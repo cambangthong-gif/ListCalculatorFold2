@@ -89,7 +89,7 @@ public class MainActivity extends Activity {
         activeField=p.getString(ACTIVE_FIELD_KEY,"price");
         String collapsed=p.getString(COLLAPSED_KEY,"");
         if(collapsed!=null&&!collapsed.isEmpty()){
-            for(String s:collapsed.split("\|"))if(!s.isEmpty())collapsedGroups.add(s);
+            for(String s:collapsed.split("\\|"))if(!s.isEmpty())collapsedGroups.add(s);
         }
         buildScreen();
     }
