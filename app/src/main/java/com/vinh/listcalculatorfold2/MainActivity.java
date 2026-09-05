@@ -542,7 +542,7 @@ public class MainActivity extends Activity {
         gridRecycler.setItemAnimator(null);
         gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         gridRecycler.setAdapter(new CalcAdapter(t));
-        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(-1,0,1));
+        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
     }
 
     void renderCancelGrid(TableModel t){
@@ -557,7 +557,7 @@ public class MainActivity extends Activity {
         gridRecycler.setItemAnimator(null);
         gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         gridRecycler.setAdapter(new CancelAdapter(t));
-        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(-1,0,1));
+        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
     }
 
     void resetCell(TextView v){
@@ -578,6 +578,9 @@ public class MainActivity extends Activity {
         }
         @Override public H onCreateViewHolder(ViewGroup parent,int type){
             LinearLayout rr=gridRow();
+            rr.setLayoutParams(new RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
             TextView st=cell("",14,false,Gravity.CENTER);
             TextView p=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
             TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
@@ -614,6 +617,9 @@ public class MainActivity extends Activity {
         }
         @Override public H onCreateViewHolder(ViewGroup parent,int type){
             LinearLayout rr=gridRow();
+            rr.setLayoutParams(new RecyclerView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
             TextView st=cell("",14,false,Gravity.CENTER);
             TextView a=cell("",16,false,Gravity.START|Gravity.CENTER_VERTICAL);
             TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
@@ -1559,7 +1565,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);v.setPadding(dp(10),0,dp(10),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
+    LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setMinimumWidth(getResources().getDisplayMetrics().widthPixels);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);v.setPadding(dp(10),0,dp(10),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
     Button topButton(String s){
         Button b=new Button(this);
         b.setText(s);
