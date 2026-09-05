@@ -21,26 +21,91 @@ public class MainActivity extends Activity {
     final ArrayList<GroupModel> groups=new ArrayList<>();
     final ArrayList<TableModel> tables=new ArrayList<>();
     LinearLayout sidebar, gridHost, keypadHost;
+    ScrollView gridScroll;
     TextView pageIndicator, grandTotal;
     Button tableBtn, undoBtn, quick1000;
     String selectedId=null;
     int activeRow=0;
+    int pendingScrollRow=-1;
     String activeField="price";
     TableModel lastDeleted=null; int lastDeletedIndex=-1;
     boolean compact=false;
     boolean explicitCellSelection=false;
     int numberFormatMode=0; // 0=1.000, 1=1,000, 2=1000
     float swipeDownX=0, swipeDownY=0;
+    float globalDownX=0, globalDownY=0;
+    boolean globalSwipeTracking=false;
+    int lastWidthBucket=-1;
     final HashSet<String> collapsedGroups=new HashSet<>();
     int navy=Color.rgb(28,62,96), navy2=Color.rgb(48,92,136), pale=Color.rgb(225,236,248), paper=Color.rgb(255,250,226), ink=Color.rgb(42,42,42), rule=Color.rgb(218,208,172), red=Color.rgb(205,35,35);
 
     @Override public void onCreate(Bundle b){super.onCreate(b);numberFormatMode=getSharedPreferences(PREFS,MODE_PRIVATE).getInt(FORMAT_KEY,0);load();if(tables.isEmpty())addCalcTable(false);selectedId=tables.get(0).id;buildScreen();}
+
+
+    @Override public void onConfigurationChanged(android.content.res.Configuration newConfig){
+        super.onConfigurationChanged(newConfig);
+        int bucket=newConfig.screenWidthDp<600?0:1;
+        if(bucket!=lastWidthBucket){
+            // Giữ nguyên selectedId, activeRow, activeField và dữ liệu; chỉ dựng lại UI.
+            buildScreen();
+        }else{
+            // Kích thước có thay đổi nhưng vẫn cùng chế độ: render lại để cột/phím lấy đúng kích thước mới.
+            renderAll();
+        }
+    }
+
+    @Override protected void onResume(){
+        super.onResume();
+        if(tableBtn==null)return;
+        int bucket=getResources().getConfiguration().screenWidthDp<600?0:1;
+        if(bucket!=lastWidthBucket)buildScreen();
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent e){
+        final int action=e.getActionMasked();
+
+        if(action==MotionEvent.ACTION_DOWN){
+            globalDownX=e.getRawX();
+            globalDownY=e.getRawY();
+            globalSwipeTracking=isSwipeZone(globalDownY);
+        }else if(action==MotionEvent.ACTION_UP && globalSwipeTracking){
+            float dx=e.getRawX()-globalDownX;
+            float dy=e.getRawY()-globalDownY;
+            globalSwipeTracking=false;
+
+            // Vuốt ngang rõ ràng: ưu tiên chuyển bảng, không để ô con nhận ACTION_UP thành click.
+            if(Math.abs(dx)>dp(72) && Math.abs(dx)>Math.abs(dy)*1.45f){
+                if(dx<0)selectNextTable(); else selectPreviousTable();
+                return true;
+            }
+
+            // Vuốt lên trong vùng bảng mở quản lý bảng/nhóm.
+            if(dy<-dp(115) && Math.abs(dy)>Math.abs(dx)*1.45f){
+                haptic(gridHost);
+                showTableManagerSheet();
+                return true;
+            }
+        }else if(action==MotionEvent.ACTION_CANCEL){
+            globalSwipeTracking=false;
+        }
+
+        return super.dispatchTouchEvent(e);
+    }
+
+    boolean isSwipeZone(float rawY){
+        int h=getResources().getDisplayMetrics().heightPixels;
+        int topLimit=compact?dp(125):dp(78);
+        int bottomLimit=h-(keypadHost==null?dp(300):keypadHost.getHeight());
+        // Chỉ bắt gesture trong vùng bảng tính; không bắt trên thanh nút hoặc bàn phím số.
+        return rawY>topLimit && rawY<bottomLimit;
+    }
 
     void buildScreen(){
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(navy2);
         int swDp=getResources().getConfiguration().screenWidthDp;
         int shDp=getResources().getConfiguration().screenHeightDp;
         compact=swDp<600;
+        lastWidthBucket=compact?0:1;
         LinearLayout top=new LinearLayout(this);top.setPadding(dp(8),dp(8),dp(8),dp(8));top.setBackgroundColor(navy);
         tableBtn=topButton("Bảng ("+tables.size()+")");tableBtn.setContentDescription("Danh sách bảng; có thể vuốt ngang vùng bảng để chuyển bảng"); Button del=topButton("Xóa bảng"); undoBtn=topButton("Hoàn tác"); Button share=topButton("↗"); quick1000=topButton("1.000"); Button add=topButton("+ Bảng");
         if(compact){
@@ -64,7 +129,6 @@ public class MainActivity extends Activity {
         else sidebar=null;
         LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setBackgroundColor(paper);gridHost=new LinearLayout(this);gridHost.setOrientation(LinearLayout.VERTICAL);right.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(dp(8),0,dp(10),0);pageIndicator=text("1/1",13,false);grandTotal=text("0",compact?20:24,true);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);footer.addView(pageIndicator,w(0,dp(compact?52:58),1));footer.addView(grandTotal,w(0,dp(58),3));right.addView(footer);
-        installTableSwipe(right);
         middle.addView(right,new LinearLayout.LayoutParams(0,-1,1));
         root.addView(middle,new LinearLayout.LayoutParams(-1,0,1));
         keypadHost=new LinearLayout(this);keypadHost.setOrientation(LinearLayout.HORIZONTAL);keypadHost.setPadding(dp(3),0,dp(3),dp(4));keypadHost.setBackgroundColor(navy2);int keypadDp=compact?Math.max(285,Math.min(330,(int)(shDp*0.32f))):310;
@@ -140,22 +204,23 @@ public class MainActivity extends Activity {
     }
 
     void renderGrid(){
-        gridHost.removeAllViews();TableModel t=selected();if(t==null)return;
+        gridHost.removeAllViews();gridScroll=null;TableModel t=selected();if(t==null)return;
         if("cancel".equals(t.type))renderCancelGrid(t);else renderCalcGrid(t);
         pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());grandTotal.setText(fmt(t.total()));
+        scrollActiveRowIntoView();
     }
 
     void renderCalcGrid(TableModel t){
         LinearLayout head=gridRow();head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));head.addView(cell("Đơn giá",14,false,Gravity.CENTER),w(0,dp(compact?52:58),2));head.addView(cell("SL",14,false,Gravity.CENTER),w(0,dp(compact?52:58),1));head.addView(cell("Thành tiền",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));gridHost.addView(head);
-        ScrollView sv=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);sv.addView(body);gridHost.addView(sv,new LinearLayout.LayoutParams(-1,0,1));
-        ensureBlankCalc(t);int shown=Math.max(8,t.calcRows.size());for(int i=0;i<shown;i++){final int row=i;CalcRow r=i<t.calcRows.size()?t.calcRows.get(i):null;LinearLayout rr=gridRow();TextView st=cell(String.valueOf(i+1),14,false,Gravity.CENTER);st.setOnClickListener(v->{activeRow=row;explicitCellSelection=false;renderGrid();renderKeypads();});rr.addView(st,w(0,dp(compact?50:56),0.45f));TextView p=cell(r==null||r.price==0?"":fmt(r.price),16,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView total=cell(r==null||r.price==0||r.qty==0?"":fmt(r.price*r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow&&"price".equals(activeField))markActive(p);if(row==activeRow&&"qty".equals(activeField))markActive(q);p.setOnClickListener(v->{activeRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});q.setOnClickListener(v->{activeRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});rr.addView(p,w(0,dp(compact?50:56),2));rr.addView(q,w(0,dp(compact?50:56),1));rr.addView(total,w(0,dp(compact?50:56),2));
+        gridScroll=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);gridScroll.addView(body);gridHost.addView(gridScroll,new LinearLayout.LayoutParams(-1,0,1));
+        ensureBlankCalc(t);int shown=Math.max(8,t.calcRows.size());for(int i=0;i<shown;i++){final int row=i;CalcRow r=i<t.calcRows.size()?t.calcRows.get(i):null;LinearLayout rr=gridRow();TextView st=cell(String.valueOf(i+1),14,false,Gravity.CENTER);st.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;explicitCellSelection=false;renderGrid();renderKeypads();});rr.addView(st,w(0,dp(compact?50:56),0.45f));TextView p=cell(r==null||r.price==0?"":fmt(r.price),16,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView total=cell(r==null||r.price==0||r.qty==0?"":fmt(r.price*r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow&&"price".equals(activeField))markActive(p);if(row==activeRow&&"qty".equals(activeField))markActive(q);p.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});rr.addView(p,w(0,dp(compact?50:56),2));rr.addView(q,w(0,dp(compact?50:56),1));rr.addView(total,w(0,dp(compact?50:56),2));
             rr.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
             body.addView(rr);}
     }
 
     void renderCancelGrid(TableModel t){
         LinearLayout head=gridRow();head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));head.addView(cell("Tên đại lý",14,false,Gravity.START|Gravity.CENTER_VERTICAL),w(0,dp(58),3));head.addView(cell("Số lượng",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));gridHost.addView(head);
-        ScrollView sv=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);sv.addView(body);gridHost.addView(sv,new LinearLayout.LayoutParams(-1,0,1));ensureBlankCancel(t);int shown=Math.max(8,t.cancelRows.size());for(int i=0;i<shown;i++){final int row=i;CancelRow r=i<t.cancelRows.size()?t.cancelRows.get(i):null;LinearLayout rr=gridRow();rr.addView(cell(String.valueOf(i+1),14,false,Gravity.CENTER),w(0,dp(compact?50:56),0.45f));TextView a=cell(r==null?"":r.agent,16,false,Gravity.START|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow)markActive(q);a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});q.setOnClickListener(v->{activeRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);renderGrid();renderKeypads();});rr.addView(a,w(0,dp(56),3));rr.addView(q,w(0,dp(compact?50:56),2));body.addView(rr);}
+        gridScroll=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);gridScroll.addView(body);gridHost.addView(gridScroll,new LinearLayout.LayoutParams(-1,0,1));ensureBlankCancel(t);int shown=Math.max(8,t.cancelRows.size());for(int i=0;i<shown;i++){final int row=i;CancelRow r=i<t.cancelRows.size()?t.cancelRows.get(i):null;LinearLayout rr=gridRow();rr.addView(cell(String.valueOf(i+1),14,false,Gravity.CENTER),w(0,dp(compact?50:56),0.45f));TextView a=cell(r==null?"":r.agent,16,false,Gravity.START|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),16,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow)markActive(q);a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);renderGrid();renderKeypads();});rr.addView(a,w(0,dp(56),3));rr.addView(q,w(0,dp(compact?50:56),2));body.addView(rr);}
     }
 
     void renderKeypads(){keypadHost.removeAllViews();TableModel t=selected();if(t==null)return;if("cancel".equals(t.type)){LinearLayout filler=new LinearLayout(this);keypadHost.addView(filler,w(0,-1,1));keypadHost.addView(buildPad("Số lượng","qty"),w(0,-1,1));}else{keypadHost.addView(buildPad("Đơn giá","price"),w(0,-1,1));keypadHost.addView(buildPad("Số lượng","qty"),w(0,-1,1));}}
@@ -182,7 +247,7 @@ public class MainActivity extends Activity {
             // dòng đã đủ Đơn giá + SL, bấm phím Đơn giá tiếp theo => tự chuyển xuống dòng mới.
             if("price".equals(field) && !"C".equals(key) && !"⌫".equals(key)
                     && !explicitCellSelection && current.price!=0 && current.qty!=0){
-                activeRow++;
+                activeRow++;pendingScrollRow=activeRow;
                 ensureRow(t,activeRow);
                 current=t.calcRows.get(activeRow);
             }
@@ -324,7 +389,7 @@ public class MainActivity extends Activity {
         if(tables.size()<2)return;
         TableModel cur=selected();int idx=cur==null?0:tables.indexOf(cur);
         idx=(idx+1)%tables.size();
-        selectedId=tables.get(idx).id;activeRow=0;
+        selectedId=tables.get(idx).id;activeRow=0;pendingScrollRow=0;
         activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
         explicitCellSelection=false;haptic(gridHost);renderAll();
     }
@@ -333,7 +398,7 @@ public class MainActivity extends Activity {
         if(tables.size()<2)return;
         TableModel cur=selected();int idx=cur==null?0:tables.indexOf(cur);
         idx=(idx-1+tables.size())%tables.size();
-        selectedId=tables.get(idx).id;activeRow=0;
+        selectedId=tables.get(idx).id;activeRow=0;pendingScrollRow=0;
         activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
         explicitCellSelection=false;haptic(gridHost);renderAll();
     }
@@ -705,6 +770,27 @@ public class MainActivity extends Activity {
         a.setRepeatMode(Animation.REVERSE);
         a.setRepeatCount(Animation.INFINITE);
         v.startAnimation(a);
+    }
+
+
+    void scrollActiveRowIntoView(){
+        if(gridScroll==null)return;
+        final int row=pendingScrollRow>=0?pendingScrollRow:activeRow;
+        gridScroll.post(()->{
+            View child=gridScroll.getChildAt(0);
+            if(!(child instanceof LinearLayout))return;
+            LinearLayout body=(LinearLayout)child;
+            if(body.getChildCount()==0)return;
+
+            int idx=Math.max(0,Math.min(row,body.getChildCount()-1));
+            View target=body.getChildAt(idx);
+
+            // Đưa dòng đang nhập xuống gần đáy vùng bảng nhưng vẫn chừa khoảng nhìn dòng kế/tổng.
+            int desired=gridScroll.getHeight()-target.getHeight()-dp(18);
+            int y=Math.max(0,target.getTop()-Math.max(dp(12),desired));
+            gridScroll.smoothScrollTo(0,y);
+            pendingScrollRow=-1;
+        });
     }
 
     LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);v.setPadding(dp(10),0,dp(10),0);GradientDrawable d=new GradientDrawable();d.setColor(paper);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
