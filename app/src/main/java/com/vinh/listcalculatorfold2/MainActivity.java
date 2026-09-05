@@ -206,6 +206,14 @@ public class MainActivity extends Activity {
 
 
 
+
+    String editDigits(String s,String key){
+        if(s==null)s="";
+        if("C".equals(key))return "";
+        if("⌫".equals(key))return s.length()>0?s.substring(0,s.length()-1):"";
+        return s+key;
+    }
+
     void cycleNumberFormat(){
         numberFormatMode=(numberFormatMode+1)%3;
         getSharedPreferences(PREFS,MODE_PRIVATE).edit().putInt(FORMAT_KEY,numberFormatMode).apply();
@@ -328,6 +336,20 @@ public class MainActivity extends Activity {
         selectedId=tables.get(idx).id;activeRow=0;
         activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
         explicitCellSelection=false;haptic(gridHost);renderAll();
+    }
+
+
+    void showAddMenu(View anchor){
+        PopupMenu p=new PopupMenu(this,anchor);
+        p.getMenu().add("Bảng tính");
+        p.getMenu().add("Bảng hủy vé");
+        p.setOnMenuItemClickListener(i->{
+            String s=i.getTitle().toString();
+            if(s.contains("hủy"))addCancelTable(true);
+            else addCalcTable(true);
+            return true;
+        });
+        p.show();
     }
 
     void showTableManagerSheet(){
