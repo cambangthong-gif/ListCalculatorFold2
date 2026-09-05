@@ -23,6 +23,7 @@ public class MainActivity extends Activity {
     LinearLayout sidebar, gridHost, keypadHost;
     ScrollView gridScroll;
     TextView pageIndicator, grandTotal, compactTableTitle, compactGroupTitle;
+    Button clearQtyBtn;
     View topInsetSpacer;
     Button tableBtn, undoBtn, quick1000;
     String selectedId=null;
@@ -144,13 +145,6 @@ public class MainActivity extends Activity {
                 }else{
                     springTableBack();
                 }
-                return true;
-            }
-
-            // Vuốt lên trong vùng bảng vẫn mở quản lý bảng/nhóm.
-            if(dy<-dp(115) && Math.abs(dy)>Math.abs(dx)*1.45f){
-                haptic(gridHost);
-                showTableManagerSheet();
                 return true;
             }
         }else if(action==MotionEvent.ACTION_CANCEL){
@@ -368,9 +362,24 @@ public class MainActivity extends Activity {
         if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
         else sidebar=null;
         LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setBackgroundColor(Color.WHITE);gridHost=new LinearLayout(this);gridHost.setOrientation(LinearLayout.VERTICAL);gridHost.setBackgroundColor(Color.WHITE);gridHost.setElevation(dp(1));right.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
-        LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(dp(10),0,dp(12),0);footer.setBackgroundColor(Color.rgb(248,250,252));pageIndicator=text("1/1",13,false);grandTotal=text("0",compact?21:25,true);grandTotal.setTextColor(accent);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);int footerH=compactLandscape?40:(compact?52:58);
-        footer.addView(pageIndicator,w(0,dp(footerH),1));
-        footer.addView(grandTotal,w(0,dp(footerH),3));right.addView(footer);
+        LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(dp(8),0,dp(10),0);footer.setBackgroundColor(Color.rgb(248,250,252));
+        pageIndicator=text("1/1",13,false);
+        grandTotal=text("0",compact?21:25,true);grandTotal.setTextColor(accent);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        int footerH=compactLandscape?40:(compact?52:58);
+
+        LinearLayout footerLeft=new LinearLayout(this);
+        footerLeft.setGravity(Gravity.CENTER_VERTICAL);
+        footerLeft.addView(pageIndicator,new LinearLayout.LayoutParams(0,dp(footerH),1));
+
+        clearQtyBtn=smallActionButton("Xóa SL");
+        clearQtyBtn.setTextColor(red);
+        clearQtyBtn.setVisibility(View.GONE);
+        clearQtyBtn.setOnClickListener(v->{haptic(v);confirmClearCurrentQuantities();});
+        footerLeft.addView(clearQtyBtn,new LinearLayout.LayoutParams(dp(compactLandscape?72:86),dp(compactLandscape?32:38)));
+
+        footer.addView(footerLeft,new LinearLayout.LayoutParams(0,dp(footerH),1.45f));
+        footer.addView(grandTotal,new LinearLayout.LayoutParams(0,dp(footerH),2.55f));
+        right.addView(footer);
         middle.addView(right,new LinearLayout.LayoutParams(0,-1,1));
         root.addView(middle,new LinearLayout.LayoutParams(-1,0,1));
         keypadHost=new LinearLayout(this);keypadHost.setOrientation(LinearLayout.HORIZONTAL);keypadHost.setPadding(dp(3),0,dp(3),dp(4));keypadHost.setBackgroundColor(Color.rgb(241,245,249));int keypadDp;
@@ -432,8 +441,8 @@ public class MainActivity extends Activity {
             LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);gh.setPadding(dp(9),dp(8),dp(7),dp(7));gh.setBackgroundColor(groupBg);
             TextView n=text((collapsedGroups.contains(gid)?"▸ ":"▾ ")+group.name,compact?12:14,true);TextView sum=text(fmt(groupTotal(gid)),compact?11:13,true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);gh.addView(n,w(0,dp(40),1));gh.addView(sum,w(0,dp(40),0.9f));gh.setTag("GROUP:"+gid);
             gh.setOnDragListener((v,e)->{if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}if(e.getAction()==DragEvent.ACTION_DROP){v.setAlpha(1f);String id=(String)e.getLocalState();TableModel t=findTable(id);if(t!=null){tables.remove(t);t.groupId=gid;tables.add(t);save();renderAll();}return true;}if(e.getAction()==DragEvent.ACTION_DRAG_ENDED)v.setAlpha(1f);return true;});
-            gh.setOnClickListener(v->{haptic(v);if(collapsedGroups.contains(gid))collapsedGroups.remove(gid);else collapsedGroups.add(gid);renderSidebar();});
-            gh.setOnLongClickListener(v->{haptic(v);renameGroup(group);return true;});
+            gh.setOnClickListener(v->{haptic(v);showGroupMenu(v,group);});
+            gh.setOnLongClickListener(v->{haptic(v);showGroupMenu(v,group);return true;});
             installGroupQuickSwipe(gh,group);
             sidebar.addView(gh);
         }
@@ -464,8 +473,8 @@ public class MainActivity extends Activity {
         info.setOnClickListener(select);
         title.setOnClickListener(select);
 
-        // Nhấn giữ tên bảng = đổi tên, không còn xung đột với kéo thả.
-        info.setOnLongClickListener(v->{haptic(v);selectedId=t.id;renameCurrent();return true;});
+        // Nhấn giữ bảng ở màn trong = vào chế độ chọn với bảng này được chọn sẵn.
+        info.setOnLongClickListener(v->{haptic(v);showTableManagerSheet(t.id);return true;});
 
         // Chỉ kéo bằng tay cầm ≡.
         drag.setOnLongClickListener(v->{haptic(v);ClipData cd=ClipData.newPlainText("table",t.id);v.startDragAndDrop(cd,new View.DragShadowBuilder(item),t.id,0);return true;});
@@ -487,7 +496,9 @@ public class MainActivity extends Activity {
     void renderGrid(){
         gridHost.removeAllViews();gridScroll=null;TableModel t=selected();if(t==null)return;
         if("cancel".equals(t.type))renderCancelGrid(t);else renderCalcGrid(t);
-        pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());grandTotal.setText(fmt(t.total()));
+        pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
+        grandTotal.setText(fmt(t.total()));
+        if(clearQtyBtn!=null)clearQtyBtn.setVisibility("cancel".equals(t.type)?View.VISIBLE:View.GONE);
         scrollActiveRowIntoView();
     }
 
@@ -657,9 +668,6 @@ public class MainActivity extends Activity {
                         if(dx<0)animateTablePageChange(true); else animateTablePageChange(false);
                         return true;
                     }
-                    if(dy<-dp(110) && Math.abs(dy)>Math.abs(dx)*1.35f){
-                        haptic(v);showTableManagerSheet();return true;
-                    }
                     return false;
             }
             return false;
@@ -698,7 +706,9 @@ public class MainActivity extends Activity {
         p.show();
     }
 
-    void showTableManagerSheet(){
+    void showTableManagerSheet(){showTableManagerSheet(null);}
+
+    void showTableManagerSheet(String preselectId){
         final Dialog dlg=new Dialog(this);
         dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
@@ -725,6 +735,7 @@ public class MainActivity extends Activity {
         root.addView(header);
 
         final HashSet<String> selectedIds=new HashSet<>();
+        if(preselectId!=null&&!preselectId.isEmpty())selectedIds.add(preselectId);
         ScrollView sv=new ScrollView(this);
         LinearLayout list=new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
@@ -916,22 +927,24 @@ public class MainActivity extends Activity {
     }
 
     void showManagerTableActions(TableModel t,Dialog manager,Runnable rebuild){
-        String[] actions={"Mở bảng","Đổi tên","Chuyển nhóm","Xóa bảng"};
+        String[] actions={"Mở bảng","Copy bảng","Đổi tên","Chuyển nhóm","Xóa bảng"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(actions,(d,i)->{
             if(i==0){selectedId=t.id;manager.dismiss();renderAll();}
-            else if(i==1){selectedId=t.id;manager.dismiss();renameCurrent();}
-            else if(i==2)showMoveOneDialog(t,manager,rebuild);
-            else if(i==3)new AlertDialog.Builder(this).setTitle("Xóa "+t.title+"?")
+            else if(i==1){copyTable(t);rebuild.run();}
+            else if(i==2){selectedId=t.id;manager.dismiss();renameCurrent();}
+            else if(i==3)showMoveOneDialog(t,manager,rebuild);
+            else if(i==4)new AlertDialog.Builder(this).setTitle("Xóa "+t.title+"?")
                     .setPositiveButton("Xóa",(x,w)->{tables.remove(t);if(t.id.equals(selectedId))selectedId=tables.isEmpty()?null:tables.get(0).id;save();rebuild.run();renderAll();})
                     .setNegativeButton("Hủy",null).show();
         }).show();
     }
 
     void showManagerGroupActions(GroupModel g,Dialog manager,Runnable rebuild){
-        String[] actions={"Đổi tên nhóm","Thu gọn / Mở rộng","Xóa nhóm (giữ bảng)"};
+        String[] actions={"Thu gọn / Mở rộng","Đổi tên nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
         new AlertDialog.Builder(this).setTitle(g.name).setItems(actions,(d,i)->{
-            if(i==0){manager.dismiss();renameGroup(g);}
-            else if(i==1){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);rebuild.run();}
+            if(i==0){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);rebuild.run();}
+            else if(i==1){manager.dismiss();renameGroup(g);}
+            else if(i==2)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
             else{
                 for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;
                 groups.remove(g);save();rebuild.run();renderAll();
@@ -990,11 +1003,12 @@ public class MainActivity extends Activity {
     }
 
     void showQuickTableActions(TableModel t){
-        String[] a={"Đổi tên","Chuyển nhóm","Xóa"};
+        String[] a={"Copy bảng","Đổi tên","Chuyển nhóm","Xóa"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(a,(d,i)->{
             selectedId=t.id;
-            if(i==0)renameCurrent();
-            else if(i==1)moveCurrentGroup();
+            if(i==0)copyTable(t);
+            else if(i==1)renameCurrent();
+            else if(i==2)moveCurrentGroup();
             else deleteCurrent();
         }).show();
     }
@@ -1012,7 +1026,108 @@ public class MainActivity extends Activity {
     }
 
     void showTableMenu(View anchor){PopupMenu p=new PopupMenu(this,anchor);p.getMenu().add("Tạo nhóm");p.getMenu().add("Đổi tên bảng hiện tại");p.getMenu().add("Chuyển bảng vào nhóm");p.setOnMenuItemClickListener(i->{String s=i.getTitle().toString();if(s.startsWith("Tạo"))createGroupDialog();else if(s.startsWith("Đổi"))renameCurrent();else moveCurrentGroup();return true;});p.show();}
-    void showGroupMenu(View anchor,GroupModel g){PopupMenu p=new PopupMenu(this,anchor);p.getMenu().add("Đổi tên nhóm");p.getMenu().add("Xóa nhóm (giữ bảng)");p.setOnMenuItemClickListener(i->{if(i.getTitle().toString().startsWith("Đổi"))renameGroup(g);else deleteGroup(g);return true;});p.show();}
+    void showGroupMenu(View anchor,GroupModel g){
+        PopupMenu p=new PopupMenu(this,anchor);
+        p.getMenu().add(collapsedGroups.contains(g.id)?"Mở rộng nhóm":"Thu gọn nhóm");
+        p.getMenu().add("Đổi tên nhóm");
+        p.getMenu().add("Xóa toàn bộ số lượng trong nhóm");
+        p.getMenu().add("Xóa nhóm (giữ bảng)");
+        p.setOnMenuItemClickListener(i->{
+            String s=i.getTitle().toString();
+            if(s.startsWith("Mở")||s.startsWith("Thu")){
+                if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);
+                renderSidebar();
+            }else if(s.startsWith("Đổi")){
+                renameGroup(g);
+            }else if(s.startsWith("Xóa toàn")){
+                confirmClearGroupQuantities(g,()->renderAll());
+            }else{
+                deleteGroup(g);
+            }
+            return true;
+        });
+        p.show();
+    }
+
+
+    void copyTable(TableModel src){
+        if(src==null)return;
+        TableModel t=new TableModel();
+        t.id=id();
+        t.type=src.type;
+        t.title=src.title+" - Bản sao";
+        t.groupId=src.groupId;
+        t.updated=System.currentTimeMillis();
+
+        if("cancel".equals(src.type)){
+            for(CancelRow r:src.cancelRows){
+                t.cancelRows.add(new CancelRow(r.agent,r.qty));
+            }
+            ensureBlankCancel(t);
+        }else{
+            for(CalcRow r:src.calcRows){
+                CalcRow c=new CalcRow();
+                c.price=r.price;
+                c.qty=r.qty;
+                t.calcRows.add(c);
+            }
+            ensureBlankCalc(t);
+        }
+
+        int idx=tables.indexOf(src);
+        tables.add(Math.min(tables.size(),idx+1),t);
+        selectedId=t.id;
+        activeRow=0;
+        pendingScrollRow=0;
+        activeField="cancel".equals(t.type)?"qty":"price";
+        save();renderAll();
+        Toast.makeText(this,"Đã copy bảng",Toast.LENGTH_SHORT).show();
+    }
+
+    void confirmClearCurrentQuantities(){
+        TableModel t=selected();
+        if(t==null||!"cancel".equals(t.type))return;
+        new AlertDialog.Builder(this)
+            .setTitle("Xóa toàn bộ số lượng?")
+            .setMessage("Tên đại lý sẽ được giữ nguyên.")
+            .setPositiveButton("Xóa SL",(d,w)->{
+                for(CancelRow r:t.cancelRows)r.qty=0;
+                t.updated=System.currentTimeMillis();
+                ensureBlankCancel(t);
+                save();renderAll();
+            })
+            .setNegativeButton("Hủy",null)
+            .show();
+    }
+
+    void clearQuantitiesInGroup(GroupModel g){
+        if(g==null)return;
+        for(TableModel t:tables){
+            if(!g.id.equals(t.groupId))continue;
+            if("cancel".equals(t.type)){
+                for(CancelRow r:t.cancelRows)r.qty=0;
+                ensureBlankCancel(t);
+            }else{
+                for(CalcRow r:t.calcRows)r.qty=0;
+                ensureBlankCalc(t);
+            }
+            t.updated=System.currentTimeMillis();
+        }
+        save();
+    }
+
+    void confirmClearGroupQuantities(GroupModel g,Runnable after){
+        if(g==null)return;
+        new AlertDialog.Builder(this)
+            .setTitle("Xóa số lượng trong "+g.name+"?")
+            .setMessage("Đơn giá và tên đại lý được giữ nguyên; chỉ cột số lượng của tất cả bảng trong nhóm bị xóa.")
+            .setPositiveButton("Xóa số lượng",(d,w)->{
+                clearQuantitiesInGroup(g);
+                if(after!=null)after.run();
+            })
+            .setNegativeButton("Hủy",null)
+            .show();
+    }
 
     void addCalcTable(boolean select){TableModel t=new TableModel();t.id=id();t.type="calc";t.title="Bảng "+(tables.size()+1);t.updated=System.currentTimeMillis();t.calcRows.add(new CalcRow());tables.add(t);if(select)selectedId=t.id;save();if(select)renderAll();}
     void addCancelTable(boolean select){TableModel t=new TableModel();t.id=id();t.type="cancel";t.title="Hủy vé";t.updated=System.currentTimeMillis();t.cancelRows.add(new CancelRow("",0));tables.add(t);if(select)selectedId=t.id;save();if(select)renderAll();}
