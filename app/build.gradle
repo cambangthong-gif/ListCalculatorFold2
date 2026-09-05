@@ -8,7 +8,11 @@ android {
         applicationId 'com.vinh.listcalculatorfold2'
         minSdk 26
         targetSdk 35
-        versionCode 120
-        versionName '1.2.0'
+        versionCode 160
+        versionName '1.6.0'
     }
+}
+
+dependencies {
+    implementation 'androidx.recyclerview:recyclerview:1.4.0'
 }
