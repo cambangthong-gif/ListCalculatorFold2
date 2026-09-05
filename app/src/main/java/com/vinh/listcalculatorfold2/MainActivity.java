@@ -11,17 +11,24 @@ import android.view.*;
 import android.view.animation.*;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.*;
+import androidx.recyclerview.widget.RecyclerView;
+import androidx.recyclerview.widget.LinearLayoutManager;
 import java.io.*;
 import java.text.*;
 import java.util.*;
 import org.json.*;
 
 public class MainActivity extends Activity {
-    static final String PREFS="list_calculator_fold_2", DATA="data_v2", OLD_DATA="data_v1", UNGROUPED="", FORMAT_KEY="number_format_mode";
+    static final String PREFS="list_calculator_fold_2", DATA="data_v2", OLD_DATA="data_v1", UNGROUPED="",
+        FORMAT_KEY="number_format_mode", SELECTED_KEY="selected_table_id", ACTIVE_ROW_KEY="active_row",
+        ACTIVE_FIELD_KEY="active_field", COLLAPSED_KEY="collapsed_groups", FAST_INPUT_KEY="fast_input_mode",
+        SHARE_BLANK_KEY="share_hide_blank";
+    static final int REQ_BACKUP=501, REQ_RESTORE=502;
     final ArrayList<GroupModel> groups=new ArrayList<>();
     final ArrayList<TableModel> tables=new ArrayList<>();
     LinearLayout sidebar, gridHost, keypadHost;
     ScrollView gridScroll;
+    RecyclerView gridRecycler;
     TextView pageIndicator, grandTotal, compactTableTitle, compactGroupTitle;
     Button clearQtyBtn;
     View topInsetSpacer;
@@ -31,6 +38,10 @@ public class MainActivity extends Activity {
     int pendingScrollRow=-1;
     String activeField="price";
     TableModel lastDeleted=null; int lastDeletedIndex=-1;
+    String undoSnapshot=null, undoLabel="";
+    int fastInputMode=0; // 0=List Calculator, 1=Enter/Tab tự chuyển ô, 2=thủ công
+    boolean shareHideBlank=true;
+    int managerSortMode=0; // 0=thủ công,1=tên,2=mới nhất,3=cũ nhất
     boolean compact=false;
     boolean compactLandscape=false;
     boolean explicitCellSelection=false;
@@ -64,9 +75,24 @@ public class MainActivity extends Activity {
         }
         if(android.os.Build.VERSION.SDK_INT>=23){
             getWindow().getDecorView().setSystemUiVisibility(
-                getWindow().getDecorView().getSystemUiVisibility()
-                | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
-        }numberFormatMode=getSharedPreferences(PREFS,MODE_PRIVATE).getInt(FORMAT_KEY,0);load();if(tables.isEmpty())addCalcTable(false);selectedId=tables.get(0).id;buildScreen();}
+                getWindow().getDecorView().getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
+        android.content.SharedPreferences p=getSharedPreferences(PREFS,MODE_PRIVATE);
+        numberFormatMode=p.getInt(FORMAT_KEY,0);
+        fastInputMode=p.getInt(FAST_INPUT_KEY,0);
+        shareHideBlank=p.getBoolean(SHARE_BLANK_KEY,true);
+        load();
+        if(tables.isEmpty())addCalcTable(false);
+        String savedSelected=p.getString(SELECTED_KEY,null);
+        selectedId=findTable(savedSelected)!=null?savedSelected:tables.get(0).id;
+        activeRow=Math.max(0,p.getInt(ACTIVE_ROW_KEY,0));
+        activeField=p.getString(ACTIVE_FIELD_KEY,"price");
+        String collapsed=p.getString(COLLAPSED_KEY,"");
+        if(collapsed!=null&&!collapsed.isEmpty()){
+            for(String s:collapsed.split("\|"))if(!s.isEmpty())collapsedGroups.add(s);
+        }
+        buildScreen();
+    }
 
 
     @Override public void onConfigurationChanged(android.content.res.Configuration newConfig){
@@ -189,7 +215,7 @@ public class MainActivity extends Activity {
                 activeRow=0;
                 pendingScrollRow=0;
                 activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
-                explicitCellSelection=false;
+                explicitCellSelection=false;saveUiState();
 
                 // Dựng nội dung bảng mới.
                 renderAll();
@@ -403,7 +429,7 @@ public class MainActivity extends Activity {
         if(selected()==null&&!tables.isEmpty())selectedId=tables.get(0).id;
         tableBtn.setText("Bảng ("+tables.size()+")");
         quick1000.setText(formatSample());
-        undoBtn.setEnabled(lastDeleted!=null);
+        undoBtn.setEnabled(undoSnapshot!=null || lastDeleted!=null);
         updateCompactCurrentHeader();
         renderSidebar();renderGrid();renderKeypads();
     }
@@ -494,7 +520,8 @@ public class MainActivity extends Activity {
     }
 
     void renderGrid(){
-        gridHost.removeAllViews();gridScroll=null;TableModel t=selected();if(t==null)return;
+        gridHost.removeAllViews();gridScroll=null;gridRecycler=null;
+        TableModel t=selected();if(t==null)return;
         if("cancel".equals(t.type))renderCancelGrid(t);else renderCalcGrid(t);
         pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
         grandTotal.setText(fmt(t.total()));
@@ -503,16 +530,110 @@ public class MainActivity extends Activity {
     }
 
     void renderCalcGrid(TableModel t){
-        LinearLayout head=gridRow();head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));head.addView(cell("Đơn giá",14,false,Gravity.CENTER),w(0,dp(compact?52:58),2));head.addView(cell("SL",14,false,Gravity.CENTER),w(0,dp(compact?52:58),1));head.addView(cell("Thành tiền",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));gridHost.addView(head);
-        gridScroll=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);gridScroll.addView(body);gridHost.addView(gridScroll,new LinearLayout.LayoutParams(-1,0,1));
-        ensureBlankCalc(t);int shown=Math.max(8,t.calcRows.size());for(int i=0;i<shown;i++){final int row=i;CalcRow r=i<t.calcRows.size()?t.calcRows.get(i):null;LinearLayout rr=gridRow();TextView st=cell(String.valueOf(i+1),14,false,Gravity.CENTER);st.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;explicitCellSelection=false;renderGrid();renderKeypads();});rr.addView(st,w(0,dp(compact?50:56),0.45f));TextView p=cell(r==null||r.price==0?"":fmt(r.price),15,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),15,false,Gravity.END|Gravity.CENTER_VERTICAL);TextView total=cell(r==null||r.price==0||r.qty==0?"":fmt(r.price*r.qty),15,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow&&"price".equals(activeField))markActive(p);if(row==activeRow&&"qty".equals(activeField))markActive(q);p.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);renderGrid();renderKeypads();});rr.addView(p,w(0,dp(compact?50:56),2));rr.addView(q,w(0,dp(compact?50:56),1));rr.addView(total,w(0,dp(compact?50:56),2));
-            rr.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
-            body.addView(rr);}
+        LinearLayout head=gridRow();
+        head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));
+        head.addView(cell("Đơn giá",14,false,Gravity.CENTER),w(0,dp(compact?52:58),2));
+        head.addView(cell("SL",14,false,Gravity.CENTER),w(0,dp(compact?52:58),1));
+        head.addView(cell("Thành tiền",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));
+        gridHost.addView(head);
+        ensureBlankCalc(t);
+        gridRecycler=new RecyclerView(this);
+        gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        gridRecycler.setItemAnimator(null);
+        gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        gridRecycler.setAdapter(new CalcAdapter(t));
+        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(-1,0,1));
     }
 
     void renderCancelGrid(TableModel t){
-        LinearLayout head=gridRow();head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));head.addView(cell("Tên đại lý",14,false,Gravity.START|Gravity.CENTER_VERTICAL),w(0,dp(58),3));head.addView(cell("Số lượng",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));gridHost.addView(head);
-        gridScroll=new ScrollView(this);LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);gridScroll.addView(body);gridHost.addView(gridScroll,new LinearLayout.LayoutParams(-1,0,1));ensureBlankCancel(t);int shown=Math.max(8,t.cancelRows.size());for(int i=0;i<shown;i++){final int row=i;CancelRow r=i<t.cancelRows.size()?t.cancelRows.get(i):null;LinearLayout rr=gridRow();rr.addView(cell(String.valueOf(i+1),14,false,Gravity.CENTER),w(0,dp(compact?50:56),0.45f));TextView a=cell(r==null?"":r.agent,16,false,Gravity.START|Gravity.CENTER_VERTICAL);TextView q=cell(r==null||r.qty==0?"":fmt(r.qty),15,false,Gravity.END|Gravity.CENTER_VERTICAL);if(row==activeRow)markActive(q);a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);renderGrid();renderKeypads();});rr.addView(a,w(0,dp(56),3));rr.addView(q,w(0,dp(compact?50:56),2));body.addView(rr);}
+        LinearLayout head=gridRow();
+        head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(compact?52:58),0.45f));
+        head.addView(cell("Tên đại lý",14,false,Gravity.START|Gravity.CENTER_VERTICAL),w(0,dp(58),3));
+        head.addView(cell("Số lượng",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(compact?52:58),2));
+        gridHost.addView(head);
+        ensureBlankCancel(t);
+        gridRecycler=new RecyclerView(this);
+        gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        gridRecycler.setItemAnimator(null);
+        gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        gridRecycler.setAdapter(new CancelAdapter(t));
+        gridHost.addView(gridRecycler,new LinearLayout.LayoutParams(-1,0,1));
+    }
+
+    void resetCell(TextView v){
+        v.clearAnimation();
+        GradientDrawable d=new GradientDrawable();
+        d.setColor(Color.WHITE);
+        d.setStroke(dp(1),rule);
+        v.setBackground(d);
+        v.setTextColor(ink);
+    }
+
+    class CalcAdapter extends RecyclerView.Adapter<CalcAdapter.H>{
+        final TableModel t;
+        CalcAdapter(TableModel x){t=x;}
+        class H extends RecyclerView.ViewHolder{
+            LinearLayout row;TextView st,p,q,total;
+            H(LinearLayout r,TextView a,TextView b,TextView c,TextView d){super(r);row=r;st=a;p=b;q=c;total=d;}
+        }
+        @Override public H onCreateViewHolder(ViewGroup parent,int type){
+            LinearLayout rr=gridRow();
+            TextView st=cell("",14,false,Gravity.CENTER);
+            TextView p=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
+            TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
+            TextView total=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
+            rr.addView(st,w(0,dp(compact?50:56),0.45f));
+            rr.addView(p,w(0,dp(compact?50:56),2));
+            rr.addView(q,w(0,dp(compact?50:56),1));
+            rr.addView(total,w(0,dp(compact?50:56),2));
+            return new H(rr,st,p,q,total);
+        }
+        @Override public void onBindViewHolder(H h,int row){
+            CalcRow r=row<t.calcRows.size()?t.calcRows.get(row):null;
+            h.st.setText(String.valueOf(row+1));
+            h.p.setText(r==null||r.price==0?"":fmt(r.price));
+            h.q.setText(r==null||r.qty==0?"":fmt(r.qty));
+            h.total.setText(r==null||r.price==0||r.qty==0?"":fmt(r.price*r.qty));
+            resetCell(h.st);resetCell(h.p);resetCell(h.q);resetCell(h.total);
+            if(row==activeRow&&"price".equals(activeField))markActive(h.p);
+            if(row==activeRow&&"qty".equals(activeField))markActive(h.q);
+            h.st.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;explicitCellSelection=false;saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.p.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.row.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
+        }
+        @Override public int getItemCount(){return Math.max(8,t.calcRows.size());}
+    }
+
+    class CancelAdapter extends RecyclerView.Adapter<CancelAdapter.H>{
+        final TableModel t;
+        CancelAdapter(TableModel x){t=x;}
+        class H extends RecyclerView.ViewHolder{
+            LinearLayout row;TextView st,a,q;
+            H(LinearLayout r,TextView x,TextView y,TextView z){super(r);row=r;st=x;a=y;q=z;}
+        }
+        @Override public H onCreateViewHolder(ViewGroup parent,int type){
+            LinearLayout rr=gridRow();
+            TextView st=cell("",14,false,Gravity.CENTER);
+            TextView a=cell("",16,false,Gravity.START|Gravity.CENTER_VERTICAL);
+            TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
+            rr.addView(st,w(0,dp(compact?50:56),0.45f));
+            rr.addView(a,w(0,dp(56),3));
+            rr.addView(q,w(0,dp(compact?50:56),2));
+            return new H(rr,st,a,q);
+        }
+        @Override public void onBindViewHolder(H h,int row){
+            CancelRow r=row<t.cancelRows.size()?t.cancelRows.get(row):null;
+            h.st.setText(String.valueOf(row+1));
+            h.a.setText(r==null?"":r.agent);
+            h.q.setText(r==null||r.qty==0?"":fmt(r.qty));
+            resetCell(h.st);resetCell(h.a);resetCell(h.q);
+            if(row==activeRow)markActive(h.q);
+            h.a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});
+            h.q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.row.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
+        }
+        @Override public int getItemCount(){return Math.max(8,t.cancelRows.size());}
     }
 
     void renderKeypads(){keypadHost.removeAllViews();TableModel t=selected();if(t==null)return;if("cancel".equals(t.type)){LinearLayout filler=new LinearLayout(this);keypadHost.addView(filler,w(0,-1,1));keypadHost.addView(buildPad("Số lượng","qty"),w(0,-1,1));}else{keypadHost.addView(buildPad("Đơn giá","price"),w(0,-1,1));keypadHost.addView(buildPad("Số lượng","qty"),w(0,-1,1));}}
@@ -522,7 +643,7 @@ public class MainActivity extends Activity {
     }
 
     void handleKey(String field,String key){
-        TableModel t=selected();if(t==null)return;
+        TableModel t=selected();if(t==null)return;if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}
 
         if("cancel".equals(t.type)){
             activeField="qty";
@@ -558,7 +679,10 @@ public class MainActivity extends Activity {
         }
 
         t.updated=System.currentTimeMillis();
-        save();renderGrid();renderSidebar();renderKeypads();
+        if(fastInputMode==1 && "qty".equals(field) && !"C".equals(key) && !"⌫".equals(key) && !"cancel".equals(t.type)){
+            // Vẫn cho nhập nhiều chữ số; Enter/Tab mới xác nhận chuyển dòng.
+        }
+        save();saveUiState();renderGrid();renderSidebar();renderKeypads();
     }
 
 
@@ -569,6 +693,60 @@ public class MainActivity extends Activity {
         if("C".equals(key))return "";
         if("⌫".equals(key))return s.length()>0?s.substring(0,s.length()-1):"";
         return s+key;
+    }
+
+
+    String stateJson(){
+        try{
+            JSONObject root=new JSONObject();
+            JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());
+            JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());
+            root.put("groups",ga).put("tables",ta);
+            root.put("selectedId",selectedId==null?"":selectedId);
+            root.put("activeRow",activeRow).put("activeField",activeField);
+            root.put("numberFormatMode",numberFormatMode).put("fastInputMode",fastInputMode);
+            root.put("shareHideBlank",shareHideBlank);
+            JSONArray ca=new JSONArray();for(String s:collapsedGroups)ca.put(s);root.put("collapsed",ca);
+            return root.toString();
+        }catch(Exception e){return "{}";}
+    }
+
+    void pushUndo(String label){
+        undoSnapshot=stateJson();
+        undoLabel=label==null?"Thao tác":label;
+        lastDeleted=null;lastDeletedIndex=-1;
+        if(undoBtn!=null)undoBtn.setEnabled(true);
+    }
+
+    void restoreStateJson(String json){
+        try{
+            JSONObject o=new JSONObject(json);
+            groups.clear();tables.clear();collapsedGroups.clear();
+            JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));
+            JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));
+            selectedId=o.optString("selectedId","");
+            if(findTable(selectedId)==null)selectedId=tables.isEmpty()?null:tables.get(0).id;
+            activeRow=Math.max(0,o.optInt("activeRow",0));
+            activeField=o.optString("activeField","price");
+            numberFormatMode=o.optInt("numberFormatMode",numberFormatMode);
+            fastInputMode=o.optInt("fastInputMode",fastInputMode);
+            shareHideBlank=o.optBoolean("shareHideBlank",shareHideBlank);
+            JSONArray ca=o.optJSONArray("collapsed");if(ca!=null)for(int i=0;i<ca.length();i++)collapsedGroups.add(ca.optString(i));
+            save();renderAll();
+        }catch(Exception e){Toast.makeText(this,"Không thể khôi phục dữ liệu",Toast.LENGTH_LONG).show();}
+    }
+
+    void saveUiState(){
+        StringBuilder c=new StringBuilder();
+        for(String s:collapsedGroups){if(c.length()>0)c.append("|");c.append(s);}
+        getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+            .putString(SELECTED_KEY,selectedId)
+            .putInt(ACTIVE_ROW_KEY,activeRow)
+            .putString(ACTIVE_FIELD_KEY,activeField)
+            .putString(COLLAPSED_KEY,c.toString())
+            .putInt(FAST_INPUT_KEY,fastInputMode)
+            .putBoolean(SHARE_BLANK_KEY,shareHideBlank)
+            .apply();
     }
 
     void cycleNumberFormat(){
@@ -593,9 +771,11 @@ public class MainActivity extends Activity {
             hasData=row<t.calcRows.size() && !t.calcRows.get(row).blank();
         }
         if(!hasData)return;
+        if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}
         new AlertDialog.Builder(this)
             .setTitle("Dòng "+(row+1))
             .setItems(new String[]{"Xóa dòng"},(d,i)->{
+                pushUndo("Xóa dòng");
                 if("cancel".equals(t.type)){
                     if(row<t.cancelRows.size())t.cancelRows.remove(row);
                     ensureBlankCancel(t);
@@ -641,9 +821,10 @@ public class MainActivity extends Activity {
                 new AlertDialog.Builder(this)
                     .setTitle("Xóa "+deleteCount+" bảng?")
                     .setPositiveButton("Xóa nhanh",(d,w)->{
+                        pushUndo("Xóa nhiều bảng");
                         TableModel undo=null;int undoIndex=-1;
                         for(int i=tables.size()-1;i>=0;i--){
-                            if(i<checked.length && checked[i]){
+                            if(i<checked.length && checked[i] && !tables.get(i).locked){
                                 undo=tables.get(i);undoIndex=i;tables.remove(i);
                             }
                         }
@@ -680,7 +861,7 @@ public class MainActivity extends Activity {
         idx=(idx+1)%tables.size();
         selectedId=tables.get(idx).id;activeRow=0;pendingScrollRow=0;
         activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
-        explicitCellSelection=false;haptic(gridHost);renderAll();
+        explicitCellSelection=false;saveUiState();haptic(gridHost);renderAll();
     }
 
     void selectPreviousTable(){
@@ -689,7 +870,7 @@ public class MainActivity extends Activity {
         idx=(idx-1+tables.size())%tables.size();
         selectedId=tables.get(idx).id;activeRow=0;pendingScrollRow=0;
         activeField="cancel".equals(tables.get(idx).type)?"qty":"price";
-        explicitCellSelection=false;haptic(gridHost);renderAll();
+        explicitCellSelection=false;saveUiState();haptic(gridHost);renderAll();
     }
 
 
@@ -734,6 +915,24 @@ public class MainActivity extends Activity {
         header.addView(close,new LinearLayout.LayoutParams(dp(76),dp(48)));
         root.addView(header);
 
+        final String[] searchQuery={""};
+        EditText search=new EditText(this);
+        search.setHint("Tìm bảng, nhóm hoặc tên đại lý…");
+        search.setSingleLine();
+        search.setTextSize(14);
+        root.addView(search,new LinearLayout.LayoutParams(-1,dp(46)));
+
+        LinearLayout tools=new LinearLayout(this);tools.setPadding(0,dp(4),0,dp(4));
+        Button backup=smallActionButton("Sao lưu");
+        Button restore=smallActionButton("Khôi phục");
+        Button sort=smallActionButton("Sắp xếp");
+        Button settings=smallActionButton("Cài đặt");
+        tools.addView(backup,new LinearLayout.LayoutParams(0,dp(44),1));
+        tools.addView(restore,new LinearLayout.LayoutParams(0,dp(44),1));
+        tools.addView(sort,new LinearLayout.LayoutParams(0,dp(44),1));
+        tools.addView(settings,new LinearLayout.LayoutParams(0,dp(44),1));
+        root.addView(tools);
+
         final HashSet<String> selectedIds=new HashSet<>();
         if(preselectId!=null&&!preselectId.isEmpty())selectedIds.add(preselectId);
         ScrollView sv=new ScrollView(this);
@@ -762,15 +961,16 @@ public class MainActivity extends Activity {
             TextView ungroupedHeader=managerSectionHeader("Chưa nhóm",fmt(groupTotal(UNGROUPED)),false);
             ungroupedHeader.setOnDragListener((v,e)->managerGroupDrop(e,UNGROUPED,dlg,rebuild[0]));
             list.addView(ungroupedHeader);
-            for(TableModel t:new ArrayList<>(inGroup(UNGROUPED))){
+            for(TableModel t:managerTablesForGroup(UNGROUPED,searchQuery[0])){
                 list.addView(managerTableRow(t,UNGROUPED,selectedIds,dlg,rebuild[0]));
             }
 
             for(GroupModel g:new ArrayList<>(groups)){
+                if(!managerGroupVisible(g,searchQuery[0]))continue;
                 LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);
                 gh.setPadding(dp(8),dp(5),dp(4),dp(5));gh.setBackgroundColor(groupBg);
                 TextView gname=text((collapsedGroups.contains(g.id)?"▸ ":"▾ ")+g.name,16,true);
-                TextView sum=text(fmt(groupTotal(g.id)),14,true);sum.setTextColor(accent);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);
+                TextView sum=text(inGroup(g.id).size()+" bảng • "+fmt(groupTotal(g.id)),12,true);sum.setTextColor(accent);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);
                 TextView more=text("⋮",24,true);more.setGravity(Gravity.CENTER);
                 gh.addView(gname,new LinearLayout.LayoutParams(0,dp(50),1));
                 gh.addView(sum,new LinearLayout.LayoutParams(dp(115),dp(50)));
@@ -783,13 +983,23 @@ public class MainActivity extends Activity {
                 list.addView(gh);
 
                 if(!collapsedGroups.contains(g.id)){
-                    for(TableModel t:new ArrayList<>(inGroup(g.id))){
+                    for(TableModel t:managerTablesForGroup(g.id,searchQuery[0])){
                         list.addView(managerTableRow(t,g.id,selectedIds,dlg,rebuild[0]));
                     }
                 }
             }
         };
         rebuild[0].run();
+
+        search.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence s,int st,int c,int a){}
+            public void onTextChanged(CharSequence s,int st,int b,int c){searchQuery[0]=s.toString().trim();rebuild[0].run();}
+            public void afterTextChanged(Editable e){}
+        });
+        backup.setOnClickListener(v->{haptic(v);startBackup();});
+        restore.setOnClickListener(v->{haptic(v);startRestore();});
+        sort.setOnClickListener(v->{haptic(v);showSortDialog(()->rebuild[0].run());});
+        settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
 
         close.setOnClickListener(v->dlg.dismiss());
         newGroup.setOnClickListener(v->{dlg.dismiss();createGroupDialog();});
@@ -827,6 +1037,41 @@ public class MainActivity extends Activity {
         }
     }
 
+
+    boolean tableMatches(TableModel t,String q){
+        if(q==null||q.trim().isEmpty())return true;
+        q=q.toLowerCase(Locale.getDefault());
+        if(t.title!=null&&t.title.toLowerCase(Locale.getDefault()).contains(q))return true;
+        if("cancel".equals(t.type))for(CancelRow r:t.cancelRows)if(r.agent!=null&&r.agent.toLowerCase(Locale.getDefault()).contains(q))return true;
+        return false;
+    }
+
+    boolean managerGroupVisible(GroupModel g,String q){
+        if(q==null||q.trim().isEmpty())return true;
+        String z=q.toLowerCase(Locale.getDefault());
+        if(g.name!=null&&g.name.toLowerCase(Locale.getDefault()).contains(z))return true;
+        for(TableModel t:inGroup(g.id))if(tableMatches(t,q))return true;
+        return false;
+    }
+
+    ArrayList<TableModel> managerTablesForGroup(String gid,String q){
+        ArrayList<TableModel> a=new ArrayList<>();
+        for(TableModel t:inGroup(gid))if(tableMatches(t,q))a.add(t);
+        Comparator<TableModel> c=null;
+        if(managerSortMode==1)c=(x,y)->x.title.compareToIgnoreCase(y.title);
+        else if(managerSortMode==2)c=(x,y)->Long.compare(y.updated,x.updated);
+        else if(managerSortMode==3)c=(x,y)->Long.compare(x.updated,y.updated);
+        if(c!=null)Collections.sort(a,c);
+        return a;
+    }
+
+    void showSortDialog(Runnable after){
+        String[] opts={"Thứ tự kéo tay","Tên A → Z","Mới cập nhật","Cũ nhất"};
+        new AlertDialog.Builder(this).setTitle("Sắp xếp bảng").setSingleChoiceItems(opts,managerSortMode,(d,i)->{
+            managerSortMode=i;d.dismiss();if(after!=null)after.run();
+        }).show();
+    }
+
     View managerTableRow(TableModel t,String gid,HashSet<String> selectedIds,Dialog dlg,Runnable rebuild){
         LinearLayout row=new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -839,7 +1084,7 @@ public class MainActivity extends Activity {
 
         LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
         TextView name=text(t.title,16,true);
-        TextView meta=text(t.dataRowCount()+" dòng • "+fmt(t.total()),12,false);meta.setTextColor(muted);
+        TextView meta=text((t.locked?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total()),12,false);meta.setTextColor(muted);
         info.addView(name);info.addView(meta);
 
         TextView drag=text("≡",24,true);drag.setGravity(Gravity.CENTER);drag.setTextColor(navy);
@@ -888,7 +1133,7 @@ public class MainActivity extends Activity {
         if(e.getAction()==DragEvent.ACTION_DROP){
             Object st=e.getLocalState();if(!(st instanceof String))return true;
             TableModel t=findTable((String)st);
-            if(t!=null){tables.remove(t);t.groupId=gid;tables.add(t);save();rebuild.run();renderAll();}
+            if(t!=null){pushUndo("Kéo bảng sang nhóm");tables.remove(t);t.groupId=gid;tables.add(t);save();rebuild.run();renderAll();}
             return true;
         }
         return true;
@@ -927,25 +1172,28 @@ public class MainActivity extends Activity {
     }
 
     void showManagerTableActions(TableModel t,Dialog manager,Runnable rebuild){
-        String[] actions={"Mở bảng","Copy bảng","Đổi tên","Chuyển nhóm","Xóa bảng"};
+        String[] actions={"Mở bảng","Copy bảng",t.locked?"Mở khóa bảng":"Khóa bảng","Đổi tên","Chuyển nhóm","Xóa bảng"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(actions,(d,i)->{
             if(i==0){selectedId=t.id;manager.dismiss();renderAll();}
-            else if(i==1){copyTable(t);rebuild.run();}
-            else if(i==2){selectedId=t.id;manager.dismiss();renameCurrent();}
-            else if(i==3)showMoveOneDialog(t,manager,rebuild);
-            else if(i==4)new AlertDialog.Builder(this).setTitle("Xóa "+t.title+"?")
-                    .setPositiveButton("Xóa",(x,w)->{tables.remove(t);if(t.id.equals(selectedId))selectedId=tables.isEmpty()?null:tables.get(0).id;save();rebuild.run();renderAll();})
-                    .setNegativeButton("Hủy",null).show();
+            else if(i==1){showCopyOptions(t);rebuild.run();}
+            else if(i==2){toggleLock(t);rebuild.run();}
+            else if(i==3){selectedId=t.id;manager.dismiss();renameCurrent();}
+            else if(i==4)showMoveOneDialog(t,manager,rebuild);
+            else if(i==5){if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("Xóa "+t.title+"?")
+                    .setPositiveButton("Xóa",(x,w)->{pushUndo("Xóa bảng");tables.remove(t);if(t.id.equals(selectedId))selectedId=tables.isEmpty()?null:tables.get(0).id;save();rebuild.run();renderAll();})
+                    .setNegativeButton("Hủy",null).show();}
         }).show();
     }
 
     void showManagerGroupActions(GroupModel g,Dialog manager,Runnable rebuild){
-        String[] actions={"Thu gọn / Mở rộng","Đổi tên nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
+        String[] actions={"Thu gọn / Mở rộng","Đổi tên nhóm","Copy cả nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
         new AlertDialog.Builder(this).setTitle(g.name).setItems(actions,(d,i)->{
-            if(i==0){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);rebuild.run();}
+            if(i==0){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);saveUiState();rebuild.run();}
             else if(i==1){manager.dismiss();renameGroup(g);}
-            else if(i==2)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
+            else if(i==2){copyGroup(g);rebuild.run();}
+            else if(i==3)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
             else{
+                pushUndo("Xóa nhóm");
                 for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;
                 groups.remove(g);save();rebuild.run();renderAll();
             }
@@ -955,6 +1203,7 @@ public class MainActivity extends Activity {
     void showMoveOneDialog(TableModel t,Dialog manager,Runnable rebuild){
         ArrayList<String> names=new ArrayList<>();names.add("Chưa nhóm");for(GroupModel g:groups)names.add(g.name);
         new AlertDialog.Builder(this).setTitle("Chuyển "+t.title).setItems(names.toArray(new String[0]),(d,i)->{
+            pushUndo("Chuyển nhóm");
             t.groupId=i==0?UNGROUPED:groups.get(i-1).id;
             tables.remove(t);tables.add(t);save();rebuild.run();renderAll();
         }).show();
@@ -964,6 +1213,7 @@ public class MainActivity extends Activity {
         ArrayList<String> names=new ArrayList<>();names.add("Chưa nhóm");for(GroupModel g:groups)names.add(g.name);
         new AlertDialog.Builder(this).setTitle("Chuyển "+selectedIds.size()+" bảng").setItems(names.toArray(new String[0]),(d,i)->{
             String gid=i==0?UNGROUPED:groups.get(i-1).id;
+            pushUndo("Chuyển nhiều bảng");
             ArrayList<TableModel> moving=new ArrayList<>();
             for(TableModel t:new ArrayList<>(tables))if(selectedIds.contains(t.id)){tables.remove(t);t.groupId=gid;moving.add(t);}
             tables.addAll(moving);save();rebuild.run();renderAll();
@@ -973,10 +1223,11 @@ public class MainActivity extends Activity {
     void confirmDeleteSelected(HashSet<String> selectedIds,Dialog manager){
         int n=selectedIds.size();
         new AlertDialog.Builder(this).setTitle("Xóa "+n+" bảng?")
-            .setMessage("Các bảng đã chọn sẽ bị xóa.")
+            .setMessage("Bảng đang khóa sẽ được giữ lại.")
             .setPositiveButton("Xóa",(d,w)->{
+                pushUndo("Xóa nhiều bảng");
                 TableModel undo=null;int undoIndex=-1;
-                for(int i=tables.size()-1;i>=0;i--)if(selectedIds.contains(tables.get(i).id)){undo=tables.get(i);undoIndex=i;tables.remove(i);}
+                for(int i=tables.size()-1;i>=0;i--)if(selectedIds.contains(tables.get(i).id)&&!tables.get(i).locked){undo=tables.get(i);undoIndex=i;tables.remove(i);}
                 lastDeleted=undo;lastDeletedIndex=undoIndex;
                 if(findTable(selectedId)==null)selectedId=tables.isEmpty()?null:tables.get(0).id;
                 save();manager.dismiss();renderAll();
@@ -1003,12 +1254,13 @@ public class MainActivity extends Activity {
     }
 
     void showQuickTableActions(TableModel t){
-        String[] a={"Copy bảng","Đổi tên","Chuyển nhóm","Xóa"};
+        String[] a={"Copy bảng",t.locked?"Mở khóa":"Khóa bảng","Đổi tên","Chuyển nhóm","Xóa"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(a,(d,i)->{
             selectedId=t.id;
-            if(i==0)copyTable(t);
-            else if(i==1)renameCurrent();
-            else if(i==2)moveCurrentGroup();
+            if(i==0)showCopyOptions(t);
+            else if(i==1)toggleLock(t);
+            else if(i==2)renameCurrent();
+            else if(i==3)moveCurrentGroup();
             else deleteCurrent();
         }).show();
     }
@@ -1030,6 +1282,7 @@ public class MainActivity extends Activity {
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(collapsedGroups.contains(g.id)?"Mở rộng nhóm":"Thu gọn nhóm");
         p.getMenu().add("Đổi tên nhóm");
+        p.getMenu().add("Copy cả nhóm");
         p.getMenu().add("Xóa toàn bộ số lượng trong nhóm");
         p.getMenu().add("Xóa nhóm (giữ bảng)");
         p.setOnMenuItemClickListener(i->{
@@ -1039,6 +1292,8 @@ public class MainActivity extends Activity {
                 renderSidebar();
             }else if(s.startsWith("Đổi")){
                 renameGroup(g);
+            }else if(s.startsWith("Copy")){
+                copyGroup(g);
             }else if(s.startsWith("Xóa toàn")){
                 confirmClearGroupQuantities(g,()->renderAll());
             }else{
@@ -1050,47 +1305,70 @@ public class MainActivity extends Activity {
     }
 
 
-    void copyTable(TableModel src){
+    void showCopyOptions(TableModel src){
+        if(src==null)return;
+        String[] opts="cancel".equals(src.type)
+            ?new String[]{"Copy toàn bộ","Copy tên đại lý, xóa số lượng","Copy bảng trống"}
+            :new String[]{"Copy toàn bộ","Copy đơn giá, xóa số lượng","Copy bảng trống"};
+        new AlertDialog.Builder(this).setTitle("Copy "+src.title).setItems(opts,(d,i)->copyTableMode(src,i)).show();
+    }
+
+    void copyTable(TableModel src){copyTableMode(src,0);}
+
+    void copyTableMode(TableModel src,int mode){
         if(src==null)return;
         TableModel t=new TableModel();
-        t.id=id();
-        t.type=src.type;
-        t.title=src.title+" - Bản sao";
-        t.groupId=src.groupId;
-        t.updated=System.currentTimeMillis();
-
+        t.id=id();t.type=src.type;t.title=src.title+" - Bản sao";t.groupId=src.groupId;t.updated=System.currentTimeMillis();
         if("cancel".equals(src.type)){
-            for(CancelRow r:src.cancelRows){
-                t.cancelRows.add(new CancelRow(r.agent,r.qty));
+            if(mode==2)t.cancelRows.add(new CancelRow("",0));
+            else{
+                for(CancelRow r:src.cancelRows){
+                    if(r.blank())continue;
+                    t.cancelRows.add(new CancelRow(r.agent,mode==1?0:r.qty));
+                }
+                ensureBlankCancel(t);
             }
-            ensureBlankCancel(t);
         }else{
-            for(CalcRow r:src.calcRows){
-                CalcRow c=new CalcRow();
-                c.price=r.price;
-                c.qty=r.qty;
-                t.calcRows.add(c);
+            if(mode==2)t.calcRows.add(new CalcRow());
+            else{
+                for(CalcRow r:src.calcRows){
+                    if(r.blank())continue;
+                    CalcRow c=new CalcRow();c.price=r.price;c.qty=mode==1?0:r.qty;t.calcRows.add(c);
+                }
+                ensureBlankCalc(t);
             }
-            ensureBlankCalc(t);
         }
+        int idx=tables.indexOf(src);tables.add(Math.min(tables.size(),idx+1),t);
+        selectedId=t.id;activeRow=0;pendingScrollRow=0;activeField="cancel".equals(t.type)?"qty":"price";
+        save();renderAll();Toast.makeText(this,"Đã copy bảng",Toast.LENGTH_SHORT).show();
+    }
 
-        int idx=tables.indexOf(src);
-        tables.add(Math.min(tables.size(),idx+1),t);
-        selectedId=t.id;
-        activeRow=0;
-        pendingScrollRow=0;
-        activeField="cancel".equals(t.type)?"qty":"price";
-        save();renderAll();
-        Toast.makeText(this,"Đã copy bảng",Toast.LENGTH_SHORT).show();
+    void toggleLock(TableModel t){
+        if(t==null)return;t.locked=!t.locked;t.updated=System.currentTimeMillis();save();renderAll();
+        Toast.makeText(this,t.locked?"Đã khóa bảng":"Đã mở khóa bảng",Toast.LENGTH_SHORT).show();
+    }
+
+    void copyGroup(GroupModel g){
+        if(g==null)return;
+        GroupModel ng=new GroupModel();ng.id=id();ng.name=g.name+" - Bản sao";groups.add(ng);
+        ArrayList<TableModel> srcs=new ArrayList<>(inGroup(g.id));
+        for(TableModel s:srcs){
+            TableModel t=new TableModel();t.id=id();t.type=s.type;t.title=s.title+" - Bản sao";t.groupId=ng.id;t.updated=System.currentTimeMillis();
+            if("cancel".equals(s.type)){for(CancelRow r:s.cancelRows)if(!r.blank())t.cancelRows.add(new CancelRow(r.agent,r.qty));ensureBlankCancel(t);}
+            else{for(CalcRow r:s.calcRows)if(!r.blank()){CalcRow c=new CalcRow();c.price=r.price;c.qty=r.qty;t.calcRows.add(c);}ensureBlankCalc(t);}
+            tables.add(t);
+        }
+        save();renderAll();Toast.makeText(this,"Đã copy nhóm",Toast.LENGTH_SHORT).show();
     }
 
     void confirmClearCurrentQuantities(){
         TableModel t=selected();
-        if(t==null||!"cancel".equals(t.type))return;
+        if(t==null||!"cancel".equals(t.type))return;if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}
         new AlertDialog.Builder(this)
             .setTitle("Xóa toàn bộ số lượng?")
             .setMessage("Tên đại lý sẽ được giữ nguyên.")
             .setPositiveButton("Xóa SL",(d,w)->{
+                pushUndo("Xóa số lượng");
                 for(CancelRow r:t.cancelRows)r.qty=0;
                 t.updated=System.currentTimeMillis();
                 ensureBlankCancel(t);
@@ -1103,7 +1381,7 @@ public class MainActivity extends Activity {
     void clearQuantitiesInGroup(GroupModel g){
         if(g==null)return;
         for(TableModel t:tables){
-            if(!g.id.equals(t.groupId))continue;
+            if(!g.id.equals(t.groupId)||t.locked)continue;
             if("cancel".equals(t.type)){
                 for(CancelRow r:t.cancelRows)r.qty=0;
                 ensureBlankCancel(t);
@@ -1122,6 +1400,7 @@ public class MainActivity extends Activity {
             .setTitle("Xóa số lượng trong "+g.name+"?")
             .setMessage("Đơn giá và tên đại lý được giữ nguyên; chỉ cột số lượng của tất cả bảng trong nhóm bị xóa.")
             .setPositiveButton("Xóa số lượng",(d,w)->{
+                pushUndo("Xóa số lượng nhóm");
                 clearQuantitiesInGroup(g);
                 if(after!=null)after.run();
             })
@@ -1131,25 +1410,119 @@ public class MainActivity extends Activity {
 
     void addCalcTable(boolean select){TableModel t=new TableModel();t.id=id();t.type="calc";t.title="Bảng "+(tables.size()+1);t.updated=System.currentTimeMillis();t.calcRows.add(new CalcRow());tables.add(t);if(select)selectedId=t.id;save();if(select)renderAll();}
     void addCancelTable(boolean select){TableModel t=new TableModel();t.id=id();t.type="cancel";t.title="Hủy vé";t.updated=System.currentTimeMillis();t.cancelRows.add(new CancelRow("",0));tables.add(t);if(select)selectedId=t.id;save();if(select)renderAll();}
-    void deleteCurrent(){TableModel t=selected();if(t==null)return;new AlertDialog.Builder(this).setTitle("Xóa bảng?").setMessage(t.title).setPositiveButton("Xóa",(d,w)->{lastDeleted=t;lastDeletedIndex=tables.indexOf(t);tables.remove(t);selectedId=tables.isEmpty()?null:tables.get(Math.max(0,Math.min(lastDeletedIndex,tables.size()-1))).id;save();renderAll();}).setNegativeButton("Hủy",null).show();}
-    void undoDelete(){if(lastDeleted==null)return;tables.add(Math.max(0,Math.min(lastDeletedIndex,tables.size())),lastDeleted);selectedId=lastDeleted.id;lastDeleted=null;lastDeletedIndex=-1;save();renderAll();}
+    void deleteCurrent(){TableModel t=selected();if(t==null)return;if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}new AlertDialog.Builder(this).setTitle("Xóa bảng?").setMessage(t.title).setPositiveButton("Xóa",(d,w)->{pushUndo("Xóa bảng");lastDeleted=t;lastDeletedIndex=tables.indexOf(t);tables.remove(t);selectedId=tables.isEmpty()?null:tables.get(Math.max(0,Math.min(lastDeletedIndex,tables.size()-1))).id;save();renderAll();}).setNegativeButton("Hủy",null).show();}
+    void undoDelete(){if(undoSnapshot!=null){String s=undoSnapshot;String label=undoLabel;undoSnapshot=null;undoLabel="";restoreStateJson(s);Toast.makeText(this,"Đã hoàn tác: "+label,Toast.LENGTH_SHORT).show();return;}if(lastDeleted==null)return;tables.add(Math.max(0,Math.min(lastDeletedIndex,tables.size())),lastDeleted);selectedId=lastDeleted.id;lastDeleted=null;lastDeletedIndex=-1;save();renderAll();}
     void renameCurrent(){TableModel t=selected();if(t==null)return;EditText e=new EditText(this);e.setText(t.title);e.setSelectAllOnFocus(true);e.setSingleLine();AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Đổi tên bảng").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty()){t.title=s;t.updated=System.currentTimeMillis();save();renderAll();}}).setNegativeButton("Hủy",null).create();dlg.setOnShowListener(x->{e.requestFocus();e.selectAll();dlg.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);});dlg.show();}
     void createGroupDialog(){EditText e=new EditText(this);e.setHint("Tên nhóm");new AlertDialog.Builder(this).setTitle("Tạo nhóm bảng").setView(padded(e)).setPositiveButton("Tạo",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty()){GroupModel g=new GroupModel();g.id=id();g.name=s;groups.add(g);save();renderAll();}}).setNegativeButton("Hủy",null).show();}
-    void moveCurrentGroup(){TableModel t=selected();if(t==null)return;ArrayList<String> names=new ArrayList<>();names.add("Chưa nhóm");for(GroupModel g:groups)names.add(g.name);new AlertDialog.Builder(this).setTitle("Chuyển vào nhóm").setItems(names.toArray(new String[0]),(d,i)->{t.groupId=i==0?UNGROUPED:groups.get(i-1).id;save();renderAll();}).show();}
+    void moveCurrentGroup(){TableModel t=selected();if(t==null)return;ArrayList<String> names=new ArrayList<>();names.add("Chưa nhóm");for(GroupModel g:groups)names.add(g.name);new AlertDialog.Builder(this).setTitle("Chuyển vào nhóm").setItems(names.toArray(new String[0]),(d,i)->{pushUndo("Chuyển nhóm");t.groupId=i==0?UNGROUPED:groups.get(i-1).id;save();renderAll();}).show();}
     void renameGroup(GroupModel g){EditText e=new EditText(this);e.setText(g.name);new AlertDialog.Builder(this).setTitle("Đổi tên nhóm").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty()){g.name=s;save();renderAll();}}).setNegativeButton("Hủy",null).show();}
-    void deleteGroup(GroupModel g){for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;groups.remove(g);save();renderAll();}
+    void deleteGroup(GroupModel g){pushUndo("Xóa nhóm");for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;groups.remove(g);save();renderAll();}
 
-    void editAgent(TableModel t,int row){activeRow=row;CancelRow r=t.cancelRows.get(row);EditText e=new EditText(this);e.setHint("Tên đại lý");e.setText(r.agent);e.setSingleLine();AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Tên đại lý").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{r.agent=e.getText().toString().trim();t.updated=System.currentTimeMillis();ensureBlankCancel(t);save();renderAll();}).setNegativeButton("Hủy",null).create();dlg.setOnShowListener(x->{e.requestFocus();dlg.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);});dlg.show();}
+    void editAgent(TableModel t,int row){if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}activeRow=row;CancelRow r=t.cancelRows.get(row);EditText e=new EditText(this);e.setHint("Tên đại lý");e.setText(r.agent);e.setSingleLine();AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Tên đại lý").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{r.agent=e.getText().toString().trim();t.updated=System.currentTimeMillis();ensureBlankCancel(t);save();renderAll();}).setNegativeButton("Hủy",null).create();dlg.setOnShowListener(x->{e.requestFocus();dlg.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);});dlg.show();}
 
     void ensureRow(TableModel t,int row){while(t.calcRows.size()<=row)t.calcRows.add(new CalcRow());}
     void ensureCancelRow(TableModel t,int row){while(t.cancelRows.size()<=row)t.cancelRows.add(new CancelRow("",0));}
     void ensureBlankCalc(TableModel t){if(t.calcRows.isEmpty()||!t.calcRows.get(t.calcRows.size()-1).blank())t.calcRows.add(new CalcRow());}
     void ensureBlankCancel(TableModel t){if(t.cancelRows.isEmpty()||!t.cancelRows.get(t.cancelRows.size()-1).blank())t.cancelRows.add(new CancelRow("",0));}
 
-    void shareCurrent(){TableModel t=selected();if(t==null)return;try{LinearLayout report=buildShareView(t);int width=Math.min(dp(900),Math.max(dp(560),getResources().getDisplayMetrics().widthPixels));report.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));report.layout(0,0,width,report.getMeasuredHeight());Bitmap bmp=Bitmap.createBitmap(width,Math.max(1,report.getMeasuredHeight()),Bitmap.Config.ARGB_8888);Canvas c=new Canvas(bmp);c.drawColor(Color.WHITE);report.draw(c);File dir=new File(getCacheDir(),"share");dir.mkdirs();File f=new File(dir,"bang-"+System.currentTimeMillis()+".png");try(FileOutputStream os=new FileOutputStream(f)){bmp.compress(Bitmap.CompressFormat.PNG,100,os);}bmp.recycle();Uri uri=Uri.parse("content://com.vinh.listcalculatorfold2.share/"+Uri.encode(f.getName()));Intent send=new Intent(Intent.ACTION_SEND);send.setType("image/png");send.putExtra(Intent.EXTRA_STREAM,uri);send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(send,"Chia sẻ ảnh"));}catch(Exception e){Toast.makeText(this,"Không tạo được ảnh",Toast.LENGTH_LONG).show();}}
-    LinearLayout buildShareView(TableModel t){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.VERTICAL);r.setPadding(dp(26),dp(22),dp(26),dp(24));r.setBackgroundColor(Color.WHITE);TextView h=text(t.title,23,true);h.setTextColor(Color.BLACK);r.addView(h);TextView dt=text(new SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).format(new Date()),12,false);dt.setTextColor(Color.GRAY);r.addView(dt);Space sp=new Space(this);r.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));if("cancel".equals(t.type)){LinearLayout hh=shareRow();hh.addView(shareCell("Tên đại lý",true,Gravity.START),w(0,dp(42),3));hh.addView(shareCell("Số lượng",true,Gravity.END),w(0,dp(42),1));r.addView(hh);for(CancelRow x:t.cancelRows)if(!x.blank()){LinearLayout rr=shareRow();rr.addView(shareCell(x.agent,false,Gravity.START),w(0,dp(40),3));rr.addView(shareCell(String.valueOf(x.qty),false,Gravity.END),w(0,dp(40),1));r.addView(rr);}}else{LinearLayout hh=shareRow();hh.addView(shareCell("Đơn giá",true,Gravity.END),w(0,dp(42),2));hh.addView(shareCell("SL",true,Gravity.END),w(0,dp(42),1));hh.addView(shareCell("Thành tiền",true,Gravity.END),w(0,dp(42),2));r.addView(hh);for(CalcRow x:t.calcRows)if(!x.blank()){LinearLayout rr=shareRow();rr.addView(shareCell(plain(x.price),false,Gravity.END),w(0,dp(40),2));rr.addView(shareCell(plain(x.qty),false,Gravity.END),w(0,dp(40),1));rr.addView(shareCell(fmt(x.price*x.qty),false,Gravity.END),w(0,dp(40),2));r.addView(rr);}}TextView sum=text("TỔNG: "+fmt(t.total()),22,true);sum.setTextColor(accent);sum.setGravity(Gravity.END);sum.setPadding(0,dp(14),0,0);r.addView(sum);return r;}
 
-    void save(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());root.put("groups",ga).put("tables",ta);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();}catch(Exception ignored){}}
+    void startBackup(){
+        Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");
+        i.putExtra(Intent.EXTRA_TITLE,"ListCalculatorFold2_Backup_"+new SimpleDateFormat("yyyyMMdd_HHmm",Locale.getDefault()).format(new Date())+".json");
+        startActivityForResult(i,REQ_BACKUP);
+    }
+
+    void startRestore(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("application/json");
+        startActivityForResult(i,REQ_RESTORE);
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+        super.onActivityResult(requestCode,resultCode,data);
+        if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+        Uri uri=data.getData();
+        try{
+            if(requestCode==REQ_BACKUP){
+                try(OutputStream os=getContentResolver().openOutputStream(uri)){
+                    os.write(stateJson().getBytes("UTF-8"));
+                }
+                Toast.makeText(this,"Đã sao lưu dữ liệu",Toast.LENGTH_SHORT).show();
+            }else if(requestCode==REQ_RESTORE){
+                StringBuilder s=new StringBuilder();
+                try(BufferedReader br=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){
+                    String line;while((line=br.readLine())!=null)s.append(line);
+                }
+                new AlertDialog.Builder(this).setTitle("Khôi phục dữ liệu?")
+                    .setMessage("Dữ liệu hiện tại sẽ được thay bằng bản sao lưu.")
+                    .setPositiveButton("Khôi phục",(d,w)->{pushUndo("Khôi phục backup");restoreStateJson(s.toString());})
+                    .setNegativeButton("Hủy",null).show();
+            }
+        }catch(Exception e){Toast.makeText(this,"Không xử lý được file: "+e.getMessage(),Toast.LENGTH_LONG).show();}
+    }
+
+    void showSettingsDialog(){
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(18),dp(8),dp(18),0);
+        TextView t=text("Chế độ nhập",14,true);box.addView(t);
+        RadioGroup rg=new RadioGroup(this);
+        String[] labels={"Kiểu List Calculator","Enter/Tab tự chuyển ô","Thủ công"};
+        for(int i=0;i<labels.length;i++){RadioButton r=new RadioButton(this);r.setText(labels[i]);r.setId(100+i);rg.addView(r);}
+        rg.check(100+fastInputMode);box.addView(rg);
+        CheckBox cb=new CheckBox(this);cb.setText("Ẩn dòng trống khi chia sẻ ảnh");cb.setChecked(shareHideBlank);box.addView(cb);
+        new AlertDialog.Builder(this).setTitle("Cài đặt").setView(box)
+            .setPositiveButton("Lưu",(d,w)->{
+                int id=rg.getCheckedRadioButtonId();fastInputMode=Math.max(0,id-100);
+                shareHideBlank=cb.isChecked();
+                saveUiState();Toast.makeText(this,"Đã lưu cài đặt",Toast.LENGTH_SHORT).show();
+            }).setNegativeButton("Hủy",null).show();
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent e){
+        if(e.getAction()!=KeyEvent.ACTION_DOWN)return super.dispatchKeyEvent(e);
+        if(e.isCtrlPressed()&&e.getKeyCode()==KeyEvent.KEYCODE_Z){undoDelete();return true;}
+        if(e.isCtrlPressed()&&e.getKeyCode()==KeyEvent.KEYCODE_C){showCopyOptions(selected());return true;}
+        if(e.getKeyCode()==KeyEvent.KEYCODE_DPAD_LEFT){selectPreviousTable();return true;}
+        if(e.getKeyCode()==KeyEvent.KEYCODE_DPAD_RIGHT){selectNextTable();return true;}
+        if(e.getKeyCode()==KeyEvent.KEYCODE_TAB||e.getKeyCode()==KeyEvent.KEYCODE_ENTER){
+            TableModel t=selected();if(t==null)return true;
+            if("cancel".equals(t.type)){activeRow++;ensureCancelRow(t,activeRow);activeField="qty";}
+            else if("price".equals(activeField)){activeField="qty";}
+            else{activeRow++;ensureRow(t,activeRow);activeField="price";}
+            pendingScrollRow=activeRow;explicitCellSelection=false;saveUiState();renderGrid();renderKeypads();return true;
+        }
+        int uc=e.getUnicodeChar();
+        if(uc>='0'&&uc<='9'){handleKey(activeField,String.valueOf((char)uc));return true;}
+        if(e.getKeyCode()==KeyEvent.KEYCODE_DEL){handleKey(activeField,"⌫");return true;}
+        return super.dispatchKeyEvent(e);
+    }
+
+    void shareCurrent(){TableModel t=selected();if(t==null)return;try{LinearLayout report=buildShareView(t);int width=Math.min(dp(900),Math.max(dp(560),getResources().getDisplayMetrics().widthPixels));report.measure(View.MeasureSpec.makeMeasureSpec(width,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(0,View.MeasureSpec.UNSPECIFIED));report.layout(0,0,width,report.getMeasuredHeight());Bitmap bmp=Bitmap.createBitmap(width,Math.max(1,report.getMeasuredHeight()),Bitmap.Config.ARGB_8888);Canvas c=new Canvas(bmp);c.drawColor(Color.WHITE);report.draw(c);File dir=new File(getCacheDir(),"share");dir.mkdirs();File f=new File(dir,"bang-"+System.currentTimeMillis()+".png");try(FileOutputStream os=new FileOutputStream(f)){bmp.compress(Bitmap.CompressFormat.PNG,100,os);}bmp.recycle();Uri uri=Uri.parse("content://com.vinh.listcalculatorfold2.share/"+Uri.encode(f.getName()));Intent send=new Intent(Intent.ACTION_SEND);send.setType("image/png");send.putExtra(Intent.EXTRA_STREAM,uri);send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(send,"Chia sẻ ảnh"));}catch(Exception e){Toast.makeText(this,"Không tạo được ảnh",Toast.LENGTH_LONG).show();}}
+    LinearLayout buildShareView(TableModel t){
+        LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.VERTICAL);r.setPadding(dp(26),dp(22),dp(26),dp(24));r.setBackgroundColor(Color.WHITE);
+        LinearLayout titleRow=new LinearLayout(this);titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        try{
+            ImageView logo=new ImageView(this);logo.setImageDrawable(getPackageManager().getApplicationIcon(getPackageName()));
+            titleRow.addView(logo,new LinearLayout.LayoutParams(dp(46),dp(46)));
+        }catch(Exception ignored){}
+        LinearLayout titleBox=new LinearLayout(this);titleBox.setOrientation(LinearLayout.VERTICAL);titleBox.setPadding(dp(10),0,0,0);
+        TextView h=text(t.title,23,true);h.setTextColor(Color.BLACK);titleBox.addView(h);
+        String gn=groupNameFor(t.groupId);
+        if(!gn.isEmpty()){TextView g=text(gn,12,false);g.setTextColor(muted);titleBox.addView(g);}
+        titleRow.addView(titleBox,new LinearLayout.LayoutParams(0,-2,1));r.addView(titleRow);
+        TextView dt=text(new SimpleDateFormat("dd/MM/yyyy HH:mm",Locale.getDefault()).format(new Date()),12,false);dt.setTextColor(Color.GRAY);r.addView(dt);
+        Space sp=new Space(this);r.addView(sp,new LinearLayout.LayoutParams(1,dp(12)));
+        if("cancel".equals(t.type)){
+            LinearLayout hh=shareRow();hh.addView(shareCell("Tên đại lý",true,Gravity.START),w(0,dp(42),3));hh.addView(shareCell("Số lượng",true,Gravity.END),w(0,dp(42),1));r.addView(hh);
+            for(CancelRow x:t.cancelRows){if(shareHideBlank&&x.blank())continue;LinearLayout rr=shareRow();rr.addView(shareCell(x.agent,false,Gravity.START),w(0,dp(40),3));rr.addView(shareCell(fmt(x.qty),false,Gravity.END),w(0,dp(40),1));r.addView(rr);}
+        }else{
+            LinearLayout hh=shareRow();hh.addView(shareCell("Đơn giá",true,Gravity.END),w(0,dp(42),2));hh.addView(shareCell("SL",true,Gravity.END),w(0,dp(42),1));hh.addView(shareCell("Thành tiền",true,Gravity.END),w(0,dp(42),2));r.addView(hh);
+            for(CalcRow x:t.calcRows){if(shareHideBlank&&x.blank())continue;LinearLayout rr=shareRow();rr.addView(shareCell(fmt(x.price),false,Gravity.END),w(0,dp(40),2));rr.addView(shareCell(fmt(x.qty),false,Gravity.END),w(0,dp(40),1));rr.addView(shareCell(fmt(x.price*x.qty),false,Gravity.END),w(0,dp(40),2));r.addView(rr);}
+        }
+        TextView sum=text("TỔNG: "+fmt(t.total()),22,true);sum.setTextColor(accent);sum.setGravity(Gravity.END);sum.setPadding(0,dp(14),0,0);r.addView(sum);return r;
+    }
+
+    void save(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());root.put("groups",ga).put("tables",ta);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();saveUiState();}catch(Exception ignored){}}
     void load(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(DATA,null);if(s!=null){try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));return;}catch(Exception ignored){}}migrateOld();}
     void migrateOld(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(OLD_DATA,null);if(s==null)return;try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++){JSONObject x=ta.getJSONObject(i);TableModel t=new TableModel();t.id=x.optString("id",id());t.type=x.optString("type","calc");t.title=x.optString("title","Bảng");t.groupId=x.optString("groupId","");t.updated=System.currentTimeMillis();if("cancel".equals(t.type)){JSONArray c=x.optJSONArray("cancelRows");if(c!=null)for(int j=0;j<c.length();j++){JSONObject z=c.optJSONObject(j);t.cancelRows.add(new CancelRow(z.optString("agent"),z.optLong("qty")));}}else{JSONArray v=x.optJSONArray("values");if(v!=null)for(int j=0;j<v.length();j++){CalcRow cr=new CalcRow();cr.price=v.optDouble(j);cr.qty=1;t.calcRows.add(cr);}}tables.add(t);}save();}catch(Exception ignored){}}
 
@@ -1158,7 +1531,7 @@ public class MainActivity extends Activity {
     static class GroupModel{String id,name;JSONObject json()throws Exception{return new JSONObject().put("id",id).put("name",name);}static GroupModel from(JSONObject o){GroupModel g=new GroupModel();g.id=o.optString("id");g.name=o.optString("name","Nhóm");return g;}}
     static class CalcRow{double price,qty;boolean blank(){return price==0&&qty==0;}JSONObject json()throws Exception{return new JSONObject().put("price",price).put("qty",qty);}static CalcRow from(JSONObject o){CalcRow r=new CalcRow();r.price=o.optDouble("price");r.qty=o.optDouble("qty");return r;}}
     static class CancelRow{String agent;long qty;CancelRow(String a,long q){agent=a;qty=q;}boolean blank(){return (agent==null||agent.trim().isEmpty())&&qty==0;}JSONObject json()throws Exception{return new JSONObject().put("agent",agent).put("qty",qty);}static CancelRow from(JSONObject o){return new CancelRow(o.optString("agent"),o.optLong("qty"));}}
-    static class TableModel{String id,type="calc",title="Bảng",groupId="";long updated;ArrayList<CalcRow> calcRows=new ArrayList<>();ArrayList<CancelRow> cancelRows=new ArrayList<>();double total(){double x=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)x+=r.qty;}else for(CalcRow r:calcRows)x+=r.price*r.qty;return x;}int dataRowCount(){int n=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)if(!r.blank())n++;}else for(CalcRow r:calcRows)if(!r.blank())n++;return n;}JSONObject json()throws Exception{JSONObject o=new JSONObject().put("id",id).put("type",type).put("title",title).put("groupId",groupId).put("updated",updated);JSONArray a=new JSONArray();for(CalcRow r:calcRows)a.put(r.json());o.put("calcRows",a);JSONArray c=new JSONArray();for(CancelRow r:cancelRows)c.put(r.json());o.put("cancelRows",c);return o;}static TableModel from(JSONObject o){TableModel t=new TableModel();t.id=o.optString("id");t.type=o.optString("type","calc");t.title=o.optString("title","Bảng");t.groupId=o.optString("groupId","");t.updated=o.optLong("updated",System.currentTimeMillis());JSONArray a=o.optJSONArray("calcRows");if(a!=null)for(int i=0;i<a.length();i++)t.calcRows.add(CalcRow.from(a.optJSONObject(i)));JSONArray c=o.optJSONArray("cancelRows");if(c!=null)for(int i=0;i<c.length();i++)t.cancelRows.add(CancelRow.from(c.optJSONObject(i)));return t;}}
+    static class TableModel{String id,type="calc",title="Bảng",groupId="";long updated;boolean locked=false;ArrayList<CalcRow> calcRows=new ArrayList<>();ArrayList<CancelRow> cancelRows=new ArrayList<>();double total(){double x=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)x+=r.qty;}else for(CalcRow r:calcRows)x+=r.price*r.qty;return x;}int dataRowCount(){int n=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)if(!r.blank())n++;}else for(CalcRow r:calcRows)if(!r.blank())n++;return n;}JSONObject json()throws Exception{JSONObject o=new JSONObject().put("id",id).put("type",type).put("title",title).put("groupId",groupId).put("updated",updated).put("locked",locked);JSONArray a=new JSONArray();for(CalcRow r:calcRows)a.put(r.json());o.put("calcRows",a);JSONArray c=new JSONArray();for(CancelRow r:cancelRows)c.put(r.json());o.put("cancelRows",c);return o;}static TableModel from(JSONObject o){TableModel t=new TableModel();t.id=o.optString("id");t.type=o.optString("type","calc");t.title=o.optString("title","Bảng");t.groupId=o.optString("groupId","");t.updated=o.optLong("updated",System.currentTimeMillis());t.locked=o.optBoolean("locked",false);JSONArray a=o.optJSONArray("calcRows");if(a!=null)for(int i=0;i<a.length();i++)t.calcRows.add(CalcRow.from(a.optJSONObject(i)));JSONArray c=o.optJSONArray("cancelRows");if(c!=null)for(int i=0;i<c.length();i++)t.cancelRows.add(CancelRow.from(c.optJSONObject(i)));return t;}}
 
     void markActive(TextView v){
         GradientDrawable d=new GradientDrawable();
@@ -1175,21 +1548,13 @@ public class MainActivity extends Activity {
 
 
     void scrollActiveRowIntoView(){
-        if(gridScroll==null)return;
+        if(gridRecycler==null)return;
         final int row=pendingScrollRow>=0?pendingScrollRow:activeRow;
-        gridScroll.post(()->{
-            View child=gridScroll.getChildAt(0);
-            if(!(child instanceof LinearLayout))return;
-            LinearLayout body=(LinearLayout)child;
-            if(body.getChildCount()==0)return;
-
-            int idx=Math.max(0,Math.min(row,body.getChildCount()-1));
-            View target=body.getChildAt(idx);
-
-            // Đưa dòng đang nhập xuống gần đáy vùng bảng nhưng vẫn chừa khoảng nhìn dòng kế/tổng.
-            int desired=gridScroll.getHeight()-target.getHeight()-dp(18);
-            int y=Math.max(0,target.getTop()-Math.max(dp(12),desired));
-            gridScroll.smoothScrollTo(0,y);
+        gridRecycler.post(()->{
+            RecyclerView.LayoutManager lm=gridRecycler.getLayoutManager();
+            if(lm instanceof LinearLayoutManager){
+                ((LinearLayoutManager)lm).scrollToPositionWithOffset(Math.max(0,row),dp(12));
+            }else gridRecycler.scrollToPosition(Math.max(0,row));
             pendingScrollRow=-1;
         });
     }
