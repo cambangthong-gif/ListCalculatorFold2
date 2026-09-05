@@ -230,27 +230,35 @@ public class MainActivity extends Activity {
 
 
     void applyTopSystemInset(){
-        if(topInsetSpacer==null)return;
+        applyTopSystemInset(topInsetSpacer);
+    }
+
+    void applyTopSystemInset(View spacer){
+        if(spacer==null)return;
         if(android.os.Build.VERSION.SDK_INT>=23){
-            getWindow().getDecorView().setOnApplyWindowInsetsListener((v,insets)->{
+            spacer.setOnApplyWindowInsetsListener((v,insets)->{
                 int top=insets.getSystemWindowInsetTop();
-                ViewGroup.LayoutParams lp=topInsetSpacer.getLayoutParams();
+                ViewGroup.LayoutParams lp=v.getLayoutParams();
                 lp.height=top;
-                topInsetSpacer.setLayoutParams(lp);
+                v.setLayoutParams(lp);
                 return insets;
             });
-            getWindow().getDecorView().requestApplyInsets();
+            spacer.requestApplyInsets();
         }else{
             int res=getResources().getIdentifier("status_bar_height","dimen","android");
             int top=res>0?getResources().getDimensionPixelSize(res):0;
-            ViewGroup.LayoutParams lp=topInsetSpacer.getLayoutParams();
+            ViewGroup.LayoutParams lp=spacer.getLayoutParams();
             lp.height=top;
-            topInsetSpacer.setLayoutParams(lp);
+            spacer.setLayoutParams(lp);
         }
     }
 
     void buildScreen(){
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(248,250,252));
+        View sheetInsetSpacer=new View(this);
+        sheetInsetSpacer.setBackgroundColor(Color.WHITE);
+        root.addView(sheetInsetSpacer,new LinearLayout.LayoutParams(-1,0));
+        applyTopSystemInset(sheetInsetSpacer);
         int swDp=getResources().getConfiguration().screenWidthDp;
         int shDp=getResources().getConfiguration().screenHeightDp;
         compact=swDp<600;
@@ -268,39 +276,43 @@ public class MainActivity extends Activity {
         undoBtn=topButton("↶  Hoàn tác");
         Button share=topButton("↗  Chia sẻ");
         quick1000=topButton(formatSample());
-        Button add=topButton("+  Bảng");
+        Button addCalc=topButton("+  Bảng tính");
+        Button addCancel=topButton("+  Bảng hủy");
 
         tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
         del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();});
         undoBtn.setOnClickListener(v->{haptic(v);undoDelete();});
         share.setOnClickListener(v->{haptic(v);shareCurrent();});
         quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();});
-        add.setOnClickListener(v->{haptic(v);showAddMenu(add);});
+        addCalc.setOnClickListener(v->{haptic(v);addCalcTable(true);});
+        addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);});
 
         if(compact && !compactLandscape){
             LinearLayout r1=new LinearLayout(this);r1.setGravity(Gravity.CENTER);
             LinearLayout r2=new LinearLayout(this);r2.setGravity(Gravity.CENTER);
-            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(42),1));
-            r1.addView(del,new LinearLayout.LayoutParams(0,dp(42),1));
-            r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(42),1));
-            r2.addView(share,new LinearLayout.LayoutParams(0,dp(42),1));
-            r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(42),1));
-            r2.addView(add,new LinearLayout.LayoutParams(0,dp(42),1));
-            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(44)));
-            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(44)));
+            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(40),1.15f));
+            r1.addView(del,new LinearLayout.LayoutParams(0,dp(40),1f));
+            r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(40),1.1f));
+            r1.addView(share,new LinearLayout.LayoutParams(0,dp(40),1f));
+            r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(40),.9f));
+            r2.addView(addCalc,new LinearLayout.LayoutParams(0,dp(40),1.25f));
+            r2.addView(addCancel,new LinearLayout.LayoutParams(0,dp(40),1.35f));
+            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(42)));
+            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(42)));
         }else{
             int h=dp(compactLandscape?38:44);
-            top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.18f));
-            top.addView(del,new LinearLayout.LayoutParams(0,h,1f));
-            top.addView(undoBtn,new LinearLayout.LayoutParams(0,h,1.05f));
-            top.addView(share,new LinearLayout.LayoutParams(0,h,1f));
-            top.addView(quick1000,new LinearLayout.LayoutParams(0,h,.85f));
-            top.addView(add,new LinearLayout.LayoutParams(0,h,1f));
+            top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.12f));
+            top.addView(del,new LinearLayout.LayoutParams(0,h,.92f));
+            top.addView(undoBtn,new LinearLayout.LayoutParams(0,h,1.02f));
+            top.addView(share,new LinearLayout.LayoutParams(0,h,.95f));
+            top.addView(quick1000,new LinearLayout.LayoutParams(0,h,.78f));
+            top.addView(addCalc,new LinearLayout.LayoutParams(0,h,1.18f));
+            top.addView(addCancel,new LinearLayout.LayoutParams(0,h,1.24f));
         }
 
         root.addView(top,new LinearLayout.LayoutParams(
                 -1,
-                compactLandscape?dp(46):(compact?dp(98):dp(54))
+                compactLandscape?dp(44):(compact?dp(94):dp(52))
         ));
 
         if(compact){
@@ -344,13 +356,13 @@ public class MainActivity extends Activity {
             next.setOnClickListener(v->{haptic(v);animateTablePageChange(true);});
             labels.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
 
-            root.addView(currentBar,new LinearLayout.LayoutParams(-1,dp(compactLandscape?38:50)));
+            root.addView(currentBar,new LinearLayout.LayoutParams(-1,dp(compactLandscape?36:46)));
         }else{
             compactTableTitle=null;
             compactGroupTitle=null;
         }
 
-        LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(248,250,252));
+        LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(248,250,252));middle.setPadding(0,dp(2),0,0);
         ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setBackgroundColor(Color.WHITE);leftScroll.addView(sidebar);
         int sideDp=swDp>=840?240:(swDp>=700?220:200);
         if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
@@ -373,7 +385,8 @@ public class MainActivity extends Activity {
         root.addView(keypadHost,new LinearLayout.LayoutParams(-1,dp(keypadDp)));
         setContentView(root);
 
-        add.setOnClickListener(v->{haptic(v);showAddMenu(add);}); del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();}); undoBtn.setOnClickListener(v->{haptic(v);undoDelete();}); share.setOnClickListener(v->{haptic(v);shareCurrent();}); quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();}); tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
+        addCalc.setOnClickListener(v->{haptic(v);addCalcTable(true);});
+        addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);}); del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();}); undoBtn.setOnClickListener(v->{haptic(v);undoDelete();}); share.setOnClickListener(v->{haptic(v);shareCurrent();}); quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();}); tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
         renderAll();
     }
 
@@ -1070,7 +1083,7 @@ public class MainActivity extends Activity {
     Button topButton(String s){
         Button b=new Button(this);
         b.setText(s);
-        b.setTextSize(compactLandscape?10.5f:(compact?11.5f:12.5f));
+        b.setTextSize(compactLandscape?9.5f:(compact?11.0f:12.0f));
         b.setTextColor(ink);
         b.setAllCaps(false);
         b.setGravity(Gravity.CENTER);
