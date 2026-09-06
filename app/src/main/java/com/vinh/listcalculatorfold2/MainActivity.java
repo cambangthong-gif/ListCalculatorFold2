@@ -882,10 +882,9 @@ public class MainActivity extends Activity {
         move.setOnClickListener(v->{selectedId=t.id;closeRevealedSwipe();moveCurrentGroup();});
         del.setOnClickListener(v->{selectedId=t.id;closeRevealedSwipe();deleteCurrent();});
 
-        int reveal=compact?144:150;
-        FrameLayout frame=makeSwipeFrame(item,actions,reveal);
-        installRevealSwipe(frame,item,reveal,()->quickDeleteTable(t));
-        return frame;
+        // Bỏ vuốt hành động ở menu trái màn trong để tránh lỗi hiển thị.
+        // Đổi tên / chuyển nhóm / xóa dùng nút ⋮ hoặc màn Quản lý bảng & nhóm.
+        return item;
     }
 
 
@@ -1143,6 +1142,20 @@ public class MainActivity extends Activity {
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(4),dp(4),dp(4),dp(2));TextView lab=text(label,compact?14:15,field.equals(activeField));lab.setTextColor(field.equals(activeField)?accent:muted);lab.setGravity(Gravity.CENTER);wrap.addView(lab,new LinearLayout.LayoutParams(-1,dp(compactLandscape?20:28)));String[][] keys={{"7","8","9"},{"4","5","6"},{"1","2","3"},{"⌫","0","C"}};for(String[] row:keys){LinearLayout rr=new LinearLayout(this);rr.setPadding(0,0,dp(3),dp(3));for(String k:row){Button b=keyButton(k);b.setOnClickListener(v->{haptic(v);handleKey(field,k);});rr.addView(b,w(0,-1,1));}wrap.addView(rr,new LinearLayout.LayoutParams(-1,0,1));}return wrap;
     }
 
+    void updateLiveTotals(TableModel t){
+        if(t==null)return;
+        if(grandTotal!=null)grandTotal.setText(fmt(t.total()));
+        if(currentGroupTotal!=null){
+            String gn=groupNameFor(t.groupId);
+            if(t.groupId!=null&&!t.groupId.isEmpty()&&!gn.isEmpty()){
+                currentGroupTotal.setText("Tổng nhóm\n"+fmt(groupTotal(t.groupId)));
+                currentGroupTotal.setVisibility(View.VISIBLE);
+            }else{
+                currentGroupTotal.setVisibility(View.GONE);
+            }
+        }
+    }
+
     void handleKey(String field,String key){
         TableModel t=selected();if(t==null)return;if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}
 
@@ -1188,10 +1201,13 @@ public class MainActivity extends Activity {
             RecyclerView.Adapter a=gridRecycler.getAdapter();
             if(activeRow>=0 && activeRow<a.getItemCount())a.notifyItemChanged(activeRow);
             else a.notifyDataSetChanged();
-            grandTotal.setText(fmt(t.total()));
+            updateLiveTotals(t);
             pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
             pendingScrollRow=activeRow;scrollActiveRowIntoView();
-        }else renderGrid();
+        }else{
+            renderGrid();
+            updateLiveTotals(t);
+        }
         renderKeypads();
     }
 
@@ -1618,16 +1634,58 @@ public class MainActivity extends Activity {
         };
         newGroup.setOnClickListener(createSelectedGroup);
         selGroup.setOnClickListener(createSelectedGroup);
+
+        selMove.setOnClickListener(v->{
+            haptic(v);
+            if(selectedIds.isEmpty()){
+                Toast.makeText(this,"Chưa chọn bảng",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            showMoveSelectedDialog(selectedIds,dlg,()->{
+                selectedIds.clear();
+                rebuild[0].run();
+            });
+        });
+
+        selCopy.setOnClickListener(v->{
+            haptic(v);
+            if(selectedIds.isEmpty()){
+                Toast.makeText(this,"Chưa chọn bảng",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            HashSet<String> before=new HashSet<>();
+            for(TableModel tb:tables)before.add(tb.id);
+
+            copySelectedTables(new HashSet<>(selectedIds));
+
+            selectedIds.clear();
+            for(TableModel tb:tables)if(!before.contains(tb.id))selectedIds.add(tb.id);
+
+            rebuild[0].run();
+            renderSidebar();
+        });
+
+        selDelete.setOnClickListener(v->{
+            haptic(v);
+            if(selectedIds.isEmpty()){
+                Toast.makeText(this,"Chưa chọn bảng",Toast.LENGTH_SHORT).show();
+                return;
+            }
+            confirmDeleteSelected(selectedIds,dlg);
+        });
+
         selectAll.setOnClickListener(v->{
             if(selectedIds.size()==tables.size())selectedIds.clear();
             else {selectedIds.clear();for(TableModel t:tables)selectedIds.add(t.id);}
             haptic(v);rebuild[0].run();
         });
         move.setOnClickListener(v->{
+            haptic(v);
             if(selectedIds.isEmpty()){Toast.makeText(this,"Vuốt phải hoặc chạm ô chọn để chọn bảng",Toast.LENGTH_SHORT).show();return;}
             showMoveSelectedDialog(selectedIds,dlg,rebuild[0]);
         });
         delete.setOnClickListener(v->{
+            haptic(v);
             if(selectedIds.isEmpty()){Toast.makeText(this,"Chưa chọn bảng",Toast.LENGTH_SHORT).show();return;}
             confirmDeleteSelected(selectedIds,dlg);
         });
@@ -1841,7 +1899,12 @@ public class MainActivity extends Activity {
         String[] actions={"Mở bảng","Copy bảng",t.locked?"Mở khóa bảng":"Khóa bảng","Đổi tên","Chuyển nhóm","Xóa bảng"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(actions,(d,i)->{
             if(i==0){selectedId=t.id;manager.dismiss();renderAll();}
-            else if(i==1){showCopyOptions(t);rebuild.run();}
+            else if(i==1){
+                showCopyOptions(t,()->{
+                    rebuild.run();
+                    renderSidebar();
+                });
+            }
             else if(i==2){toggleLock(t);rebuild.run();}
             else if(i==3){selectedId=t.id;manager.dismiss();renameCurrent();}
             else if(i==4)showMoveOneDialog(t,manager,rebuild);
@@ -1887,7 +1950,7 @@ public class MainActivity extends Activity {
             else{for(CalcRow r:s.calcRows)if(!r.blank()){CalcRow c=new CalcRow();c.price=r.price;c.qty=r.qty;t.calcRows.add(c);}ensureBlankCalc(t);}
             tables.add(t);
         }
-        save();renderAll();Toast.makeText(this,"Đã copy "+srcs.size()+" bảng",Toast.LENGTH_SHORT).show();
+        saveNow();renderAll();Toast.makeText(this,"Đã copy "+srcs.size()+" bảng",Toast.LENGTH_SHORT).show();
     }
 
     void showMoveSelectedDialog(HashSet<String> selectedIds,Dialog manager,Runnable rebuild){
@@ -1911,7 +1974,9 @@ public class MainActivity extends Activity {
                 for(int i=tables.size()-1;i>=0;i--)if(selectedIds.contains(tables.get(i).id)&&!tables.get(i).locked){undo=tables.get(i);undoIndex=i;tables.remove(i);}
                 lastDeleted=undo;lastDeletedIndex=undoIndex;
                 if(findTable(selectedId)==null)selectedId=tables.isEmpty()?null:tables.get(0).id;
-                save();manager.dismiss();renderAll();
+                selectedIds.clear();
+                saveNow();manager.dismiss();renderAll();
+                showUndoSnackbar("Đã xóa "+n+" bảng");
             })
             .setNegativeButton("Hủy",null).show();
     }
@@ -2137,11 +2202,20 @@ public class MainActivity extends Activity {
 
 
     void showCopyOptions(TableModel src){
+        showCopyOptions(src,null);
+    }
+
+    void showCopyOptions(TableModel src,Runnable afterCopy){
         if(src==null)return;
         String[] opts="cancel".equals(src.type)
             ?new String[]{"Copy toàn bộ","Copy tên đại lý, xóa số lượng","Copy bảng trống"}
             :new String[]{"Copy toàn bộ","Copy đơn giá, xóa số lượng","Copy bảng trống"};
-        new AlertDialog.Builder(this).setTitle("Copy "+src.title).setItems(opts,(d,i)->copyTableMode(src,i)).show();
+        new AlertDialog.Builder(this)
+            .setTitle("Copy "+src.title)
+            .setItems(opts,(d,i)->{
+                copyTableMode(src,i);
+                if(afterCopy!=null)afterCopy.run();
+            }).show();
     }
 
     void copyTable(TableModel src){copyTableMode(src,0);}
@@ -2171,7 +2245,7 @@ public class MainActivity extends Activity {
         }
         int idx=tables.indexOf(src);tables.add(Math.min(tables.size(),idx+1),t);
         selectedId=t.id;activeRow=0;pendingScrollRow=0;activeField="cancel".equals(t.type)?"qty":"price";
-        save();renderAll();Toast.makeText(this,"Đã copy bảng",Toast.LENGTH_SHORT).show();
+        saveNow();renderAll();Toast.makeText(this,"Đã copy bảng",Toast.LENGTH_SHORT).show();
     }
 
     void toggleLock(TableModel t){
