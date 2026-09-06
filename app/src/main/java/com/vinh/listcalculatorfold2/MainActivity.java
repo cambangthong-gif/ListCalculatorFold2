@@ -925,10 +925,12 @@ public class MainActivity extends Activity {
     void renderCalcGrid(TableModel t){
         gridHost.setPadding(0,0,0,0);
         LinearLayout head=gridRow();
-        head.addView(cell("STT",14,false,Gravity.CENTER),w(0,dp(headerRowDp()),0.45f));
-        head.addView(cell("Đơn giá",14,false,Gravity.CENTER),w(0,dp(headerRowDp()),2));
-        head.addView(cell("SL",14,false,Gravity.CENTER),w(0,dp(headerRowDp()),1));
-        head.addView(cell("Thành tiền",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,dp(headerRowDp()),2));
+        int hh=dp(headerRowDp());
+        head.setLayoutParams(new LinearLayout.LayoutParams(-1,hh));
+        head.addView(cell("STT",14,false,Gravity.CENTER),w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.45f));
+        head.addView(cell("Đơn giá",14,false,Gravity.CENTER),w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
+        head.addView(cell("SL",14,false,Gravity.CENTER),w(0,ViewGroup.LayoutParams.MATCH_PARENT,1));
+        head.addView(cell("Thành tiền",14,false,Gravity.END|Gravity.CENTER_VERTICAL),w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
         gridHost.addView(head);
         if(t.dataRowCount()==0)gridHost.addView(emptyHint("Nhập Đơn giá bên trái và Số lượng bên phải"),new LinearLayout.LayoutParams(-1,dp(34)));
         ensureBlankCalc(t);
@@ -974,9 +976,11 @@ public class MainActivity extends Activity {
         TextView ha=cell("Tên đại lý",14,true,Gravity.START|Gravity.CENTER_VERTICAL);
         TextView hq=cell("Số lượng",14,true,Gravity.END|Gravity.CENTER_VERTICAL);
         fillCell(hs,Color.rgb(255,251,235));fillCell(ha,Color.rgb(255,251,235));fillCell(hq,Color.rgb(255,251,235));
-        head.addView(hs,w(0,dp(headerRowDp()),0.38f));
-        head.addView(ha,w(0,dp(headerRowDp()),3.5f));
-        head.addView(hq,w(0,dp(headerRowDp()),1.65f));
+        int hh=dp(headerRowDp());
+        head.setLayoutParams(new LinearLayout.LayoutParams(-1,hh));
+        head.addView(hs,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.38f));
+        head.addView(ha,w(0,ViewGroup.LayoutParams.MATCH_PARENT,3.5f));
+        head.addView(hq,w(0,ViewGroup.LayoutParams.MATCH_PARENT,1.65f));
         gridHost.addView(head);
 
         if(t.dataRowCount()==0)gridHost.addView(emptyHint("Chạm Tên đại lý để nhập • bàn phím bên phải nhập Số lượng"),
@@ -1012,17 +1016,17 @@ public class MainActivity extends Activity {
         }
         @Override public H onCreateViewHolder(ViewGroup parent,int type){
             LinearLayout rr=gridRow();
+            int rowH=dp(dataRowDp());
             rr.setLayoutParams(new RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+                ViewGroup.LayoutParams.MATCH_PARENT,rowH));
             TextView st=cell("",14,false,Gravity.CENTER);
             TextView p=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
             TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
             TextView total=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
-            rr.addView(st,w(0,dp(dataRowDp()),0.45f));
-            rr.addView(p,w(0,dp(dataRowDp()),2));
-            rr.addView(q,w(0,dp(dataRowDp()),1));
-            rr.addView(total,w(0,dp(dataRowDp()),2));
+            rr.addView(st,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.45f));
+            rr.addView(p,w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
+            rr.addView(q,w(0,ViewGroup.LayoutParams.MATCH_PARENT,1));
+            rr.addView(total,w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
             return new H(rr,st,p,q,total);
         }
         @Override public void onBindViewHolder(H h,int row){
@@ -1055,15 +1059,15 @@ public class MainActivity extends Activity {
         }
         @Override public H onCreateViewHolder(ViewGroup parent,int type){
             LinearLayout rr=gridRow();
+            int rowH=dp(dataRowDp());
             rr.setLayoutParams(new RecyclerView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
+                ViewGroup.LayoutParams.MATCH_PARENT,rowH));
             TextView st=cell("",14,false,Gravity.CENTER);
             TextView a=cell("",16,false,Gravity.START|Gravity.CENTER_VERTICAL);
             TextView q=cell("",15,false,Gravity.END|Gravity.CENTER_VERTICAL);
-            rr.addView(st,w(0,dp(dataRowDp()),0.38f));
-            rr.addView(a,w(0,dp(dataRowDp()),3.5f));
-            rr.addView(q,w(0,dp(dataRowDp()),1.65f));
+            rr.addView(st,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.38f));
+            rr.addView(a,w(0,ViewGroup.LayoutParams.MATCH_PARENT,3.5f));
+            rr.addView(q,w(0,ViewGroup.LayoutParams.MATCH_PARENT,1.65f));
             return new H(rr,st,a,q);
         }
         @Override public void onBindViewHolder(H h,int row){
@@ -1181,7 +1185,9 @@ public class MainActivity extends Activity {
         }
         save();saveUiState();
         if(gridRecycler!=null && gridRecycler.getAdapter()!=null){
-            gridRecycler.getAdapter().notifyDataSetChanged();
+            RecyclerView.Adapter a=gridRecycler.getAdapter();
+            if(activeRow>=0 && activeRow<a.getItemCount())a.notifyItemChanged(activeRow);
+            else a.notifyDataSetChanged();
             grandTotal.setText(fmt(t.total()));
             pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
             pendingScrollRow=activeRow;scrollActiveRowIntoView();
@@ -2450,7 +2456,14 @@ public class MainActivity extends Activity {
         });
     }
 
-    LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);int cw=getResources().getConfiguration().screenWidthDp;
+    LinearLayout gridRow(){
+        LinearLayout r=new LinearLayout(this);
+        r.setOrientation(LinearLayout.HORIZONTAL);
+        r.setBaselineAligned(false);
+        r.setGravity(Gravity.CENTER_VERTICAL);
+        r.setBackgroundColor(paper);
+        return r;
+    }TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);int cw=getResources().getConfiguration().screenWidthDp;
         int cp=cw<380?5:(cw<600?7:(cw<840?7:9));
         v.setPadding(dp(cp),0,dp(cp),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
     Button topButton(String s){
