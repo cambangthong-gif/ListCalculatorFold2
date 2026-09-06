@@ -758,20 +758,14 @@ public class MainActivity extends Activity {
                 }
                 return true;
             });
-            LinearLayout gActions=new LinearLayout(this);
-            gActions.setPadding(dp(4),dp(4),dp(4),dp(4));
-            Button gRename=swipeActionButton("Đổi tên",false);
-            Button gDelete=swipeActionButton("Xóa nhóm",true);
-            gActions.addView(gRename,new LinearLayout.LayoutParams(0,-1,1));
-            gActions.addView(gDelete,new LinearLayout.LayoutParams(0,-1,1));
-
-            gRename.setOnClickListener(v->{closeRevealedSwipe();renameGroup(group);});
-            gDelete.setOnClickListener(v->{closeRevealedSwipe();quickDeleteGroup(group);});
-
-            int gReveal=compact?150:180;
-            FrameLayout gFrame=makeSwipeFrame(gh,gActions,gReveal);
-            installRevealSwipe(gFrame,gh,gReveal,()->quickDeleteGroup(group));
-            sidebar.addView(gFrame);
+            // Không dùng vuốt/xóa nhanh trên tiêu đề nhóm ở sidebar để tránh thao tác nhầm.
+            // Chạm nhóm chỉ thu gọn/mở rộng; quản lý nhóm qua màn Quản lý bảng & nhóm.
+            gh.setOnClickListener(v->{
+                if(collapsedGroups.contains(group.id))collapsedGroups.remove(group.id);
+                else collapsedGroups.add(group.id);
+                saveUiState();renderSidebar();
+            });
+            sidebar.addView(gh);
         }
         if(group!=null && collapsedGroups.contains(gid))return;
         ArrayList<TableModel> list=inGroup(gid); for(TableModel t:list)sidebar.addView(sidebarItem(t,gid));
@@ -1458,6 +1452,17 @@ public class MainActivity extends Activity {
         saveNow();renderSidebar();
     }
 
+    void moveGroupBy(GroupModel g,int delta){
+        if(g==null||delta==0)return;
+        int idx=groups.indexOf(g);if(idx<0)return;
+        int target=idx+delta;
+        if(target<0||target>=groups.size())return;
+        pushUndo("Di chuyển nhóm");
+        groups.remove(idx);
+        groups.add(target,g);
+        saveNow();
+    }
+
     void showTableManagerSheet(){showTableManagerSheet(null);}
 
     void showTableManagerSheet(String preselectId){
@@ -1915,17 +1920,18 @@ public class MainActivity extends Activity {
     }
 
     void showManagerGroupActions(GroupModel g,Dialog manager,Runnable rebuild){
-        String[] actions={"Thu gọn / Mở rộng",g.pinned?"Bỏ ghim nhóm":"Ghim nhóm","Đổi tên nhóm","Copy cả nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
+        String[] actions={"Thu gọn / Mở rộng",g.pinned?"Bỏ ghim nhóm":"Ghim nhóm","Di chuyển nhóm lên","Di chuyển nhóm xuống","Đổi tên nhóm","Copy cả nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm và toàn bộ bảng"};
         new AlertDialog.Builder(this).setTitle(g.name).setItems(actions,(d,i)->{
             if(i==0){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);saveUiState();rebuild.run();}
             else if(i==1){togglePinGroup(g);rebuild.run();}
-            else if(i==2){manager.dismiss();renameGroup(g);}
-            else if(i==3){copyGroup(g);rebuild.run();}
-            else if(i==4)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
+            else if(i==2){moveGroupBy(g,-1);rebuild.run();renderSidebar();}
+            else if(i==3){moveGroupBy(g,1);rebuild.run();renderSidebar();}
+            else if(i==4){manager.dismiss();renameGroup(g);}
+            else if(i==5){copyGroup(g);rebuild.run();}
+            else if(i==6)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
             else{
-                pushUndo("Xóa nhóm");
-                for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;
-                groups.remove(g);save();rebuild.run();renderAll();
+                manager.dismiss();
+                deleteGroup(g);
             }
         }).show();
     }
@@ -2175,10 +2181,12 @@ public class MainActivity extends Activity {
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(collapsedGroups.contains(g.id)?"Mở rộng nhóm":"Thu gọn nhóm");
         p.getMenu().add(g.pinned?"Bỏ ghim nhóm":"Ghim nhóm");
+        p.getMenu().add("Di chuyển nhóm lên");
+        p.getMenu().add("Di chuyển nhóm xuống");
         p.getMenu().add("Đổi tên nhóm");
         p.getMenu().add("Copy cả nhóm");
         p.getMenu().add("Xóa toàn bộ số lượng trong nhóm");
-        p.getMenu().add("Xóa nhóm (giữ bảng)");
+        p.getMenu().add("Xóa nhóm và toàn bộ bảng");
         p.setOnMenuItemClickListener(i->{
             String s=i.getTitle().toString();
             if(s.startsWith("Mở")||s.startsWith("Thu")){
@@ -2186,6 +2194,10 @@ public class MainActivity extends Activity {
                 renderSidebar();
             }else if(s.contains("ghim")){
                 togglePinGroup(g);
+            }else if(s.startsWith("Di chuyển nhóm lên")){
+                moveGroupBy(g,-1);renderAll();
+            }else if(s.startsWith("Di chuyển nhóm xuống")){
+                moveGroupBy(g,1);renderAll();
             }else if(s.startsWith("Đổi")){
                 renameGroup(g);
             }else if(s.startsWith("Copy")){
@@ -2336,7 +2348,24 @@ public class MainActivity extends Activity {
             }).show();
     }
     void renameGroup(GroupModel g){EditText e=new EditText(this);e.setText(g.name);new AlertDialog.Builder(this).setTitle("Đổi tên nhóm").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{String s=e.getText().toString().trim();if(!s.isEmpty()){g.name=s;save();renderAll();}}).setNegativeButton("Hủy",null).show();}
-    void deleteGroup(GroupModel g){pushUndo("Xóa nhóm");for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;groups.remove(g);save();renderAll();}
+    void deleteGroup(GroupModel g){
+        if(g==null)return;
+        int count=0;for(TableModel t:tables)if(g.id.equals(t.groupId))count++;
+        final int groupCount=count;
+        new AlertDialog.Builder(this)
+            .setTitle("Xóa nhóm "+g.name+"?")
+            .setMessage("Sẽ xóa luôn "+groupCount+" bảng trong nhóm. Có thể Hoàn tác sau khi xóa.")
+            .setPositiveButton("Xóa nhóm và bảng",(d,w)->{
+                pushUndo("Xóa nhóm và bảng");
+                for(int i=tables.size()-1;i>=0;i--)if(g.id.equals(tables.get(i).groupId))tables.remove(i);
+                groups.remove(g);
+                if(findTable(selectedId)==null)selectedId=tables.isEmpty()?null:tables.get(0).id;
+                saveNow();renderAll();
+                showUndoSnackbar("Đã xóa nhóm "+g.name+" và "+groupCount+" bảng");
+            })
+            .setNegativeButton("Hủy",null)
+            .show();
+    }
 
     void editAgent(TableModel t,int row){if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return;}activeRow=row;CancelRow r=t.cancelRows.get(row);EditText e=new EditText(this);e.setHint("Tên đại lý");e.setText(r.agent);e.setSingleLine();AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Tên đại lý").setView(padded(e)).setPositiveButton("Lưu",(d,w)->{r.agent=e.getText().toString().trim();t.updated=System.currentTimeMillis();ensureBlankCancel(t);save();renderAll();}).setNegativeButton("Hủy",null).create();dlg.setOnShowListener(x->{e.requestFocus();dlg.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);});dlg.show();}
 
