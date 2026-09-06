@@ -452,6 +452,23 @@ public class MainActivity extends Activity {
         setTopButtonLabel(addCalc,"＋","Bảng tính","+ Tính",swDp,landscape);
         setTopButtonLabel(addCancel,"＋","Bảng hủy","+ Hủy",swDp,landscape);
 
+        // Màn ngoài Fold/điện thoại dọc: luôn dùng nhãn ngắn, không để toolbar rơi vào icon-only
+        // vì icon Unicode có thể hiển thị lệch hoặc khó hiểu trên một số font Samsung.
+        if(swDp<600 && !landscape){
+            tableBtn.setText("☰ QL");
+            del.setText("⌫ Xóa");
+            undoBtn.setText("↶ Undo");
+            share.setText("↗ Share");
+            addCalc.setText("＋ Tính");
+            addCancel.setText("＋ Hủy");
+            tableBtn.setTextSize(12);del.setTextSize(12);undoBtn.setTextSize(12);share.setTextSize(12);
+            addCalc.setTextSize(13);addCancel.setTextSize(13);
+            tableBtn.setSingleLine(true);del.setSingleLine(true);undoBtn.setSingleLine(true);share.setSingleLine(true);
+            addCalc.setSingleLine(true);addCancel.setSingleLine(true);quick1000.setSingleLine(true);
+            tableBtn.setEllipsize(TextUtils.TruncateAt.END);del.setEllipsize(TextUtils.TruncateAt.END);
+            undoBtn.setEllipsize(TextUtils.TruncateAt.END);share.setEllipsize(TextUtils.TruncateAt.END);
+        }
+
         // Phân cấp thị giác: thao tác chính nổi bật, thao tác nguy hiểm dịu hơn.
         styleTopPrimary(tableBtn);
         styleTopSecondary(undoBtn);
@@ -487,8 +504,8 @@ public class MainActivity extends Activity {
             r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(42),.9f));
             r2.addView(addCalc,new LinearLayout.LayoutParams(0,dp(42),1.25f));
             r2.addView(addCancel,new LinearLayout.LayoutParams(0,dp(42),1.35f));
-            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(44)));
-            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(44)));
+            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(46)));
+            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(46)));
         }else{
             int h=dp(compactLandscape?38:44);
             top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.32f));
@@ -503,7 +520,7 @@ public class MainActivity extends Activity {
         int topHeight;
         boolean twoRowTop=(compact && !compactLandscape)||(smallTablet && !landscape);
         if(compactLandscape)topHeight=dp(44);
-        else if(twoRowTop)topHeight=dp(tinyPhone?88:92);
+        else if(twoRowTop)topHeight=dp(tinyPhone?96:100);
         else topHeight=dp(tablet?54:52);
         root.addView(top,new LinearLayout.LayoutParams(-1,topHeight));
 
@@ -1055,7 +1072,7 @@ public class MainActivity extends Activity {
         if("cancel".equals(t.type))renderCancelGrid(t);else renderCalcGrid(t);
         pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
         grandTotal.setText(fmt(t.total()));
-        if(clearQtyBtn!=null)clearQtyBtn.setVisibility("cancel".equals(t.type)?View.VISIBLE:View.GONE);
+        if(clearQtyBtn!=null)clearQtyBtn.setVisibility(View.VISIBLE);
         scrollActiveRowIntoView();
     }
 
@@ -1304,7 +1321,7 @@ public class MainActivity extends Activity {
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
         TextView icon=text("🎟",22,false);icon.setGravity(Gravity.CENTER);
         LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);
-        TextView title=text(t.title,compact?15:17,true);title.setTextColor(ink);
+        TextView title=text(t.title,compact?15:17,true);title.setTextColor(ink);title.setSingleLine(true);title.setEllipsize(TextUtils.TruncateAt.END);
         String gn=groupNameFor(t.groupId);TextView group=text(gn.isEmpty()?"Chưa nhóm":gn,11,false);group.setTextColor(muted);
         labels.addView(title);labels.addView(group);
         TextView total=text("SL "+fmt(cancelTotalQty(t)),compact?14:16,true);total.setTextColor(Color.rgb(194,65,12));total.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
@@ -1314,28 +1331,58 @@ public class MainActivity extends Activity {
         header.addView(total,new LinearLayout.LayoutParams(dp(100),dp(44)));
         box.addView(header);
 
-        LinearLayout r1=new LinearLayout(this),r2=new LinearLayout(this);
+        LinearLayout r1=new LinearLayout(this),r2=new LinearLayout(this),r3=new LinearLayout(this);
         Button addAgent=smallActionButton("+ Đại lý");
         Button move=smallActionButton("↪ Nhóm");
         Button copy=smallActionButton("⧉ Copy");
         Button clear=smallActionButton("Xóa SL");clear.setTextColor(red);
+        Button rowUp=smallActionButton("↑ Dòng trên");
+        Button rowDown=smallActionButton("↓ Dòng dưới");
+        rowUp.setTextColor(accent);rowDown.setTextColor(accent);
 
         addAgent.setOnClickListener(v->{haptic(v);int row=Math.max(0,t.cancelRows.size()-1);ensureCancelRow(t,row);editAgent(t,row);});
         move.setOnClickListener(v->{haptic(v);moveCurrentGroup();});
         copy.setOnClickListener(v->{haptic(v);showCopyOptions(t);});
         clear.setOnClickListener(v->{haptic(v);confirmClearCurrentQuantities();});
+        rowUp.setOnClickListener(v->{haptic(v);moveCancelQtyCursor(-1);});
+        rowDown.setOnClickListener(v->{haptic(v);moveCancelQtyCursor(1);});
 
-        int bh=compactLandscape?38:46;
-        r1.addView(addAgent,new LinearLayout.LayoutParams(0,dp(bh),1));
-        r1.addView(move,new LinearLayout.LayoutParams(0,dp(bh),1));
-        r2.addView(copy,new LinearLayout.LayoutParams(0,dp(bh),1));
-        r2.addView(clear,new LinearLayout.LayoutParams(0,dp(bh),1));
-        box.addView(r1,new LinearLayout.LayoutParams(-1,dp(bh+4)));
-        box.addView(r2,new LinearLayout.LayoutParams(-1,dp(bh+4)));
+        int bh=compactLandscape?36:43;
+        r1.addView(rowUp,new LinearLayout.LayoutParams(0,dp(bh),1));
+        r1.addView(rowDown,new LinearLayout.LayoutParams(0,dp(bh),1));
+        r2.addView(addAgent,new LinearLayout.LayoutParams(0,dp(bh),1));
+        r2.addView(move,new LinearLayout.LayoutParams(0,dp(bh),1));
+        r3.addView(copy,new LinearLayout.LayoutParams(0,dp(bh),1));
+        r3.addView(clear,new LinearLayout.LayoutParams(0,dp(bh),1));
+        box.addView(r1,new LinearLayout.LayoutParams(-1,dp(bh+3)));
+        box.addView(r2,new LinearLayout.LayoutParams(-1,dp(bh+3)));
+        box.addView(r3,new LinearLayout.LayoutParams(-1,dp(bh+3)));
 
-        TextView tip=text("Tên đại lý: chạm trực tiếp trong bảng",10,false);tip.setTextColor(muted);tip.setGravity(Gravity.CENTER);
-        box.addView(tip,new LinearLayout.LayoutParams(-1,dp(24)));
+        TextView tip=text("↑ ↓ chuyển ô Số lượng • nhập tiếp bằng bàn phím bên phải",10,false);tip.setTextColor(muted);tip.setGravity(Gravity.CENTER);
+        box.addView(tip,new LinearLayout.LayoutParams(-1,dp(22)));
         return box;
+    }
+
+    void moveCancelQtyCursor(int delta){
+        TableModel t=selected();
+        if(t==null||!"cancel".equals(t.type))return;
+        if(isEffectivelyLocked(t)){Toast.makeText(this,"Bảng/nhóm đang khóa",Toast.LENGTH_SHORT).show();return;}
+
+        int target=Math.max(0,activeRow+delta);
+        // Cho phép đi xuống dòng trống kế tiếp để nhập số lượng ngay.
+        ensureCancelRow(t,target);
+        if(target>=t.cancelRows.size())target=t.cancelRows.size()-1;
+
+        previousActiveRow=activeRow;
+        activeRow=target;pendingScrollRow=target;activeField="qty";explicitCellSelection=false;
+        ensureBlankCancel(t);
+        saveUiState();
+
+        if(gridRecycler!=null&&gridRecycler.getAdapter()!=null){
+            refreshActiveRowHighlight();
+            gridRecycler.post(()->scrollActiveRowIntoView());
+        }else renderGrid();
+        renderKeypads();
     }
 
     LinearLayout buildPad(String label,String field){
@@ -3388,15 +3435,24 @@ public class MainActivity extends Activity {
 
     void confirmClearCurrentQuantities(){
         TableModel t=selected();
-        if(t==null||!"cancel".equals(t.type))return;if(isEffectivelyLocked(t)){Toast.makeText(this,"Bảng/nhóm đang khóa",Toast.LENGTH_SHORT).show();return;}
+        if(t==null)return;
+        if(isEffectivelyLocked(t)){Toast.makeText(this,"Bảng/nhóm đang khóa",Toast.LENGTH_SHORT).show();return;}
+
+        boolean cancel="cancel".equals(t.type);
         new AlertDialog.Builder(this)
             .setTitle("Xóa toàn bộ số lượng?")
-            .setMessage("Tên đại lý sẽ được giữ nguyên.")
+            .setMessage(cancel?"Tên đại lý sẽ được giữ nguyên.":"Đơn giá sẽ được giữ nguyên; chỉ cột SL bị xóa.")
             .setPositiveButton("Xóa SL",(d,w)->{
                 pushUndo("Xóa số lượng");
-                for(CancelRow r:t.cancelRows)r.qty=0;
+                if(cancel){
+                    for(CancelRow r:t.cancelRows)r.qty=0;
+                    ensureBlankCancel(t);
+                }else{
+                    for(CalcRow r:t.calcRows)r.qty=0;
+                    ensureBlankCalc(t);
+                }
                 t.updated=System.currentTimeMillis();
-                ensureBlankCancel(t);
+                activeRow=0;previousActiveRow=-1;
                 save();renderAll();showUndoSnackbar("Đã xóa toàn bộ số lượng");
             })
             .setNegativeButton("Hủy",null)
