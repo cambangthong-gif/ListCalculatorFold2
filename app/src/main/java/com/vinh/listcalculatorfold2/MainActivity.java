@@ -33,6 +33,9 @@ public class MainActivity extends Activity {
     ScrollView gridScroll;
     RecyclerView gridRecycler;
     TextView pageIndicator, grandTotal, currentGroupTotal, cashRemainderView, compactTableTitle, compactGroupTitle, breadcrumbTitle;
+    TextView cancelSummaryQtyView, cancelSummaryAgentsView, cancelQuickQtyView;
+    final HashMap<String,TextView> sidebarTableMetaViews=new HashMap<>();
+    final HashMap<String,TextView> sidebarGroupTotalViews=new HashMap<>();
     Button clearQtyBtn;
     View topInsetSpacer;
     Button tableBtn, undoBtn, quick1000;
@@ -722,6 +725,8 @@ public class MainActivity extends Activity {
     void renderSidebar(){
         if(sidebar==null)return;
         revealedSwipeRow=null;
+        sidebarTableMetaViews.clear();
+        sidebarGroupTotalViews.clear();
         sidebar.removeAllViews();
         addSidebarModeButton();
         addPinnedDropZone();
@@ -816,7 +821,9 @@ public class MainActivity extends Activity {
                     ?((group.pinned?"📌 ":"")+(collapsedGroups.contains(gid)?"▸ ":"▾ ")+shortSidebarTitle(group.name))
                     :((group.pinned?"📌 ":"")+(collapsedGroups.contains(gid)?"▸ ":"▾ ")+group.name),
                     sidebarCompactMode?10:(compact?12:(gw>=1100?15:14)),true);
-            TextView sum=text(sidebarCompactMode?"":fmt(groupTotal(gid)),sidebarCompactMode?9:(compact?11:13),true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);gh.addView(n,w(0,dp(38),1));gh.addView(sum,w(0,dp(38),0.8f));gh.setTag("GROUP:"+gid);
+            TextView sum=text(sidebarCompactMode?"":fmt(groupTotal(gid)),sidebarCompactMode?9:(compact?11:13),true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);
+            sidebarGroupTotalViews.put(gid,sum);
+            gh.addView(n,w(0,dp(38),1));gh.addView(sum,w(0,dp(38),0.8f));gh.setTag("GROUP:"+gid);
             gh.setOnDragListener((v,e)->{
                 int a=e.getAction();
                 if(a==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}
@@ -894,6 +901,7 @@ public class MainActivity extends Activity {
         TextView meta=text((t.locked?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total())+(groupBadge.isEmpty()?"":" • "+groupBadge),compact?10:11,false);
         meta.setSingleLine(true);meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
         meta.setTextColor(muted);
+        sidebarTableMetaViews.put(t.id,meta);
         info.addView(title);info.addView(meta);
 
         TextView drag=text("≡",22,true);drag.setGravity(Gravity.CENTER);
@@ -1039,6 +1047,7 @@ public class MainActivity extends Activity {
     }
 
     void renderCalcGrid(TableModel t){
+        cancelSummaryQtyView=null;cancelSummaryAgentsView=null;cancelQuickQtyView=null;
         gridHost.setPadding(0,0,0,0);
         LinearLayout head=gridRow();
         int hh=dp(headerRowDp());
@@ -1079,6 +1088,8 @@ public class MainActivity extends Activity {
         TextView left=text("🎟  "+t.title,13,true);left.setTextColor(ink);
         TextView mid=text(cancelNamedAgents(t)+" đại lý",12,false);mid.setTextColor(muted);mid.setGravity(Gravity.CENTER);
         TextView right=text("SL "+fmt(cancelTotalQty(t)),14,true);right.setTextColor(Color.rgb(194,65,12));right.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        cancelSummaryAgentsView=mid;
+        cancelSummaryQtyView=right;
         card.addView(left,new LinearLayout.LayoutParams(0,dp(34),1.35f));
         card.addView(mid,new LinearLayout.LayoutParams(0,dp(34),.8f));
         card.addView(right,new LinearLayout.LayoutParams(0,dp(34),1f));
@@ -1278,6 +1289,7 @@ public class MainActivity extends Activity {
         String gn=groupNameFor(t.groupId);TextView group=text(gn.isEmpty()?"Chưa nhóm":gn,11,false);group.setTextColor(muted);
         labels.addView(title);labels.addView(group);
         TextView total=text("SL "+fmt(cancelTotalQty(t)),compact?14:16,true);total.setTextColor(Color.rgb(194,65,12));total.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        cancelQuickQtyView=total;
         header.addView(icon,new LinearLayout.LayoutParams(dp(36),dp(44)));
         header.addView(labels,new LinearLayout.LayoutParams(0,dp(44),1));
         header.addView(total,new LinearLayout.LayoutParams(dp(100),dp(44)));
@@ -1327,6 +1339,26 @@ public class MainActivity extends Activity {
     void updateLiveTotals(TableModel t){
         if(t==null)return;
         if(grandTotal!=null)grandTotal.setText(fmt(t.total()));
+
+        // Các số đang nhìn thấy phải đổi ngay khi bấm phím, không chờ dựng lại màn hình.
+        if("cancel".equals(t.type)){
+            long q=cancelTotalQty(t);
+            if(cancelSummaryQtyView!=null)cancelSummaryQtyView.setText("SL "+fmt(q));
+            if(cancelSummaryAgentsView!=null)cancelSummaryAgentsView.setText(cancelNamedAgents(t)+" đại lý");
+            if(cancelQuickQtyView!=null)cancelQuickQtyView.setText("SL "+fmt(q));
+        }
+
+        TextView tableMeta=sidebarTableMetaViews.get(t.id);
+        if(tableMeta!=null){
+            String groupBadge=groupNameFor(t.groupId);
+            tableMeta.setText((isEffectivelyLocked(t)?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total())+(groupBadge.isEmpty()?"":" • "+groupBadge));
+        }
+
+        if(t.groupId!=null&&!t.groupId.isEmpty()){
+            TextView groupSide=sidebarGroupTotalViews.get(t.groupId);
+            if(groupSide!=null)groupSide.setText(sidebarCompactMode?"":fmt(groupTotal(t.groupId)));
+        }
+
         if(currentGroupTotal!=null){
             String gn=groupNameFor(t.groupId);
             if(t.groupId!=null&&!t.groupId.isEmpty()&&!gn.isEmpty()){
@@ -1713,12 +1745,22 @@ public class MainActivity extends Activity {
 
             // Luồng nhập kiểu List Calculator:
             // dòng đã đủ Đơn giá + SL, bấm phím Đơn giá tiếp theo => tự chuyển xuống dòng mới.
-            if("price".equals(field) && !"C".equals(key) && !"⌫".equals(key)
-                    && !explicitCellSelection && current.price!=0 && current.qty!=0){
+            // Kiểu List Calculator:
+            // Sau khi một dòng đã có đủ Đơn giá + SL, chỉ cần bấm số ở bàn phím
+            // Đơn giá là app tự chuyển xuống dòng kế tiếp để nhập, không cần chạm dòng mới.
+            //
+            // Nếu người dùng vừa CHẠM trực tiếp vào ô Đơn giá hiện tại để sửa thì vẫn
+            // cho gõ nhiều chữ số trong chính ô đó. Nhưng sau khi đã nhập SL (activeField=qty),
+            // lần bấm Đơn giá kế tiếp luôn được hiểu là bắt đầu một dòng mới.
+            boolean numericPriceKey="price".equals(field) && !"C".equals(key) && !"⌫".equals(key);
+            boolean switchingFromQtyToPrice="qty".equals(activeField);
+            if(numericPriceKey && current.price!=0 && current.qty!=0
+                    && (!explicitCellSelection || switchingFromQtyToPrice)){
                 previousActiveRow=activeRow;
                 activeRow++;pendingScrollRow=activeRow;
                 ensureRow(t,activeRow);
                 current=t.calcRows.get(activeRow);
+                explicitCellSelection=false;
             }
 
             activeField=field;
@@ -3555,7 +3597,7 @@ public class MainActivity extends Activity {
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(18),dp(8),dp(18),0);
         TextView t=text("Chế độ nhập",14,true);box.addView(t);
         RadioGroup rg=new RadioGroup(this);
-        String[] labels={"Kiểu List Calculator","Enter/Tab tự chuyển ô","Thủ công"};
+        String[] labels={"Kiểu List Calculator (tự xuống dòng)","Enter/Tab tự chuyển ô","Thủ công"};
         for(int i=0;i<labels.length;i++){RadioButton r=new RadioButton(this);r.setText(labels[i]);r.setId(100+i);rg.addView(r);}
         rg.check(100+fastInputMode);box.addView(rg);
         CheckBox cb=new CheckBox(this);cb.setText("Ẩn dòng trống khi chia sẻ ảnh");cb.setChecked(shareHideBlank);box.addView(cb);
@@ -3705,7 +3747,9 @@ public class MainActivity extends Activity {
 
             StringBuilder sheet=new StringBuilder();
             sheet.append("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>")
-                 .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData>");
+                 .append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">")
+                 .append("<cols><col min=\"1\" max=\"1\" width=\"10\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"28\" customWidth=\"1\"/><col min=\"3\" max=\"4\" width=\"18\" customWidth=\"1\"/></cols>")
+                 .append("<sheetData>");
             int r=1;
             sheet.append("<row r=\"").append(r).append("\">").append(xlsxCell("A"+r,g.name,true)).append("</row>");r++;
             sheet.append("<row r=\"").append(r).append("\">").append(xlsxCell("A"+r,"Ngày tạo nhóm",true)).append(xlsxCell("B"+r,shareTime(groupCreatedTime(g)),false)).append("</row>");r++;
@@ -3746,19 +3790,19 @@ public class MainActivity extends Activity {
                 sheet.append("<row r=\"").append(r).append("\">").append(xlsxCell("A"+r,"Tổng bảng",true)).append(xlsxNum("B"+r,t.total(),true)).append("</row>");r+=2;
                 idx++;
             }
-            sheet.append("</sheetData><cols><col min=\"1\" max=\"1\" width=\"10\" customWidth=\"1\"/><col min=\"2\" max=\"2\" width=\"28\" customWidth=\"1\"/><col min=\"3\" max=\"4\" width=\"18\" customWidth=\"1\"/></cols></worksheet>");
+            sheet.append("</sheetData></worksheet>");
 
             try(ZipOutputStream z=new ZipOutputStream(new FileOutputStream(f))){
                 zipText(z,"[Content_Types].xml","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/xl/workbook.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml\"/><Override PartName=\"/xl/worksheets/sheet1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml\"/><Override PartName=\"/xl/styles.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml\"/></Types>");
                 zipText(z,"_rels/.rels","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"xl/workbook.xml\"/></Relationships>");
                 zipText(z,"xl/workbook.xml","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Nhóm\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
                 zipText(z,"xl/_rels/workbook.xml.rels","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/></Relationships>");
-                zipText(z,"xl/styles.xml","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"1\"><fill><patternFill patternType=\"none\"/></fill></fills><borders count=\"1\"><border/></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/></cellXfs></styleSheet>");
+                zipText(z,"xl/styles.xml","<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><styleSheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><fonts count=\"2\"><font><sz val=\"11\"/><name val=\"Calibri\"/></font><font><b/><sz val=\"11\"/><name val=\"Calibri\"/></font></fonts><fills count=\"2\"><fill><patternFill patternType=\"none\"/></fill><fill><patternFill patternType=\"gray125\"/></fill></fills><borders count=\"1\"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count=\"1\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\"/></cellStyleXfs><cellXfs count=\"2\"><xf numFmtId=\"0\" fontId=\"0\" fillId=\"0\" borderId=\"0\" xfId=\"0\"/><xf numFmtId=\"0\" fontId=\"1\" fillId=\"0\" borderId=\"0\" xfId=\"0\" applyFont=\"1\"/></cellXfs><cellStyles count=\"1\"><cellStyle name=\"Normal\" xfId=\"0\" builtinId=\"0\"/></cellStyles></styleSheet>");
                 zipText(z,"xl/worksheets/sheet1.xml",sheet.toString());
             }
             shareCachedFile(f,"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","Chia sẻ Excel nhóm");
         }catch(Exception e){
-            Toast.makeText(this,"Không tạo được file Excel: "+e.getMessage(),Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Không xuất được Excel: "+e.getClass().getSimpleName()+" • "+e.getMessage(),Toast.LENGTH_LONG).show();
         }
     }
 
