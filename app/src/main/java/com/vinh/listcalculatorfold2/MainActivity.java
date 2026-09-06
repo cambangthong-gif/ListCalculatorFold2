@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
     String selectedId=null;
     int activeRow=0;
     int pendingScrollRow=-1;
+    int previousActiveRow=-1;
     String activeField="price";
     TableModel lastDeleted=null; int lastDeletedIndex=-1;
     String undoSnapshot=null, undoLabel="";
@@ -339,6 +340,27 @@ public class MainActivity extends Activity {
     }
 
 
+    void setManagerButtonLabel(Button b,int wDp,boolean landscape){
+        String count=String.valueOf(tables.size());
+        if(wDp<380){
+            b.setText("☰ QL");
+            b.setTextSize(12);
+        }else if(wDp<600 && landscape){
+            b.setText("☰ QL");
+            b.setTextSize(12);
+        }else if(wDp<600){
+            b.setText("☰ Quản lý");
+            b.setTextSize(11);
+        }else if(wDp<840){
+            b.setText("☰ Bảng & nhóm");
+            b.setTextSize(11);
+        }else{
+            b.setText("☰ Quản lý bảng/nhóm ("+count+")");
+            b.setTextSize(12);
+        }
+        b.setContentDescription("Quản lý bảng và nhóm");
+    }
+
     void setTopButtonLabel(Button b,String icon,String full,String shortText,int wDp,boolean landscape){
         if(wDp<380){
             b.setText(icon);
@@ -392,7 +414,7 @@ public class MainActivity extends Activity {
         Button addCalc=topButton("");
         Button addCancel=topButton("");
 
-        setTopButtonLabel(tableBtn,"▤","Bảng ("+tables.size()+")","Bảng",swDp,landscape);
+        setManagerButtonLabel(tableBtn,swDp,landscape);
         setTopButtonLabel(del,"⌫","Xóa","Xóa",swDp,landscape);
         setTopButtonLabel(undoBtn,"↶","Hoàn tác","Undo",swDp,landscape);
         setTopButtonLabel(share,"↗","Chia sẻ","Chia",swDp,landscape);
@@ -414,7 +436,7 @@ public class MainActivity extends Activity {
         if((compact && !compactLandscape)||(smallTablet && !landscape)){
             LinearLayout r1=new LinearLayout(this);r1.setGravity(Gravity.CENTER);
             LinearLayout r2=new LinearLayout(this);r2.setGravity(Gravity.CENTER);
-            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(40),1.15f));
+            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(40),1.35f));
             r1.addView(del,new LinearLayout.LayoutParams(0,dp(40),1f));
             r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(40),1.1f));
             r1.addView(share,new LinearLayout.LayoutParams(0,dp(40),1f));
@@ -425,7 +447,7 @@ public class MainActivity extends Activity {
             top.addView(r2,new LinearLayout.LayoutParams(-1,dp(42)));
         }else{
             int h=dp(compactLandscape?38:44);
-            top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.12f));
+            top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.32f));
             top.addView(del,new LinearLayout.LayoutParams(0,h,.92f));
             top.addView(undoBtn,new LinearLayout.LayoutParams(0,h,1.02f));
             top.addView(share,new LinearLayout.LayoutParams(0,h,.95f));
@@ -552,7 +574,7 @@ public class MainActivity extends Activity {
         if(selected()==null&&!tables.isEmpty())selectedId=tables.get(0).id;
         int rw=getResources().getConfiguration().screenWidthDp;
         boolean rland=getResources().getConfiguration().screenWidthDp>getResources().getConfiguration().screenHeightDp;
-        setTopButtonLabel(tableBtn,"▤","Bảng ("+tables.size()+")","Bảng",rw,rland);
+        setManagerButtonLabel(tableBtn,rw,rland);
         quick1000.setText(formatSample());
         undoBtn.setEnabled(undoSnapshot!=null || lastDeleted!=null);
         updateCompactCurrentHeader();
@@ -907,6 +929,7 @@ public class MainActivity extends Activity {
 
     void renderGrid(){
         gridHost.removeAllViews();gridScroll=null;gridRecycler=null;
+        previousActiveRow=activeRow;
         TableModel t=selected();if(t==null)return;
         if("cancel".equals(t.type))renderCancelGrid(t);else renderCalcGrid(t);
         pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
@@ -1035,9 +1058,9 @@ public class MainActivity extends Activity {
             fillCell(h.st,rowBg);fillCell(h.p,rowBg);fillCell(h.q,rowBg);fillCell(h.total,rowBg);
             if(row==activeRow&&"price".equals(activeField))markActive(h.p);
             if(row==activeRow&&"qty".equals(activeField))markActive(h.q);
-            h.st.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;explicitCellSelection=false;saveUiState();notifyDataSetChanged();renderKeypads();});
-            h.p.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
-            h.q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.st.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;explicitCellSelection=false;saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            h.p.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
             h.row.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
         }
         @Override public int getItemCount(){return Math.max(8,t.calcRows.size());}
@@ -1074,7 +1097,7 @@ public class MainActivity extends Activity {
             fillCell(h.st,rowBg);fillCell(h.a,rowBg);fillCell(h.q,rowBg);
             if(row==activeRow)markActive(h.q);
             h.a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});
-            h.q.setOnClickListener(v->{activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();renderKeypads();});
+            h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
             h.row.setOnLongClickListener(v->{haptic(v);showRowDeleteDialog(t,row);return true;});
         }
         @Override public int getItemCount(){return Math.max(8,t.cancelRows.size());}
@@ -1136,6 +1159,19 @@ public class MainActivity extends Activity {
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(4),dp(4),dp(4),dp(2));TextView lab=text(label,compact?14:15,field.equals(activeField));lab.setTextColor(field.equals(activeField)?accent:muted);lab.setGravity(Gravity.CENTER);wrap.addView(lab,new LinearLayout.LayoutParams(-1,dp(compactLandscape?20:28)));String[][] keys={{"7","8","9"},{"4","5","6"},{"1","2","3"},{"⌫","0","C"}};for(String[] row:keys){LinearLayout rr=new LinearLayout(this);rr.setPadding(0,0,dp(3),dp(3));for(String k:row){Button b=keyButton(k);b.setOnClickListener(v->{haptic(v);handleKey(field,k);});rr.addView(b,w(0,-1,1));}wrap.addView(rr,new LinearLayout.LayoutParams(-1,0,1));}return wrap;
     }
 
+    void refreshActiveRowHighlight(){
+        if(gridRecycler==null||gridRecycler.getAdapter()==null)return;
+        RecyclerView.Adapter a=gridRecycler.getAdapter();
+        int count=a.getItemCount();
+        if(previousActiveRow>=0 && previousActiveRow<count && previousActiveRow!=activeRow){
+            a.notifyItemChanged(previousActiveRow);
+        }
+        if(activeRow>=0 && activeRow<count){
+            a.notifyItemChanged(activeRow);
+        }
+        previousActiveRow=activeRow;
+    }
+
     void updateLiveTotals(TableModel t){
         if(t==null)return;
         if(grandTotal!=null)grandTotal.setText(fmt(t.total()));
@@ -1168,6 +1204,7 @@ public class MainActivity extends Activity {
             // dòng đã đủ Đơn giá + SL, bấm phím Đơn giá tiếp theo => tự chuyển xuống dòng mới.
             if("price".equals(field) && !"C".equals(key) && !"⌫".equals(key)
                     && !explicitCellSelection && current.price!=0 && current.qty!=0){
+                previousActiveRow=activeRow;
                 activeRow++;pendingScrollRow=activeRow;
                 ensureRow(t,activeRow);
                 current=t.calcRows.get(activeRow);
@@ -1192,9 +1229,7 @@ public class MainActivity extends Activity {
         }
         save();saveUiState();
         if(gridRecycler!=null && gridRecycler.getAdapter()!=null){
-            RecyclerView.Adapter a=gridRecycler.getAdapter();
-            if(activeRow>=0 && activeRow<a.getItemCount())a.notifyItemChanged(activeRow);
-            else a.notifyDataSetChanged();
+            refreshActiveRowHighlight();
             updateLiveTotals(t);
             pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
             pendingScrollRow=activeRow;scrollActiveRowIntoView();
