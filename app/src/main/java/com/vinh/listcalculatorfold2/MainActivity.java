@@ -56,6 +56,9 @@ public class MainActivity extends Activity {
     boolean tableSwipeAnimating=false;
     int lastWidthBucket=-1;
     final HashSet<String> collapsedGroups=new HashSet<>();
+    final HashSet<String> sidebarSelectedIds=new HashSet<>();
+    final Handler saveHandler=new Handler(Looper.getMainLooper());
+    boolean saveScheduled=false;
     int navy=Color.rgb(27,67,110),
         navy2=Color.rgb(239,245,251),
         pale=Color.rgb(235,243,252),
@@ -312,9 +315,10 @@ public class MainActivity extends Activity {
         compactLandscape=compact && swDp>shDp;
         lastWidthBucket=compact?0:1;
         LinearLayout top=new LinearLayout(this);
-        top.setOrientation(compact && !compactLandscape?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
+        boolean innerNarrow=!compact && swDp<820;
+        top.setOrientation((compact && !compactLandscape)||innerNarrow?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(8),dp(5),dp(8),dp(5));
+        top.setPadding(dp(6),dp(4),dp(6),dp(4));
         top.setBackgroundColor(Color.WHITE);
         top.setElevation(dp(2));
 
@@ -342,7 +346,7 @@ public class MainActivity extends Activity {
         addCalc.setOnClickListener(v->{haptic(v);addCalcTable(true);});
         addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);});
 
-        if(compact && !compactLandscape){
+        if((compact && !compactLandscape)||innerNarrow){
             LinearLayout r1=new LinearLayout(this);r1.setGravity(Gravity.CENTER);
             LinearLayout r2=new LinearLayout(this);r2.setGravity(Gravity.CENTER);
             r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(40),1.15f));
@@ -419,21 +423,24 @@ public class MainActivity extends Activity {
 
         LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(248,250,252));middle.setPadding(0,dp(2),0,0);
         ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setBackgroundColor(Color.WHITE);leftScroll.addView(sidebar);
-        int sideDp=swDp>=840?240:(swDp>=700?220:200);
+        int sideDp;
+        if(swDp>=900)sideDp=Math.min(300,Math.max(250,(int)(swDp*0.29f)));
+        else if(swDp>=720)sideDp=Math.min(275,Math.max(235,(int)(swDp*0.30f)));
+        else sideDp=210;
         if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
         else sidebar=null;
         LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setBackgroundColor(Color.WHITE);
         if(!compact){
-            breadcrumbTitle=text("",13,true);breadcrumbTitle.setTextColor(muted);
+            breadcrumbTitle=text("",14,true);breadcrumbTitle.setTextColor(muted);
             breadcrumbTitle.setPadding(dp(12),0,dp(12),0);
             breadcrumbTitle.setGravity(Gravity.CENTER_VERTICAL);
-            right.addView(breadcrumbTitle,new LinearLayout.LayoutParams(-1,dp(34)));
+            right.addView(breadcrumbTitle,new LinearLayout.LayoutParams(-1,dp(40)));
         }else breadcrumbTitle=null;
         gridHost=new LinearLayout(this);gridHost.setOrientation(LinearLayout.VERTICAL);gridHost.setBackgroundColor(Color.WHITE);gridHost.setElevation(dp(1));right.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(dp(8),0,dp(10),0);footer.setBackgroundColor(Color.rgb(248,250,252));
         pageIndicator=text("1/1",13,false);
-        grandTotal=text("0",compact?21:25,true);grandTotal.setTextColor(accent);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
-        int footerH=compactLandscape?40:(compact?52:58);
+        grandTotal=text("0",compact?21:27,true);grandTotal.setTextColor(accent);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        int footerH=compactLandscape?40:(compact?52:50);
 
         LinearLayout footerLeft=new LinearLayout(this);
         footerLeft.setGravity(Gravity.CENTER_VERTICAL);
@@ -457,7 +464,7 @@ public class MainActivity extends Activity {
         }else if(compact){
             keypadDp=Math.max(285,Math.min(330,(int)(shDp*0.32f)));
         }else{
-            keypadDp=310;
+            keypadDp=Math.max(238,Math.min(268,(int)(shDp*0.27f)));
         }
         root.addView(keypadHost,new LinearLayout.LayoutParams(-1,dp(keypadDp)));
         setContentView(root);
@@ -501,25 +508,133 @@ public class MainActivity extends Activity {
         return "";
     }
 
+
+    ArrayList<GroupModel> orderedGroups(){
+        ArrayList<GroupModel> a=new ArrayList<>(groups);
+        Collections.sort(a,(x,y)->{
+            if(x.pinned!=y.pinned)return x.pinned?-1:1;
+            return Integer.compare(groups.indexOf(x),groups.indexOf(y));
+        });
+        return a;
+    }
+
+    void togglePinGroup(GroupModel g){
+        if(g==null)return;
+        g.pinned=!g.pinned;
+        saveNow();
+        renderAll();
+        Toast.makeText(this,g.pinned?"Đã ghim nhóm":"Đã bỏ ghim nhóm",Toast.LENGTH_SHORT).show();
+    }
+
     void renderSidebar(){
         if(sidebar==null)return;
         sidebar.removeAllViews();
+        addPinnedDropZone();
+        if(!sidebarSelectedIds.isEmpty())addSidebarSelectionBar();
+        for(GroupModel g:orderedGroups())if(g.pinned)addSidebarSection(g.id,g);
         addSidebarSection(UNGROUPED,null);
-        for(GroupModel g:groups)addSidebarSection(g.id,g);
+        for(GroupModel g:orderedGroups())if(!g.pinned)addSidebarSection(g.id,g);
         sidebar.setOnDragListener((v,e)->true);
+    }
+
+
+
+    void addPinnedDropZone(){
+        TextView pinZone=text("📌 Ghim nhóm",10,true);
+        pinZone.setTextColor(muted);
+        pinZone.setGravity(Gravity.CENTER);
+        pinZone.setPadding(dp(6),dp(4),dp(6),dp(4));
+        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(248,250,252));bg.setStroke(dp(1),rule);bg.setCornerRadius(dp(10));pinZone.setBackground(bg);
+        pinZone.setOnDragListener((v,e)->{
+            if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.55f);return true;}
+            if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}
+            if(e.getAction()==DragEvent.ACTION_DROP){
+                v.setAlpha(1f);
+                Object st=e.getLocalState();
+                if(st instanceof String && ((String)st).startsWith("GROUP:")){
+                    String id=((String)st).substring(6);
+                    GroupModel moving=null;for(GroupModel g:groups)if(id.equals(g.id)){moving=g;break;}
+                    if(moving!=null){
+                        pushUndo("Ghim nhóm");
+                        moving.pinned=true;
+                        groups.remove(moving);groups.add(0,moving);
+                        saveNow();renderAll();
+                    }
+                }
+                return true;
+            }
+            if(e.getAction()==DragEvent.ACTION_DRAG_ENDED)v.setAlpha(1f);
+            return true;
+        });
+        sidebar.addView(pinZone,new LinearLayout.LayoutParams(-1,dp(28)));
+    }
+
+    void addSidebarSelectionBar(){
+        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(6),dp(5),dp(6),dp(5));
+        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(239,246,255));bg.setCornerRadius(dp(12));bar.setBackground(bg);
+        TextView count=text(sidebarSelectedIds.size()+" đã chọn",12,true);count.setTextColor(accent);
+        Button group=smallActionButton("+ Nhóm");Button move=smallActionButton("Chuyển");Button clear=smallActionButton("Bỏ chọn");
+        bar.addView(count,new LinearLayout.LayoutParams(0,dp(42),1));
+        bar.addView(group,new LinearLayout.LayoutParams(dp(66),dp(38)));
+        bar.addView(move,new LinearLayout.LayoutParams(dp(66),dp(38)));
+        bar.addView(clear,new LinearLayout.LayoutParams(dp(68),dp(38)));
+        group.setOnClickListener(v->{haptic(v);createGroupFromSidebarSelection();});
+        move.setOnClickListener(v->{haptic(v);moveSidebarSelectionDialog();});
+        clear.setOnClickListener(v->{sidebarSelectedIds.clear();renderSidebar();});
+        sidebar.addView(bar,new LinearLayout.LayoutParams(-1,dp(50)));
+    }
+
+    void createGroupFromSidebarSelection(){
+        if(sidebarSelectedIds.isEmpty())return;
+        EditText e=new EditText(this);e.setHint("Tên nhóm");e.setSingleLine();
+        new AlertDialog.Builder(this).setTitle("Tạo nhóm từ "+sidebarSelectedIds.size()+" bảng").setView(padded(e))
+            .setPositiveButton("Tạo",(d,w)->{
+                String name=e.getText().toString().trim();if(name.isEmpty())return;
+                pushUndo("Tạo nhóm");GroupModel g=new GroupModel();g.id=id();g.name=name;groups.add(g);
+                for(TableModel t:tables)if(sidebarSelectedIds.contains(t.id))t.groupId=g.id;
+                sidebarSelectedIds.clear();saveNow();renderAll();
+            }).setNegativeButton("Hủy",null).show();
+    }
+
+    void moveSidebarSelectionDialog(){
+        if(sidebarSelectedIds.isEmpty())return;
+        ArrayList<String> names=new ArrayList<>();names.add("Chưa nhóm");for(GroupModel g:groups)names.add(g.name);
+        new AlertDialog.Builder(this).setTitle("Chuyển "+sidebarSelectedIds.size()+" bảng").setItems(names.toArray(new String[0]),(d,i)->{
+            pushUndo("Chuyển nhiều bảng");String gid=i==0?UNGROUPED:groups.get(i-1).id;
+            for(TableModel t:tables)if(sidebarSelectedIds.contains(t.id))t.groupId=gid;
+            sidebarSelectedIds.clear();saveNow();renderAll();
+        }).show();
+    }
+
+    void moveSidebarSelectionToGroup(String gid){
+        if(sidebarSelectedIds.isEmpty())return;
+        pushUndo("Kéo nhiều bảng vào nhóm");
+        for(TableModel t:tables)if(sidebarSelectedIds.contains(t.id))t.groupId=gid;
+        sidebarSelectedIds.clear();saveNow();renderAll();
     }
 
     void addSidebarSection(String gid,GroupModel group){
         if(group!=null){
-            LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);gh.setPadding(dp(9),dp(8),dp(7),dp(7));gh.setBackgroundColor(groupBg);
-            TextView n=text((collapsedGroups.contains(gid)?"▸ ":"▾ ")+group.name,compact?12:14,true);TextView sum=text(fmt(groupTotal(gid)),compact?11:13,true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);gh.addView(n,w(0,dp(40),1));gh.addView(sum,w(0,dp(40),0.9f));gh.setTag("GROUP:"+gid);
-            gh.setOnDragListener((v,e)->{if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}if(e.getAction()==DragEvent.ACTION_DROP){v.setAlpha(1f);String id=(String)e.getLocalState();TableModel t=findTable(id);if(t!=null){tables.remove(t);t.groupId=gid;tables.add(t);save();renderAll();}return true;}if(e.getAction()==DragEvent.ACTION_DRAG_ENDED)v.setAlpha(1f);return true;});
+            LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);gh.setPadding(dp(7),dp(5),dp(5),dp(5));gh.setBackgroundColor(groupBg);
+            TextView n=text((group.pinned?"📌 ":"")+(collapsedGroups.contains(gid)?"▸ ":"▾ ")+group.name,compact?12:14,true);TextView sum=text(fmt(groupTotal(gid)),compact?11:13,true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);gh.addView(n,w(0,dp(38),1));gh.addView(sum,w(0,dp(38),0.8f));gh.setTag("GROUP:"+gid);
+            gh.setOnDragListener((v,e)->{if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}if(e.getAction()==DragEvent.ACTION_DROP){
+                v.setAlpha(1f);
+                Object st=e.getLocalState();
+                if(st instanceof String && ((String)st).startsWith("MULTI:")){
+                    moveSidebarSelectionToGroup(gid);
+                    return true;
+                }
+                String id=st instanceof String?(String)st:null;
+                TableModel t=findTable(id);
+                if(t!=null){pushUndo("Kéo bảng vào nhóm");tables.remove(t);t.groupId=gid;tables.add(t);saveNow();renderAll();}
+                return true;
+            }if(e.getAction()==DragEvent.ACTION_DRAG_ENDED)v.setAlpha(1f);return true;});
             gh.setOnClickListener(v->{haptic(v);showGroupMenu(v,group);});
             sum.setOnClickListener(v->{haptic(v);showGroupStats(group);});
             gh.setOnLongClickListener(v->{haptic(v);showGroupMenu(v,group);return true;});
             installGroupQuickSwipe(gh,group);
             TextView gdrag=text("≡",22,true);gdrag.setGravity(Gravity.CENTER);gdrag.setTextColor(muted);
-            gh.addView(gdrag,new LinearLayout.LayoutParams(dp(42),dp(42)));
+            gh.addView(gdrag,new LinearLayout.LayoutParams(dp(40),dp(38)));
             gdrag.setOnLongClickListener(v->{haptic(v);ClipData cd=ClipData.newPlainText("group",group.id);v.startDragAndDrop(cd,new View.DragShadowBuilder(gh),"GROUP:"+group.id,0);return true;});
             gh.setOnDragListener((v,e)->handleGroupReorderDrop(e,group));
             LinearLayout gActions=new LinearLayout(this);
@@ -543,8 +658,8 @@ public class MainActivity extends Activity {
 
     View sidebarItem(TableModel t,String gid){
         LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.HORIZONTAL);item.setTag(t.id);item.setGravity(Gravity.CENTER_VERTICAL);
-        item.setPadding(dp(8),dp(5),dp(6),dp(5));GradientDrawable itemBg=new GradientDrawable();
-        itemBg.setColor(t.id.equals(selectedId)?selectedBg:Color.TRANSPARENT);
+        item.setPadding(dp(6),dp(4),dp(4),dp(4));GradientDrawable itemBg=new GradientDrawable();
+        itemBg.setColor(t.id.equals(selectedId)?Color.rgb(232,242,255):Color.TRANSPARENT);
         itemBg.setCornerRadius(dp(12));
         item.setBackground(itemBg);
 
@@ -552,29 +667,49 @@ public class MainActivity extends Activity {
         GradientDrawable stripeBg=new GradientDrawable();
         stripeBg.setColor("cancel".equals(t.type)?Color.rgb(245,158,11):accent);
         stripeBg.setCornerRadius(dp(3));typeStripe.setBackground(stripeBg);
+        CheckBox pick=new CheckBox(this);pick.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));
+        pick.setChecked(sidebarSelectedIds.contains(t.id));
+        pick.setAlpha(sidebarSelectedIds.isEmpty()?0.72f:1f);
         LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);info.setPadding(dp(4),0,dp(2),0);
-        TextView title=text(t.title,compact?14:16,true);
+        TextView title=text(t.title,compact?14:15,true);
         title.setTextColor(t.id.equals(selectedId)?accent:ink);
         String groupBadge=groupNameFor(t.groupId);
-        TextView meta=text((t.locked?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total())+(groupBadge.isEmpty()?"":" • "+groupBadge),compact?10:12,false);
+        TextView meta=text((t.locked?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total())+(groupBadge.isEmpty()?"":" • "+groupBadge),compact?10:11,false);
         meta.setTextColor(muted);
         info.addView(title);info.addView(meta);
 
         TextView drag=text("≡",22,true);drag.setGravity(Gravity.CENTER);
         drag.setTextColor(t.id.equals(selectedId)?accent:muted);
+        TextView more=text("⋮",24,true);more.setGravity(Gravity.CENTER);more.setTextColor(muted);
         item.addView(typeStripe,new LinearLayout.LayoutParams(dp(4),dp(46)));
-        item.addView(info,new LinearLayout.LayoutParams(0,dp(62),1));
-        item.addView(drag,new LinearLayout.LayoutParams(dp(42),dp(62)));
+        item.addView(pick,new LinearLayout.LayoutParams(dp(34),dp(56)));
+        item.addView(info,new LinearLayout.LayoutParams(0,dp(58),1));
+        item.addView(drag,new LinearLayout.LayoutParams(dp(40),dp(58)));
+        item.addView(more,new LinearLayout.LayoutParams(dp(40),dp(58)));
 
+        pick.setOnCheckedChangeListener((b,on)->{if(on)sidebarSelectedIds.add(t.id);else sidebarSelectedIds.remove(t.id);renderSidebar();});
         View.OnClickListener select=v->{selectedId=t.id;activeRow=0;activeField="cancel".equals(t.type)?"qty":"price";explicitCellSelection=false;renderAll();};
         info.setOnClickListener(select);
         title.setOnClickListener(select);
 
         // Nhấn giữ bảng ở màn trong = vào chế độ chọn với bảng này được chọn sẵn.
-        info.setOnLongClickListener(v->{haptic(v);showTableManagerSheet(t.id);return true;});
+        info.setOnLongClickListener(v->{haptic(v);if(sidebarSelectedIds.contains(t.id))sidebarSelectedIds.remove(t.id);else sidebarSelectedIds.add(t.id);renderSidebar();return true;});
+
+        more.setOnClickListener(v->{haptic(v);selectedId=t.id;showQuickTableActions(t);});
+        more.setOnLongClickListener(v->{haptic(v);selectedId=t.id;renameCurrent();return true;});
 
         // Chỉ kéo bằng tay cầm ≡.
-        drag.setOnLongClickListener(v->{haptic(v);ClipData cd=ClipData.newPlainText("table",t.id);v.startDragAndDrop(cd,new View.DragShadowBuilder(item),t.id,0);return true;});
+        drag.setOnLongClickListener(v->{
+            haptic(v);
+            if(sidebarSelectedIds.contains(t.id) && sidebarSelectedIds.size()>1){
+                ClipData cd=ClipData.newPlainText("tables",String.valueOf(sidebarSelectedIds.size()));
+                v.startDragAndDrop(cd,new View.DragShadowBuilder(item),"MULTI:"+t.id,0);
+            }else{
+                ClipData cd=ClipData.newPlainText("table",t.id);
+                v.startDragAndDrop(cd,new View.DragShadowBuilder(item),t.id,0);
+            }
+            return true;
+        });
 
         item.setOnDragListener((v,e)->{
             if(e.getAction()==DragEvent.ACTION_DROP){
@@ -587,9 +722,9 @@ public class MainActivity extends Activity {
         });
         LinearLayout actions=new LinearLayout(this);
         actions.setPadding(dp(4),dp(4),dp(4),dp(4));
-        Button rename=swipeActionButton("Đổi tên",false);
-        Button move=swipeActionButton("Nhóm",false);
-        Button del=swipeActionButton("Xóa",true);
+        Button rename=swipeActionButton("✎ Đổi tên",false);
+        Button move=swipeActionButton("↪ Nhóm",false);
+        Button del=swipeActionButton("🗑 Xóa",true);
         actions.addView(rename,new LinearLayout.LayoutParams(0,-1,1));
         actions.addView(move,new LinearLayout.LayoutParams(0,-1,1));
         actions.addView(del,new LinearLayout.LayoutParams(0,-1,1));
@@ -598,7 +733,7 @@ public class MainActivity extends Activity {
         move.setOnClickListener(v->{selectedId=t.id;closeRevealedSwipe();moveCurrentGroup();});
         del.setOnClickListener(v->{selectedId=t.id;closeRevealedSwipe();deleteCurrent();});
 
-        int reveal=compact?190:220;
+        int reveal=compact?170:200;
         FrameLayout frame=makeSwipeFrame(item,actions,reveal);
         installRevealSwipe(frame,item,reveal,()->quickDeleteTable(t));
         return frame;
@@ -606,15 +741,15 @@ public class MainActivity extends Activity {
 
 
     int dataRowDp(){
-        if(densityMode==1)return compact?42:46;
-        if(densityMode==2)return compact?58:64;
-        return compact?50:56;
+        if(densityMode==1)return compact?42:44;
+        if(densityMode==2)return compact?58:60;
+        return compact?50:52;
     }
 
     int headerRowDp(){
-        if(densityMode==1)return compact?46:50;
-        if(densityMode==2)return compact?60:66;
-        return compact?52:58;
+        if(densityMode==1)return compact?46:48;
+        if(densityMode==2)return compact?60:62;
+        return compact?52:54;
     }
 
     TextView emptyHint(String s){
@@ -647,6 +782,9 @@ public class MainActivity extends Activity {
         ensureBlankCalc(t);
         gridRecycler=new RecyclerView(this);
         gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        gridRecycler.setHasFixedSize(true);
+        gridRecycler.setItemViewCacheSize(18);
+        gridRecycler.getRecycledViewPool().setMaxRecycledViews(0,24);
         gridRecycler.setItemAnimator(null);
         gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         gridRecycler.setAdapter(new CalcAdapter(t));
@@ -663,6 +801,9 @@ public class MainActivity extends Activity {
         ensureBlankCancel(t);
         gridRecycler=new RecyclerView(this);
         gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        gridRecycler.setHasFixedSize(true);
+        gridRecycler.setItemViewCacheSize(18);
+        gridRecycler.getRecycledViewPool().setMaxRecycledViews(0,24);
         gridRecycler.setItemAnimator(null);
         gridRecycler.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         gridRecycler.setAdapter(new CancelAdapter(t));
@@ -858,7 +999,14 @@ public class MainActivity extends Activity {
         if(fastInputMode==1 && "qty".equals(field) && !"C".equals(key) && !"⌫".equals(key) && !"cancel".equals(t.type)){
             // Vẫn cho nhập nhiều chữ số; Enter/Tab mới xác nhận chuyển dòng.
         }
-        save();saveUiState();renderGrid();renderSidebar();renderKeypads();
+        save();saveUiState();
+        if(gridRecycler!=null && gridRecycler.getAdapter()!=null){
+            gridRecycler.getAdapter().notifyDataSetChanged();
+            grandTotal.setText(fmt(t.total()));
+            pageIndicator.setText((tables.indexOf(t)+1)+"/"+tables.size());
+            pendingScrollRow=activeRow;scrollActiveRowIntoView();
+        }else renderGrid();
+        renderKeypads();
     }
 
 
@@ -1100,10 +1248,11 @@ public class MainActivity extends Activity {
         }
         if(moving==null||target==null)return;
         pushUndo("Di chuyển nhóm");
+        moving.pinned=target.pinned;
         groups.remove(moving);
         int idx=groups.indexOf(target);
         groups.add(Math.max(0,idx),moving);
-        save();renderSidebar();
+        saveNow();renderSidebar();
     }
 
     void showTableManagerSheet(){showTableManagerSheet(null);}
@@ -1200,11 +1349,11 @@ public class MainActivity extends Activity {
                 list.addView(managerTableRow(t,UNGROUPED,selectedIds,dlg,rebuild[0]));
             }
 
-            for(GroupModel g:new ArrayList<>(groups)){
+            for(GroupModel g:orderedGroups()){
                 if(!managerGroupVisible(g,searchQuery[0]))continue;
                 LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);
                 gh.setPadding(dp(8),dp(5),dp(4),dp(5));gh.setBackgroundColor(groupBg);
-                TextView gname=text((collapsedGroups.contains(g.id)?"▸ ":"▾ ")+g.name,16,true);
+                TextView gname=text((g.pinned?"📌 ":"")+(collapsedGroups.contains(g.id)?"▸ ":"▾ ")+g.name,16,true);
                 TextView sum=text(inGroup(g.id).size()+" bảng • "+fmt(groupTotal(g.id)),12,true);sum.setTextColor(accent);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);
                 TextView gdrag=text("≡",22,true);gdrag.setGravity(Gravity.CENTER);gdrag.setTextColor(muted);
                 TextView more=text("⋮",24,true);more.setGravity(Gravity.CENTER);
@@ -1400,13 +1549,25 @@ public class MainActivity extends Activity {
             if(e.getActionMasked()==MotionEvent.ACTION_DOWN){down[0]=e.getX();down[1]=e.getY();return false;}
             if(e.getActionMasked()==MotionEvent.ACTION_UP){
                 float dx=e.getX()-down[0],dy=e.getY()-down[1];
-                if(Math.abs(dx)>dp(65)&&Math.abs(dx)>Math.abs(dy)*1.4f){
+                float width=Math.max(dp(240),row.getWidth());
+
+                if(dx<0 && Math.abs(dx)>width*.58f && Math.abs(dx)>Math.abs(dy)*.85f){
                     haptic(v);
-                    if(dx<0)showManagerTableActions(t,dlg,rebuild);
-                    else{
-                        if(selectedIds.contains(t.id)){selectedIds.remove(t.id);cb.setChecked(false);}
-                        else {selectedIds.add(t.id);cb.setChecked(true);}
-                    }
+                    if(t.locked){Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();return true;}
+                    pushUndo("Xóa nhanh bảng");
+                    tables.remove(t);selectedIds.remove(t.id);
+                    if(t.id.equals(selectedId))selectedId=tables.isEmpty()?null:tables.get(0).id;
+                    saveNow();rebuild.run();renderAll();showUndoSnackbar("Đã xóa "+t.title);
+                    return true;
+                }
+
+                if(dx<-dp(26)&&Math.abs(dx)>Math.abs(dy)*.85f){
+                    haptic(v);showManagerTableActions(t,dlg,rebuild);return true;
+                }
+                if(dx>dp(26)&&Math.abs(dx)>Math.abs(dy)*.85f){
+                    haptic(v);
+                    if(selectedIds.contains(t.id)){selectedIds.remove(t.id);cb.setChecked(false);}
+                    else{selectedIds.add(t.id);cb.setChecked(true);}
                     return true;
                 }
             }
@@ -1420,7 +1581,9 @@ public class MainActivity extends Activity {
             if(e.getActionMasked()==MotionEvent.ACTION_DOWN){down[0]=e.getX();down[1]=e.getY();return false;}
             if(e.getActionMasked()==MotionEvent.ACTION_UP){
                 float dx=e.getX()-down[0],dy=e.getY()-down[1];
-                if(dx<-dp(65)&&Math.abs(dx)>Math.abs(dy)*1.4f){haptic(v);showManagerGroupActions(g,dlg,rebuild);return true;}
+                if(dx<-dp(26)&&Math.abs(dx)>Math.abs(dy)*.85f){
+                    haptic(v);showManagerGroupActions(g,dlg,rebuild);return true;
+                }
             }
             return false;
         });
@@ -1441,12 +1604,13 @@ public class MainActivity extends Activity {
     }
 
     void showManagerGroupActions(GroupModel g,Dialog manager,Runnable rebuild){
-        String[] actions={"Thu gọn / Mở rộng","Đổi tên nhóm","Copy cả nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
+        String[] actions={"Thu gọn / Mở rộng",g.pinned?"Bỏ ghim nhóm":"Ghim nhóm","Đổi tên nhóm","Copy cả nhóm","Xóa toàn bộ số lượng trong nhóm","Xóa nhóm (giữ bảng)"};
         new AlertDialog.Builder(this).setTitle(g.name).setItems(actions,(d,i)->{
             if(i==0){if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);saveUiState();rebuild.run();}
-            else if(i==1){manager.dismiss();renameGroup(g);}
-            else if(i==2){copyGroup(g);rebuild.run();}
-            else if(i==3)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
+            else if(i==1){togglePinGroup(g);rebuild.run();}
+            else if(i==2){manager.dismiss();renameGroup(g);}
+            else if(i==3){copyGroup(g);rebuild.run();}
+            else if(i==4)confirmClearGroupQuantities(g,()->{rebuild.run();renderAll();});
             else{
                 pushUndo("Xóa nhóm");
                 for(TableModel t:tables)if(g.id.equals(t.groupId))t.groupId=UNGROUPED;
@@ -1541,30 +1705,40 @@ public class MainActivity extends Activity {
 
     void installRevealSwipe(FrameLayout frame,View content,int revealDp,Runnable fullSwipeAction){
         final float[] down={0,0};
+        final boolean[] crossed={false,false};
         frame.setOnTouchListener((v,e)->{
             if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
                 down[0]=e.getX();down[1]=e.getY();
+                crossed[0]=false;crossed[1]=false;
                 if(revealedSwipeRow!=null&&revealedSwipeRow!=frame)closeRevealedSwipe();
                 return false;
             }
             if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
                 float dx=e.getX()-down[0],dy=e.getY()-down[1];
-                if(Math.abs(dx)>dp(8)&&Math.abs(dx)>Math.abs(dy)*1.25f){
-                    float max=Math.max(dp(revealDp),frame.getWidth()*0.92f);
+                if(Math.abs(dx)>dp(5)&&Math.abs(dx)>Math.abs(dy)*0.82f){
+                    float width=Math.max(dp(220),frame.getWidth());
+                    float max=Math.max(dp(revealDp),width*0.92f);
                     float x=Math.max(-max,Math.min(0,dx));
                     content.setTranslationX(x);
-                    float progress=Math.min(1f,Math.abs(x)/Math.max(1f,frame.getWidth()));
-                    content.setAlpha(1f-progress*0.18f);
+
+                    if(dx<-dp(24)&&!crossed[0]){
+                        crossed[0]=true;
+                        content.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+                    }
+                    if(Math.abs(dx)>width*0.55f&&!crossed[1]){
+                        crossed[1]=true;
+                        content.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                    }
                     return true;
                 }
             }
             if(e.getActionMasked()==MotionEvent.ACTION_UP){
                 float dx=e.getX()-down[0],dy=e.getY()-down[1];
-                float width=Math.max(dp(260),frame.getWidth());
+                float width=Math.max(dp(220),frame.getWidth());
 
-                // Vuốt dài > 72% chiều rộng = xóa nhanh.
-                if(dx<0 && Math.abs(dx)>width*0.72f && Math.abs(dx)>Math.abs(dy)*1.25f){
-                    content.animate().translationX(-width).alpha(0f).setDuration(150)
+                // Vuốt dài khoảng 55% = xóa nhanh.
+                if(dx<0 && Math.abs(dx)>width*0.55f && Math.abs(dx)>Math.abs(dy)*0.8f){
+                    content.animate().translationX(-width).alpha(.72f).setDuration(130)
                         .withEndAction(()->{
                             revealedSwipeRow=null;
                             if(fullSwipeAction!=null)fullSwipeAction.run();
@@ -1572,27 +1746,30 @@ public class MainActivity extends Activity {
                     return true;
                 }
 
-                if(Math.abs(dx)>dp(45)&&Math.abs(dx)>Math.abs(dy)*1.25f){
-                    if(dx<0){
-                        content.animate().translationX(-dp(revealDp)).alpha(1f).setDuration(145)
-                            .setInterpolator(new DecelerateInterpolator()).start();
-                        revealedSwipeRow=frame;
-                    }else{
-                        content.animate().translationX(0f).alpha(1f).setDuration(130).start();
-                        if(revealedSwipeRow==frame)revealedSwipeRow=null;
-                    }
+                // Chỉ cần vuốt trái nhẹ là mở action.
+                if(dx<-dp(24) && Math.abs(dx)>Math.abs(dy)*0.8f){
+                    content.animate().translationX(-dp(revealDp)).alpha(1f).setDuration(120)
+                        .setInterpolator(new DecelerateInterpolator(1.5f)).start();
+                    revealedSwipeRow=frame;
+                    return true;
+                }
+
+                // Vuốt phải nhẹ là đóng.
+                if(dx>dp(18)){
+                    content.animate().translationX(0f).alpha(1f).setDuration(105).start();
+                    if(revealedSwipeRow==frame)revealedSwipeRow=null;
                     return true;
                 }
 
                 if(content.getTranslationX()!=0f){
-                    boolean open=content.getTranslationX()<-dp(revealDp/2);
-                    content.animate().translationX(open?-dp(revealDp):0f).alpha(1f).setDuration(120).start();
-                    if(open)revealedSwipeRow=frame; else if(revealedSwipeRow==frame)revealedSwipeRow=null;
+                    boolean open=content.getTranslationX()<-dp(18);
+                    content.animate().translationX(open?-dp(revealDp):0f).alpha(1f).setDuration(105).start();
+                    if(open)revealedSwipeRow=frame;else if(revealedSwipeRow==frame)revealedSwipeRow=null;
                     return true;
                 }
             }
             if(e.getActionMasked()==MotionEvent.ACTION_CANCEL){
-                content.animate().translationX(0f).alpha(1f).setDuration(100).start();
+                content.animate().translationX(0f).alpha(1f).setDuration(90).start();
             }
             return false;
         });
@@ -1631,13 +1808,13 @@ public class MainActivity extends Activity {
     }
 
     void showQuickTableActions(TableModel t){
-        String[] a={"Copy bảng",t.locked?"Mở khóa":"Khóa bảng","Đổi tên","Chuyển nhóm","Xóa"};
+        String[] a={"Đổi tên","Chuyển nhóm","Copy bảng",t.locked?"Mở khóa":"Khóa bảng","Xóa"};
         new AlertDialog.Builder(this).setTitle(t.title).setItems(a,(d,i)->{
             selectedId=t.id;
-            if(i==0)showCopyOptions(t);
-            else if(i==1)toggleLock(t);
-            else if(i==2)renameCurrent();
-            else if(i==3)moveCurrentGroup();
+            if(i==0)renameCurrent();
+            else if(i==1)moveCurrentGroup();
+            else if(i==2)showCopyOptions(t);
+            else if(i==3)toggleLock(t);
             else deleteCurrent();
         }).show();
     }
@@ -1668,6 +1845,7 @@ public class MainActivity extends Activity {
     void showGroupMenu(View anchor,GroupModel g){
         PopupMenu p=new PopupMenu(this,anchor);
         p.getMenu().add(collapsedGroups.contains(g.id)?"Mở rộng nhóm":"Thu gọn nhóm");
+        p.getMenu().add(g.pinned?"Bỏ ghim nhóm":"Ghim nhóm");
         p.getMenu().add("Đổi tên nhóm");
         p.getMenu().add("Copy cả nhóm");
         p.getMenu().add("Xóa toàn bộ số lượng trong nhóm");
@@ -1677,6 +1855,8 @@ public class MainActivity extends Activity {
             if(s.startsWith("Mở")||s.startsWith("Thu")){
                 if(collapsedGroups.contains(g.id))collapsedGroups.remove(g.id);else collapsedGroups.add(g.id);
                 renderSidebar();
+            }else if(s.contains("ghim")){
+                togglePinGroup(g);
             }else if(s.startsWith("Đổi")){
                 renameGroup(g);
             }else if(s.startsWith("Copy")){
@@ -1930,13 +2110,27 @@ public class MainActivity extends Activity {
         TextView sum=text("TỔNG: "+fmt(t.total()),22,true);sum.setTextColor(accent);sum.setGravity(Gravity.END);sum.setPadding(0,dp(14),0,0);r.addView(sum);return r;
     }
 
-    void save(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());root.put("groups",ga).put("tables",ta);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();saveUiState();}catch(Exception ignored){}}
+    void save(){
+        saveHandler.removeCallbacksAndMessages("SAVE");
+        saveScheduled=true;
+        saveHandler.postAtTime(()->saveNow(),"SAVE",SystemClock.uptimeMillis()+180);
+    }
+    void saveNow(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());root.put("groups",ga).put("tables",ta);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();saveUiState();saveScheduled=false;}catch(Exception ignored){saveScheduled=false;}}
+    void flushSave(){
+        if(saveScheduled)saveNow();
+    }
+
+    @Override protected void onPause(){
+        flushSave();
+        super.onPause();
+    }
+
     void load(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(DATA,null);if(s!=null){try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));return;}catch(Exception ignored){}}migrateOld();}
     void migrateOld(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(OLD_DATA,null);if(s==null)return;try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++){JSONObject x=ta.getJSONObject(i);TableModel t=new TableModel();t.id=x.optString("id",id());t.type=x.optString("type","calc");t.title=x.optString("title","Bảng");t.groupId=x.optString("groupId","");t.updated=System.currentTimeMillis();if("cancel".equals(t.type)){JSONArray c=x.optJSONArray("cancelRows");if(c!=null)for(int j=0;j<c.length();j++){JSONObject z=c.optJSONObject(j);t.cancelRows.add(new CancelRow(z.optString("agent"),z.optLong("qty")));}}else{JSONArray v=x.optJSONArray("values");if(v!=null)for(int j=0;j<v.length();j++){CalcRow cr=new CalcRow();cr.price=v.optDouble(j);cr.qty=1;t.calcRows.add(cr);}}tables.add(t);}save();}catch(Exception ignored){}}
 
     TableModel selected(){return findTable(selectedId);}TableModel findTable(String id){if(id==null)return null;for(TableModel t:tables)if(id.equals(t.id))return t;return null;}ArrayList<TableModel> inGroup(String gid){ArrayList<TableModel> a=new ArrayList<>();for(TableModel t:tables)if(gid.equals(t.groupId))a.add(t);return a;}double groupTotal(String gid){double x=0;for(TableModel t:tables)if(gid.equals(t.groupId))x+=t.total();return x;}
 
-    static class GroupModel{String id,name;JSONObject json()throws Exception{return new JSONObject().put("id",id).put("name",name);}static GroupModel from(JSONObject o){GroupModel g=new GroupModel();g.id=o.optString("id");g.name=o.optString("name","Nhóm");return g;}}
+    static class GroupModel{String id,name;boolean pinned=false;JSONObject json()throws Exception{return new JSONObject().put("id",id).put("name",name).put("pinned",pinned);}static GroupModel from(JSONObject o){GroupModel g=new GroupModel();g.id=o.optString("id");g.name=o.optString("name","Nhóm");g.pinned=o.optBoolean("pinned",false);return g;}}
     static class CalcRow{double price,qty;boolean blank(){return price==0&&qty==0;}JSONObject json()throws Exception{return new JSONObject().put("price",price).put("qty",qty);}static CalcRow from(JSONObject o){CalcRow r=new CalcRow();r.price=o.optDouble("price");r.qty=o.optDouble("qty");return r;}}
     static class CancelRow{String agent;long qty;CancelRow(String a,long q){agent=a;qty=q;}boolean blank(){return (agent==null||agent.trim().isEmpty())&&qty==0;}JSONObject json()throws Exception{return new JSONObject().put("agent",agent).put("qty",qty);}static CancelRow from(JSONObject o){return new CancelRow(o.optString("agent"),o.optLong("qty"));}}
     static class TableModel{String id,type="calc",title="Bảng",groupId="";long updated;boolean locked=false;ArrayList<CalcRow> calcRows=new ArrayList<>();ArrayList<CancelRow> cancelRows=new ArrayList<>();double total(){double x=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)x+=r.qty;}else for(CalcRow r:calcRows)x+=r.price*r.qty;return x;}int dataRowCount(){int n=0;if("cancel".equals(type)){for(CancelRow r:cancelRows)if(!r.blank())n++;}else for(CalcRow r:calcRows)if(!r.blank())n++;return n;}JSONObject json()throws Exception{JSONObject o=new JSONObject().put("id",id).put("type",type).put("title",title).put("groupId",groupId).put("updated",updated).put("locked",locked);JSONArray a=new JSONArray();for(CalcRow r:calcRows)a.put(r.json());o.put("calcRows",a);JSONArray c=new JSONArray();for(CancelRow r:cancelRows)c.put(r.json());o.put("cancelRows",c);return o;}static TableModel from(JSONObject o){TableModel t=new TableModel();t.id=o.optString("id");t.type=o.optString("type","calc");t.title=o.optString("title","Bảng");t.groupId=o.optString("groupId","");t.updated=o.optLong("updated",System.currentTimeMillis());t.locked=o.optBoolean("locked",false);JSONArray a=o.optJSONArray("calcRows");if(a!=null)for(int i=0;i<a.length();i++)t.calcRows.add(CalcRow.from(a.optJSONObject(i)));JSONArray c=o.optJSONArray("cancelRows");if(c!=null)for(int i=0;i<c.length();i++)t.cancelRows.add(CancelRow.from(c.optJSONObject(i)));return t;}}
@@ -1967,7 +2161,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setMinimumWidth(getResources().getDisplayMetrics().widthPixels);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);v.setPadding(dp(10),0,dp(10),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
+    LinearLayout gridRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);r.setBackgroundColor(paper);return r;}TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);v.setPadding(dp(compact?8:7),0,dp(compact?8:7),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
     Button topButton(String s){
         Button b=new Button(this);
         b.setText(s);
