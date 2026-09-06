@@ -1075,7 +1075,7 @@ public class MainActivity extends Activity {
         }
         @Override public void onBindViewHolder(H h,int row){
             CalcRow r=row<t.calcRows.size()?t.calcRows.get(row):null;
-            h.st.setText(String.valueOf(row+1));
+            h.st.setText((r!=null&&!r.blank()?"≡ ":"")+String.valueOf(row+1));
             h.p.setText(r==null||r.price==0?"":fmt(r.price));
             h.q.setText(r==null||r.qty==0?"":fmt(r.qty));
             h.total.setText(r==null||r.price==0||r.qty==0?"":fmt(r.price*r.qty));
@@ -1086,7 +1086,15 @@ public class MainActivity extends Activity {
             fillCell(h.st,rowBg);fillCell(h.p,rowBg);fillCell(h.q,rowBg);fillCell(h.total,rowBg);
             if(row==activeRow&&"price".equals(activeField))markActive(h.p);
             if(row==activeRow&&"qty".equals(activeField))markActive(h.q);
-            h.st.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;explicitCellSelection=false;saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            h.st.setOnClickListener(v->{
+                if(r!=null&&!r.blank()){
+                    haptic(v);
+                    showMoveRowDialog(t,row);
+                }else{
+                    previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;explicitCellSelection=false;
+                    saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();
+                }
+            });
             h.p.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
             h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
             View.OnLongClickListener deleteRowsLong=v->{
@@ -1095,7 +1103,7 @@ public class MainActivity extends Activity {
                 return true;
             };
             h.row.setOnLongClickListener(deleteRowsLong);
-            h.st.setOnLongClickListener(deleteRowsLong);
+            h.st.setOnLongClickListener(v->{if(r!=null&&!r.blank()){haptic(v);showMoveRowDialog(t,row);}return true;});
             h.p.setOnLongClickListener(deleteRowsLong);
             h.q.setOnLongClickListener(deleteRowsLong);
             h.total.setOnLongClickListener(deleteRowsLong);
@@ -1125,7 +1133,7 @@ public class MainActivity extends Activity {
         }
         @Override public void onBindViewHolder(H h,int row){
             CancelRow r=row<t.cancelRows.size()?t.cancelRows.get(row):null;
-            h.st.setText(String.valueOf(row+1));
+            h.st.setText((r!=null&&!r.blank()?"≡ ":"")+String.valueOf(row+1));
             h.a.setText(r==null||r.agent==null||r.agent.isEmpty()?(row==activeRow?"Chạm để nhập đại lý":""):r.agent);
             h.a.setTextColor(r==null||r.agent==null||r.agent.isEmpty()?muted:ink);
             h.q.setText(r==null||r.qty==0?"":fmt(r.qty));
@@ -1133,6 +1141,14 @@ public class MainActivity extends Activity {
             int rowBg=(row==activeRow)?Color.rgb(255,247,237):(row%2==0?Color.WHITE:Color.rgb(252,252,253));
             fillCell(h.st,rowBg);fillCell(h.a,rowBg);fillCell(h.q,rowBg);
             if(row==activeRow)markActive(h.q);
+            h.st.setOnClickListener(v->{
+                if(r!=null&&!r.blank()){
+                    haptic(v);showMoveRowDialog(t,row);
+                }else{
+                    previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";
+                    explicitCellSelection=false;saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();
+                }
+            });
             h.a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});
             h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
 
@@ -1142,7 +1158,7 @@ public class MainActivity extends Activity {
                 return true;
             };
             h.row.setOnLongClickListener(deleteRowsLong);
-            h.st.setOnLongClickListener(deleteRowsLong);
+            h.st.setOnLongClickListener(v->{if(r!=null&&!r.blank()){haptic(v);showMoveRowDialog(t,row);}return true;});
             h.a.setOnLongClickListener(deleteRowsLong);
             h.q.setOnLongClickListener(deleteRowsLong);
         }
@@ -1703,6 +1719,115 @@ public class MainActivity extends Activity {
         if(numberFormatMode==1)return "1,000";
         if(numberFormatMode==2)return "1000";
         return "1.000";
+    }
+
+    int lastDataRowIndex(TableModel t){
+        if(t==null)return -1;
+        if("cancel".equals(t.type)){
+            for(int i=t.cancelRows.size()-1;i>=0;i--)if(!t.cancelRows.get(i).blank())return i;
+        }else{
+            for(int i=t.calcRows.size()-1;i>=0;i--)if(!t.calcRows.get(i).blank())return i;
+        }
+        return -1;
+    }
+
+    void moveRow(TableModel t,int from,int to){
+        if(t==null||from==to)return;
+        if(t.locked){
+            Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int last=lastDataRowIndex(t);
+        if(from<0||from>last||to<0||to>last)return;
+
+        pushUndo("Di chuyển dòng");
+        if("cancel".equals(t.type)){
+            CancelRow r=t.cancelRows.remove(from);
+            t.cancelRows.add(to,r);
+            ensureBlankCancel(t);
+        }else{
+            CalcRow r=t.calcRows.remove(from);
+            t.calcRows.add(to,r);
+            ensureBlankCalc(t);
+        }
+
+        activeRow=to;
+        previousActiveRow=-1;
+        pendingScrollRow=to;
+        t.updated=System.currentTimeMillis();
+        saveNow();
+        renderAll();
+        Toast.makeText(this,"Đã chuyển dòng "+(from+1)+" → "+(to+1),Toast.LENGTH_SHORT).show();
+    }
+
+    void showMoveRowDialog(TableModel t,int row){
+        if(t==null)return;
+        if(t.locked){
+            Toast.makeText(this,"Bảng đang khóa",Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        int last=lastDataRowIndex(t);
+        if(row<0||row>last)return;
+
+        String[] actions={
+            "↑ Lên 1 dòng",
+            "↓ Xuống 1 dòng",
+            "⇡ Lên đầu",
+            "⇣ Xuống cuối",
+            "↕ Chuyển đến vị trí…"
+        };
+
+        new AlertDialog.Builder(this)
+            .setTitle("Di chuyển dòng "+(row+1))
+            .setItems(actions,(d,i)->{
+                if(i==0){
+                    if(row==0)Toast.makeText(this,"Dòng đã ở trên cùng",Toast.LENGTH_SHORT).show();
+                    else moveRow(t,row,row-1);
+                }else if(i==1){
+                    if(row>=last)Toast.makeText(this,"Dòng đã ở dưới cùng",Toast.LENGTH_SHORT).show();
+                    else moveRow(t,row,row+1);
+                }else if(i==2){
+                    if(row==0)Toast.makeText(this,"Dòng đã ở trên cùng",Toast.LENGTH_SHORT).show();
+                    else moveRow(t,row,0);
+                }else if(i==3){
+                    if(row>=last)Toast.makeText(this,"Dòng đã ở dưới cùng",Toast.LENGTH_SHORT).show();
+                    else moveRow(t,row,last);
+                }else{
+                    EditText e=new EditText(this);
+                    e.setHint("1 - "+(last+1));
+                    e.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                    e.setSingleLine();
+                    e.setText(String.valueOf(row+1));
+                    e.setSelectAllOnFocus(true);
+
+                    AlertDialog posDlg=new AlertDialog.Builder(this)
+                        .setTitle("Chuyển dòng "+(row+1)+" đến vị trí")
+                        .setView(padded(e))
+                        .setPositiveButton("Chuyển",null)
+                        .setNegativeButton("Hủy",null)
+                        .create();
+                    posDlg.setOnShowListener(x->{
+                        e.requestFocus();e.selectAll();
+                        posDlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                            int pos;
+                            try{pos=Integer.parseInt(e.getText().toString().trim());}
+                            catch(Exception ex){pos=-1;}
+                            if(pos<1||pos>last+1){
+                                Toast.makeText(this,"Nhập vị trí từ 1 đến "+(last+1),Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+                            haptic(v);
+                            posDlg.dismiss();
+                            moveRow(t,row,pos-1);
+                        });
+                    });
+                    posDlg.show();
+                }
+            })
+            .setNegativeButton("Đóng",null)
+            .show();
     }
 
     void showRowDeleteDialog(TableModel t,int row){
