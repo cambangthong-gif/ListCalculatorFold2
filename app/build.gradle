@@ -1,5 +1,11 @@
 plugins { id 'com.android.application' version '8.7.3' }
 
+def signingPath = System.getenv("ANDROID_KEYSTORE_PATH")
+def signingStorePass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+def signingAlias = System.getenv("ANDROID_KEY_ALIAS")
+def signingKeyPass = System.getenv("ANDROID_KEY_PASSWORD")
+def hasStableSigning = signingPath && signingStorePass && signingAlias && signingKeyPass
+
 android {
     namespace 'com.vinh.listcalculatorfold2'
     compileSdk 35
@@ -8,8 +14,31 @@ android {
         applicationId 'com.vinh.listcalculatorfold2'
         minSdk 26
         targetSdk 35
-        versionCode 251
-        versionName '2.5.1'
+        versionCode 254
+        versionName '2.5.4'
+    }
+
+    signingConfigs {
+        stableRelease {
+            if (hasStableSigning) {
+                storeFile file(signingPath)
+                storePassword signingStorePass
+                keyAlias signingAlias
+                keyPassword signingKeyPass
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Giữ debug cho thử nghiệm.
+        }
+        release {
+            minifyEnabled false
+            if (hasStableSigning) {
+                signingConfig signingConfigs.stableRelease
+            }
+        }
     }
 }
 
