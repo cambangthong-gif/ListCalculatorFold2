@@ -1331,13 +1331,13 @@ public class MainActivity extends Activity {
         header.addView(total,new LinearLayout.LayoutParams(dp(100),dp(44)));
         box.addView(header);
 
-        LinearLayout r1=new LinearLayout(this),r2=new LinearLayout(this),r3=new LinearLayout(this);
+        LinearLayout navRow=new LinearLayout(this),r2=new LinearLayout(this),r3=new LinearLayout(this);
         Button addAgent=smallActionButton("+ Đại lý");
         Button move=smallActionButton("↪ Nhóm");
         Button copy=smallActionButton("⧉ Copy");
         Button clear=smallActionButton("Xóa SL");clear.setTextColor(red);
-        Button rowUp=smallActionButton("↑ Dòng trên");
-        Button rowDown=smallActionButton("↓ Dòng dưới");
+        Button rowUp=largeActionButton("↑ Dòng trên");
+        Button rowDown=largeActionButton("↓ Dòng dưới");
         rowUp.setTextColor(accent);rowDown.setTextColor(accent);
 
         addAgent.setOnClickListener(v->{haptic(v);int row=Math.max(0,t.cancelRows.size()-1);ensureCancelRow(t,row);editAgent(t,row);});
@@ -1348,18 +1348,22 @@ public class MainActivity extends Activity {
         rowDown.setOnClickListener(v->{haptic(v);moveCancelQtyCursor(1);});
 
         int bh=compactLandscape?36:43;
-        r1.addView(rowUp,new LinearLayout.LayoutParams(0,dp(bh),1));
-        r1.addView(rowDown,new LinearLayout.LayoutParams(0,dp(bh),1));
+        int navH=compactLandscape?54:68;
+        LinearLayout.LayoutParams navLp=new LinearLayout.LayoutParams(0,dp(navH),1);
+        navLp.setMargins(0,0,dp(6),0);
+        navRow.addView(rowUp,navLp);
+        LinearLayout.LayoutParams navLp2=new LinearLayout.LayoutParams(0,dp(navH),1);
+        navRow.addView(rowDown,navLp2);
         r2.addView(addAgent,new LinearLayout.LayoutParams(0,dp(bh),1));
         r2.addView(move,new LinearLayout.LayoutParams(0,dp(bh),1));
         r3.addView(copy,new LinearLayout.LayoutParams(0,dp(bh),1));
         r3.addView(clear,new LinearLayout.LayoutParams(0,dp(bh),1));
-        box.addView(r1,new LinearLayout.LayoutParams(-1,dp(bh+3)));
+        box.addView(navRow,new LinearLayout.LayoutParams(-1,dp(navH+4)));
         box.addView(r2,new LinearLayout.LayoutParams(-1,dp(bh+3)));
         box.addView(r3,new LinearLayout.LayoutParams(-1,dp(bh+3)));
 
-        TextView tip=text("↑ ↓ chuyển ô Số lượng • nhập tiếp bằng bàn phím bên phải",10,false);tip.setTextColor(muted);tip.setGravity(Gravity.CENTER);
-        box.addView(tip,new LinearLayout.LayoutParams(-1,dp(22)));
+        TextView tip=text("Dùng 2 nút lớn để nhảy nhanh ô Số lượng rồi nhập tiếp bằng bàn phím",10,false);tip.setTextColor(muted);tip.setGravity(Gravity.CENTER);
+        box.addView(tip,new LinearLayout.LayoutParams(-1,dp(24)));
         return box;
     }
 
@@ -3139,6 +3143,20 @@ public class MainActivity extends Activity {
         GradientDrawable d=new GradientDrawable();
         d.setColor(Color.rgb(238,244,252));d.setStroke(dp(1),Color.rgb(218,228,240));d.setCornerRadius(dp(12));
         b.setBackground(d);b.setStateListAnimator(null);
+        return b;
+    }
+
+    Button largeActionButton(String s){
+        Button b=smallActionButton(s);
+        b.setTextSize(16);
+        b.setPadding(dp(18),0,dp(18),0);
+        b.setMinHeight(dp(54));
+        GradientDrawable d=new GradientDrawable();
+        d.setColor(Color.rgb(230,240,252));
+        d.setStroke(dp(1),Color.rgb(196,214,238));
+        d.setCornerRadius(dp(24));
+        b.setBackground(d);
+        b.setStateListAnimator(null);
         return b;
     }
 
