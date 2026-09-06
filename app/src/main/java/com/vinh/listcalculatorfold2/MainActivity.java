@@ -58,6 +58,7 @@ public class MainActivity extends Activity {
     int lastWidthBucket=-1;
     final HashSet<String> collapsedGroups=new HashSet<>();
     final HashSet<String> sidebarSelectedIds=new HashSet<>();
+    HashSet<String> managerDragSelection=new HashSet<>();
     final Handler saveHandler=new Handler(Looper.getMainLooper());
     boolean saveScheduled=false;
     int navy=Color.rgb(27,67,110),
@@ -581,7 +582,7 @@ public class MainActivity extends Activity {
             return;
         }
         String groupName=groupNameFor(t.groupId);
-        compactTableTitle.setText(groupName.isEmpty()?t.title:(groupName+"  ›  "+t.title));
+        compactTableTitle.setText(t.title);
         compactGroupTitle.setText((t.locked?"🔒  ":"")+(groupName.isEmpty()?"Chưa nhóm":groupName));
     }
 
@@ -632,6 +633,7 @@ public class MainActivity extends Activity {
 
     void renderSidebar(){
         if(sidebar==null)return;
+        revealedSwipeRow=null;
         sidebar.removeAllViews();
         addSidebarModeButton();
         addPinnedDropZone();
@@ -727,26 +729,35 @@ public class MainActivity extends Activity {
                     :((group.pinned?"📌 ":"")+(collapsedGroups.contains(gid)?"▸ ":"▾ ")+group.name),
                     sidebarCompactMode?10:(compact?12:(gw>=1100?15:14)),true);
             TextView sum=text(sidebarCompactMode?"":fmt(groupTotal(gid)),sidebarCompactMode?9:(compact?11:13),true);sum.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);sum.setTextColor(accent);gh.addView(n,w(0,dp(38),1));gh.addView(sum,w(0,dp(38),0.8f));gh.setTag("GROUP:"+gid);
-            gh.setOnDragListener((v,e)->{if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}if(e.getAction()==DragEvent.ACTION_DROP){
+            gh.setOnDragListener((v,e)->{
+                int a=e.getAction();
+                if(a==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.65f);return true;}
+                if(a==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}
+                if(a==DragEvent.ACTION_DRAG_ENDED){v.setAlpha(1f);return true;}
+                if(a!=DragEvent.ACTION_DROP)return true;
+
                 v.setAlpha(1f);
                 Object st=e.getLocalState();
-                if(st instanceof String && ((String)st).startsWith("MULTI:")){
+                if(!(st instanceof String))return true;
+                String state=(String)st;
+
+                if(state.startsWith("GROUP:")){
+                    reorderGroup(state.substring(6),group.id);
+                    return true;
+                }
+                if(state.startsWith("MULTI:")){
                     moveSidebarSelectionToGroup(gid);
                     return true;
                 }
-                String id=st instanceof String?(String)st:null;
-                TableModel t=findTable(id);
-                if(t!=null){pushUndo("Kéo bảng vào nhóm");tables.remove(t);t.groupId=gid;tables.add(t);saveNow();renderAll();}
+
+                TableModel moved=findTable(state);
+                if(moved!=null){
+                    pushUndo("Kéo bảng vào nhóm");
+                    tables.remove(moved);moved.groupId=gid;tables.add(moved);
+                    saveNow();renderAll();
+                }
                 return true;
-            }if(e.getAction()==DragEvent.ACTION_DRAG_ENDED)v.setAlpha(1f);return true;});
-            gh.setOnClickListener(v->{haptic(v);showGroupMenu(v,group);});
-            sum.setOnClickListener(v->{haptic(v);showGroupStats(group);});
-            gh.setOnLongClickListener(v->{haptic(v);showGroupMenu(v,group);return true;});
-            installGroupQuickSwipe(gh,group);
-            TextView gdrag=text("≡",22,true);gdrag.setGravity(Gravity.CENTER);gdrag.setTextColor(muted);
-            gh.addView(gdrag,new LinearLayout.LayoutParams(dp(40),dp(38)));
-            gdrag.setOnLongClickListener(v->{haptic(v);ClipData cd=ClipData.newPlainText("group",group.id);v.startDragAndDrop(cd,new View.DragShadowBuilder(gh),"GROUP:"+group.id,0);return true;});
-            gh.setOnDragListener((v,e)->handleGroupReorderDrop(e,group));
+            });
             LinearLayout gActions=new LinearLayout(this);
             gActions.setPadding(dp(4),dp(4),dp(4),dp(4));
             Button gRename=swipeActionButton("Đổi tên",false);
@@ -799,6 +810,7 @@ public class MainActivity extends Activity {
         title.setTextColor(t.id.equals(selectedId)?accent:ink);
         String groupBadge=groupNameFor(t.groupId);
         TextView meta=text((t.locked?"🔒 • ":"")+t.dataRowCount()+" dòng • "+fmt(t.total())+(groupBadge.isEmpty()?"":" • "+groupBadge),compact?10:11,false);
+        meta.setSingleLine(true);meta.setEllipsize(android.text.TextUtils.TruncateAt.END);
         meta.setTextColor(muted);
         info.addView(title);info.addView(meta);
 
@@ -825,9 +837,15 @@ public class MainActivity extends Activity {
         // Chỉ kéo bằng tay cầm ≡.
         drag.setOnLongClickListener(v->{
             haptic(v);
-            if(sidebarSelectedIds.contains(t.id) && sidebarSelectedIds.size()>1){
-                ClipData cd=ClipData.newPlainText("tables",String.valueOf(sidebarSelectedIds.size()));
-                v.startDragAndDrop(cd,new View.DragShadowBuilder(item),"MULTI:"+t.id,0);
+            if(!sidebarSelectedIds.isEmpty()){
+                sidebarSelectedIds.add(t.id);
+                if(sidebarSelectedIds.size()>1){
+                    ClipData cd=ClipData.newPlainText("tables",String.valueOf(sidebarSelectedIds.size()));
+                    v.startDragAndDrop(cd,new View.DragShadowBuilder(item),"MULTI:"+t.id,0);
+                }else{
+                    ClipData cd=ClipData.newPlainText("table",t.id);
+                    v.startDragAndDrop(cd,new View.DragShadowBuilder(item),t.id,0);
+                }
             }else{
                 ClipData cd=ClipData.newPlainText("table",t.id);
                 v.startDragAndDrop(cd,new View.DragShadowBuilder(item),t.id,0);
@@ -1572,7 +1590,28 @@ public class MainActivity extends Activity {
         settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
 
         close.setOnClickListener(v->dlg.dismiss());
-        newGroup.setOnClickListener(v->{dlg.dismiss();createGroupDialog();});
+
+        View.OnClickListener createSelectedGroup=v->{
+            haptic(v);
+            if(selectedIds.isEmpty()){
+                dlg.dismiss();createGroupDialog();return;
+            }
+            EditText e=new EditText(this);e.setHint("Tên nhóm");e.setSingleLine();
+            new AlertDialog.Builder(this)
+                .setTitle("Tạo nhóm từ "+selectedIds.size()+" bảng")
+                .setView(padded(e))
+                .setPositiveButton("Tạo",(d,w)->{
+                    String name=e.getText().toString().trim();
+                    if(name.isEmpty())return;
+                    pushUndo("Tạo nhóm từ nhiều bảng");
+                    GroupModel g=new GroupModel();g.id=id();g.name=name;groups.add(g);
+                    for(TableModel tb:tables)if(selectedIds.contains(tb.id))tb.groupId=g.id;
+                    selectedIds.clear();saveNow();rebuild[0].run();renderAll();
+                })
+                .setNegativeButton("Hủy",null).show();
+        };
+        newGroup.setOnClickListener(createSelectedGroup);
+        selGroup.setOnClickListener(createSelectedGroup);
         selectAll.setOnClickListener(v->{
             if(selectedIds.size()==tables.size())selectedIds.clear();
             else {selectedIds.clear();for(TableModel t:tables)selectedIds.add(t.id);}
@@ -1676,17 +1715,33 @@ public class MainActivity extends Activity {
 
         drag.setOnLongClickListener(v->{
             haptic(v);
-            ClipData cd=ClipData.newPlainText("table",t.id);
-            v.startDragAndDrop(cd,new View.DragShadowBuilder(row),t.id,0);
+            if(selectedIds.contains(t.id) && selectedIds.size()>1){
+                managerDragSelection=new HashSet<>(selectedIds);
+                ClipData cd=ClipData.newPlainText("tables",String.valueOf(selectedIds.size()));
+                v.startDragAndDrop(cd,new View.DragShadowBuilder(row),"MGRMULTI:"+t.id,0);
+            }else{
+                ClipData cd=ClipData.newPlainText("table",t.id);
+                v.startDragAndDrop(cd,new View.DragShadowBuilder(row),t.id,0);
+            }
             return true;
         });
 
         row.setOnDragListener((v,e)->{
             if(e.getAction()==DragEvent.ACTION_DROP){
                 Object st=e.getLocalState();if(!(st instanceof String))return true;
-                TableModel moving=findTable((String)st);if(moving==null||moving==t)return true;
+                String state=(String)st;
+                if(state.startsWith("MGRMULTI:") && managerDragSelection!=null&&!managerDragSelection.isEmpty()){
+                    pushUndo("Kéo nhiều bảng");
+                    ArrayList<TableModel> movingList=new ArrayList<>();
+                    for(TableModel tb:new ArrayList<>(tables))if(managerDragSelection.contains(tb.id))movingList.add(tb);
+                    tables.removeAll(movingList);
+                    int idx=Math.max(0,tables.indexOf(t));
+                    for(TableModel tb:movingList){tb.groupId=gid;tables.add(Math.min(idx++,tables.size()),tb);}
+                    saveNow();rebuild.run();renderAll();return true;
+                }
+                TableModel moving=findTable(state);if(moving==null||moving==t)return true;
                 tables.remove(moving);moving.groupId=gid;int idx=tables.indexOf(t);tables.add(Math.max(0,idx),moving);
-                save();rebuild.run();renderAll();return true;
+                saveNow();rebuild.run();renderAll();return true;
             }
             return true;
         });
@@ -1705,11 +1760,27 @@ public class MainActivity extends Activity {
     }
 
     boolean managerGroupDrop(DragEvent e,String gid,Dialog dlg,Runnable rebuild){
-        if(e.getAction()==DragEvent.ACTION_DROP){
-            Object st=e.getLocalState();if(!(st instanceof String))return true;
-            TableModel t=findTable((String)st);
-            if(t!=null){pushUndo("Kéo bảng sang nhóm");tables.remove(t);t.groupId=gid;tables.add(t);save();rebuild.run();renderAll();}
+        if(e.getAction()!=DragEvent.ACTION_DROP)return true;
+        Object st=e.getLocalState();if(!(st instanceof String))return true;
+        String state=(String)st;
+
+        if(state.startsWith("MGRMULTI:")){
+            // Use the checked state from visible manager checkboxes by reading selected rows is not available here.
+            // Delegate via temporary manager selection snapshot stored in tag is avoided; manager uses helper below.
+            HashSet<String> ids=managerDragSelection;
+            if(ids!=null&&!ids.isEmpty()){
+                pushUndo("Kéo nhiều bảng sang nhóm");
+                for(TableModel tb:tables)if(ids.contains(tb.id))tb.groupId=gid;
+                saveNow();rebuild.run();renderAll();
+            }
             return true;
+        }
+
+        TableModel tb=findTable(state);
+        if(tb!=null){
+            pushUndo("Kéo bảng sang nhóm");
+            tables.remove(tb);tb.groupId=gid;tables.add(tb);
+            saveNow();rebuild.run();renderAll();
         }
         return true;
     }
@@ -1882,6 +1953,7 @@ public class MainActivity extends Activity {
 
     FrameLayout makeSwipeFrame(View content,LinearLayout actions,int revealDp){
         FrameLayout frame=new FrameLayout(this);
+        frame.setClipChildren(true);frame.setClipToPadding(true);
         FrameLayout.LayoutParams ap=new FrameLayout.LayoutParams(dp(revealDp),ViewGroup.LayoutParams.MATCH_PARENT,Gravity.END);
         frame.addView(actions,ap);
         content.setTag("swipe_content");
