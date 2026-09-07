@@ -30,6 +30,7 @@ public class MainActivity extends Activity {
     static final int REQ_BACKUP=501, REQ_RESTORE=502;
     final ArrayList<GroupModel> groups=new ArrayList<>();
     final ArrayList<TableModel> tables=new ArrayList<>();
+    final ArrayList<TotalGroupModel> totalGroups=new ArrayList<>();
     LinearLayout sidebar, gridHost, keypadHost;
     ScrollView gridScroll;
     FrameLayout coverFrame;
@@ -67,6 +68,7 @@ public class MainActivity extends Activity {
     int scrollHapticLevel=1; // 0=Tắt, 1=Nhẹ, 2=Vừa
     int deleteRowHoldMs=500; // thời gian giữ để mở Xóa dòng: 300..1200ms
     final Set<View> suppressClickAfterDeleteHold=Collections.newSetFromMap(new WeakHashMap<View,Boolean>());
+    final WeakHashMap<View,Runnable> pendingDeleteHoldCancels=new WeakHashMap<>();
     int managerSortMode=0; // 0=kéo tay,1=tên,2=sửa mới,3=sửa cũ,4=tạo mới,5=tổng lớn,6=nhiều dòng
     View revealedSwipeRow=null;
     PopupWindow swipePreviewPopup=null, undoPopup=null;
@@ -183,6 +185,9 @@ public class MainActivity extends Activity {
             // Chỉ bắt khi ý định vuốt ngang đã rõ ràng.
             if(!globalDragging && Math.abs(dx)>dp(10) && Math.abs(dx)>Math.abs(dy)*1.25f){
                 globalDragging=true;
+                // Child cell may stop receiving MOVE after dispatchTouchEvent takes
+                // ownership of the swipe, so cancel all pending delete-holds here.
+                cancelAllPendingDeleteHolds();
             }
 
             if(globalDragging && gridHost!=null){
@@ -206,6 +211,7 @@ public class MainActivity extends Activity {
             float dy=e.getRawY()-globalDownY;
             dismissSwipePreview();
             boolean wasDragging=globalDragging;
+            if(wasDragging)cancelAllPendingDeleteHolds();
             globalSwipeTracking=false;
             globalDragging=false;
 
@@ -231,6 +237,7 @@ public class MainActivity extends Activity {
                 return true;
             }
         }else if(action==MotionEvent.ACTION_CANCEL){
+            cancelAllPendingDeleteHolds();
             globalSwipeTracking=false;
             globalDragging=false;
             dismissSwipePreview();
@@ -536,14 +543,22 @@ public class MainActivity extends Activity {
         totalCard.addView(chart,new LinearLayout.LayoutParams(dp(42),dp(48)));
         totalCard.addView(labels,new LinearLayout.LayoutParams(0,dp(48),1));
         totalCard.addView(arrow,new LinearLayout.LayoutParams(dp(30),dp(48)));
-        totalCard.setOnClickListener(v->{haptic(v);showDashboard();});
+        totalCard.setOnClickListener(v->{haptic(v);showTotalComposer();});
+        totalCard.setOnLongClickListener(v->{haptic(v);showDashboard();return true;});
         box.addView(totalCard,new LinearLayout.LayoutParams(-1,dp(62)));
+
+        if(!totalGroups.isEmpty()){
+            Button savedTotals=smallActionButton("∑ Nhóm cộng tổng  ("+totalGroups.size()+")");
+            savedTotals.setTextColor(accent);
+            savedTotals.setOnClickListener(v->{haptic(v);showTotalComposer();});
+            box.addView(savedTotals,new LinearLayout.LayoutParams(-1,dp(42)));
+        }
 
         LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER_VERTICAL);actions.setPadding(0,dp(6),0,0);
         Button settings=smallActionButton("⚙ Cài đặt");
         Button about=smallActionButton("ⓘ Giới thiệu");
         settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
-        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.0").setPositiveButton("Đóng",null).show();});
+        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.6").setPositiveButton("Đóng",null).show();});
         actions.addView(settings,new LinearLayout.LayoutParams(0,dp(42),1));
         actions.addView(about,new LinearLayout.LayoutParams(0,dp(42),1));
         box.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -1378,6 +1393,13 @@ public class MainActivity extends Activity {
         v.setTextColor(ink);
     }
 
+    void cancelAllPendingDeleteHolds(){
+        if(pendingDeleteHoldCancels.isEmpty())return;
+        ArrayList<Runnable> cancels=new ArrayList<>(pendingDeleteHoldCancels.values());
+        pendingDeleteHoldCancels.clear();
+        for(Runnable r:cancels)if(r!=null)r.run();
+    }
+
     boolean consumeDeleteHoldClick(View v){
         return v!=null && suppressClickAfterDeleteHold.remove(v);
     }
@@ -1387,36 +1409,61 @@ public class MainActivity extends Activity {
         final int slop=ViewConfiguration.get(this).getScaledTouchSlop();
         final float[] downX={0},downY={0};
         final boolean[] armed={false};
+        final Runnable[] fireRef={null};
+
+        final Runnable cancel=()->{
+            armed[0]=false;
+            if(fireRef[0]!=null)v.removeCallbacks(fireRef[0]);
+            pendingDeleteHoldCancels.remove(v);
+        };
 
         final Runnable fire=()->{
-            if(!armed[0])return;
+            // Tuyệt đối không mở Xóa dòng nếu gesture ngang toàn màn hình
+            // đã được nhận diện là đổi bảng.
+            if(!armed[0] || globalDragging){
+                cancel.run();
+                return;
+            }
             armed[0]=false;
+            pendingDeleteHoldCancels.remove(v);
             suppressClickAfterDeleteHold.add(v);
             hapticDanger(v);
             action.run();
         };
+        fireRef[0]=fire;
 
-        // Không dùng Android long-click mặc định vì timeout hệ thống không chỉnh riêng
-        // cho từng app/view được. Tự hẹn giờ để Cài đặt có hiệu lực chính xác.
         v.setOnLongClickListener(null);
         v.setOnTouchListener((view,e)->{
             int a=e.getActionMasked();
+
             if(a==MotionEvent.ACTION_DOWN){
+                cancel.run();
                 suppressClickAfterDeleteHold.remove(view);
-                downX[0]=e.getX();downY[0]=e.getY();
+                downX[0]=e.getX();
+                downY[0]=e.getY();
                 armed[0]=true;
-                view.removeCallbacks(fire);
+                pendingDeleteHoldCancels.put(view,cancel);
                 view.postDelayed(fire,deleteRowHoldMs);
+
             }else if(a==MotionEvent.ACTION_MOVE){
-                if(Math.abs(e.getX()-downX[0])>slop||Math.abs(e.getY()-downY[0])>slop){
-                    armed[0]=false;
-                    view.removeCallbacks(fire);
+                float dx=Math.abs(e.getX()-downX[0]);
+                float dy=Math.abs(e.getY()-downY[0]);
+
+                // Gesture ngang cần hủy giữ-xóa rất sớm. Điều này tránh trường hợp
+                // dispatchTouchEvent bắt swipe ngang và child không nhận MOVE tiếp theo.
+                float horizontalCancel=Math.max(dp(5),slop*0.65f);
+                float normalCancel=slop*1.6f;
+
+                if(globalDragging ||
+                        (dx>horizontalCancel && dx>dy*1.05f) ||
+                        dx>normalCancel || dy>normalCancel){
+                    cancel.run();
                 }
+
             }else if(a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL){
-                armed[0]=false;
-                view.removeCallbacks(fire);
+                cancel.run();
             }
-            return false; // vẫn cho click/scroll RecyclerView hoạt động bình thường
+            return false;
         });
     }
 
@@ -1651,6 +1698,8 @@ public class MainActivity extends Activity {
     void updateLiveTotals(TableModel t){
         if(t==null)return;
         if(grandTotal!=null)grandTotal.setText(fmt(t.total()));
+        // Tổng cộng ở sidebar/drawer phải cập nhật ngay theo từng phím bấm.
+        if(sidebarGrandView!=null)sidebarGrandView.setText(fmt(allTablesTotal()));
 
         // Các số đang nhìn thấy phải đổi ngay khi bấm phím, không chờ dựng lại màn hình.
         if("cancel".equals(t.type)){
@@ -2121,7 +2170,8 @@ public class MainActivity extends Activity {
             JSONObject root=new JSONObject();
             JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());
             JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());
-            root.put("groups",ga).put("tables",ta);
+            JSONArray tga=new JSONArray();for(TotalGroupModel g:totalGroups)tga.put(g.json());
+            root.put("groups",ga).put("tables",ta).put("totalGroups",tga);
             root.put("selectedId",selectedId==null?"":selectedId);
             root.put("activeRow",activeRow).put("activeField",activeField);
             root.put("numberFormatMode",numberFormatMode).put("fastInputMode",fastInputMode);
@@ -2196,9 +2246,10 @@ public class MainActivity extends Activity {
     void restoreStateJson(String json){
         try{
             JSONObject o=new JSONObject(json);
-            groups.clear();tables.clear();collapsedGroups.clear();
+            groups.clear();tables.clear();totalGroups.clear();collapsedGroups.clear();
             JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));
             JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));
+            JSONArray tga=o.optJSONArray("totalGroups");if(tga!=null)for(int i=0;i<tga.length();i++)totalGroups.add(TotalGroupModel.from(tga.getJSONObject(i)));
             selectedId=o.optString("selectedId","");
             if(findTable(selectedId)==null)selectedId=tables.isEmpty()?null:tables.get(0).id;
             activeRow=Math.max(0,o.optInt("activeRow",0));
@@ -3891,6 +3942,231 @@ public class MainActivity extends Activity {
         }catch(Exception e){Toast.makeText(this,"Không xử lý được file: "+e.getMessage(),Toast.LENGTH_LONG).show();}
     }
 
+
+    double selectedCustomTotal(Set<String> tableIds,Set<String> groupIds){
+        LinkedHashSet<String> unique=new LinkedHashSet<>();
+        if(tableIds!=null)unique.addAll(tableIds);
+        if(groupIds!=null)for(String gid:groupIds){
+            for(TableModel t:tables)if(gid!=null&&gid.equals(t.groupId))unique.add(t.id);
+        }
+        double total=0;
+        for(String id:unique){
+            TableModel t=findTable(id);
+            if(t!=null)total+=t.total();
+        }
+        return total;
+    }
+
+    int selectedCustomTableCount(Set<String> tableIds,Set<String> groupIds){
+        LinkedHashSet<String> unique=new LinkedHashSet<>();
+        if(tableIds!=null)unique.addAll(tableIds);
+        if(groupIds!=null)for(String gid:groupIds){
+            for(TableModel t:tables)if(gid!=null&&gid.equals(t.groupId))unique.add(t.id);
+        }
+        int n=0;for(String id:unique)if(findTable(id)!=null)n++;
+        return n;
+    }
+
+    void showTotalGroupActions(TotalGroupModel tg,Runnable refresh,Set<String> selectedTables,Set<String> selectedGroups){
+        String[] opts={"Dùng nhóm cộng tổng này","Đổi tên","Xóa nhóm cộng tổng"};
+        new AlertDialog.Builder(this).setTitle(tg.name).setItems(opts,(d,i)->{
+            if(i==0){
+                selectedTables.clear();selectedTables.addAll(tg.tableIds);
+                selectedGroups.clear();selectedGroups.addAll(tg.groupIds);
+                if(refresh!=null)refresh.run();
+            }else if(i==1){
+                EditText e=new EditText(this);e.setSingleLine();e.setText(tg.name);e.setSelection(e.length());
+                new AlertDialog.Builder(this).setTitle("Đổi tên nhóm cộng tổng").setView(padded(e))
+                    .setPositiveButton("Lưu",(x,w)->{
+                        String s=e.getText().toString().trim();
+                        if(!s.isEmpty()){tg.name=s;saveNow();if(refresh!=null)refresh.run();}
+                    }).setNegativeButton("Hủy",null).show();
+            }else{
+                new AlertDialog.Builder(this).setTitle("Xóa nhóm cộng tổng?")
+                    .setMessage(tg.name+"\n\nChỉ xóa nhóm cộng tổng đã lưu, không xóa bảng hoặc nhóm dữ liệu.")
+                    .setPositiveButton("Xóa",(x,w)->{
+                        totalGroups.remove(tg);saveNow();renderAll();
+                        if(refresh!=null)refresh.run();
+                    }).setNegativeButton("Hủy",null).show();
+            }
+        }).show();
+    }
+
+    void showTotalComposer(){
+        final Dialog dlg=new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        final HashSet<String> selectedTables=new HashSet<>();
+        final HashSet<String> selectedGroups=new HashSet<>();
+
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(compact?10:16),dp(10),dp(compact?10:16),dp(12));
+        root.setBackgroundColor(Color.rgb(248,250,253));
+
+        LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titleBox=new LinearLayout(this);titleBox.setOrientation(LinearLayout.VERTICAL);
+        TextView title=text("Cộng tổng bảng & nhóm",compact?18:21,true);
+        TextView sub=text("Chọn tự do bảng và nhóm • không cộng trùng bảng",11,false);sub.setTextColor(muted);
+        titleBox.addView(title);titleBox.addView(sub);
+        Button close=smallActionButton("Đóng");
+        header.addView(titleBox,new LinearLayout.LayoutParams(0,dp(58),1));
+        header.addView(close,new LinearLayout.LayoutParams(dp(72),dp(44)));
+        root.addView(header);
+
+        LinearLayout totalCard=new LinearLayout(this);totalCard.setGravity(Gravity.CENTER_VERTICAL);
+        totalCard.setPadding(dp(14),dp(8),dp(14),dp(8));
+        GradientDrawable tbg=new GradientDrawable();tbg.setColor(Color.rgb(232,240,254));tbg.setCornerRadius(dp(20));totalCard.setBackground(tbg);
+        LinearLayout totalLabels=new LinearLayout(this);totalLabels.setOrientation(LinearLayout.VERTICAL);
+        TextView totalCap=text("Tổng đã chọn",12,false);totalCap.setTextColor(muted);
+        TextView totalCount=text("0 bảng",11,false);totalCount.setTextColor(muted);
+        totalLabels.addView(totalCap);totalLabels.addView(totalCount);
+        TextView totalValue=text("0",compact?24:28,true);totalValue.setTextColor(accent);totalValue.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        totalCard.addView(totalLabels,new LinearLayout.LayoutParams(0,dp(58),1));
+        totalCard.addView(totalValue,new LinearLayout.LayoutParams(0,dp(58),1.2f));
+        root.addView(totalCard,new LinearLayout.LayoutParams(-1,dp(72)));
+
+        LinearLayout quick=new LinearLayout(this);quick.setPadding(0,dp(6),0,dp(4));
+        Button allTables=smallActionButton("Tất cả bảng");
+        Button allGroups=smallActionButton("Tất cả nhóm");
+        Button clear=smallActionButton("Bỏ chọn");
+        quick.addView(allTables,new LinearLayout.LayoutParams(0,dp(42),1));
+        quick.addView(allGroups,new LinearLayout.LayoutParams(0,dp(42),1));
+        quick.addView(clear,new LinearLayout.LayoutParams(0,dp(42),1));
+        root.addView(quick);
+
+        ScrollView scroll=new ScrollView(this);installScrollHaptics(scroll);
+        LinearLayout list=new LinearLayout(this);list.setOrientation(LinearLayout.VERTICAL);list.setPadding(0,dp(2),0,dp(6));
+        scroll.addView(list);
+        root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));
+
+        LinearLayout bottom=new LinearLayout(this);bottom.setPadding(0,dp(6),0,0);
+        Button saveGroup=smallActionButton("+ Tạo nhóm cộng tổng");
+        saveGroup.setTextColor(accent);
+        Button dashboard=smallActionButton("Tổng quan");
+        bottom.addView(saveGroup,new LinearLayout.LayoutParams(0,dp(50),1.5f));
+        bottom.addView(dashboard,new LinearLayout.LayoutParams(0,dp(50),1));
+        root.addView(bottom);
+
+        final Runnable[] refresh={null};
+        refresh[0]=()->{
+            totalValue.setText(fmt(selectedCustomTotal(selectedTables,selectedGroups)));
+            totalCount.setText(selectedCustomTableCount(selectedTables,selectedGroups)+" bảng thực tế");
+            list.removeAllViews();
+
+            if(!totalGroups.isEmpty()){
+                TextView savedHead=text("NHÓM CỘNG TỔNG ĐÃ LƯU",11,true);savedHead.setTextColor(muted);savedHead.setPadding(dp(6),dp(8),0,dp(4));
+                list.addView(savedHead,new LinearLayout.LayoutParams(-1,dp(34)));
+                for(TotalGroupModel tg:new ArrayList<>(totalGroups)){
+                    LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(10),dp(4),dp(6),dp(4));
+                    GradientDrawable bg=new GradientDrawable();bg.setColor(Color.WHITE);bg.setStroke(dp(1),Color.rgb(225,228,232));bg.setCornerRadius(dp(16));row.setBackground(bg);
+                    LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
+                    TextView n=text("∑  "+tg.name,14,true);
+                    TextView m=text(selectedCustomTableCount(tg.tableIds,tg.groupIds)+" bảng • "+fmt(selectedCustomTotal(tg.tableIds,tg.groupIds)),11,false);m.setTextColor(muted);
+                    info.addView(n);info.addView(m);
+                    Button use=smallActionButton("Dùng");
+                    TextView more=text("⋮",24,true);more.setGravity(Gravity.CENTER);more.setTextColor(muted);
+                    row.addView(info,new LinearLayout.LayoutParams(0,dp(56),1));
+                    row.addView(use,new LinearLayout.LayoutParams(dp(62),dp(40)));
+                    row.addView(more,new LinearLayout.LayoutParams(dp(42),dp(48)));
+                    use.setOnClickListener(v->{
+                        haptic(v);selectedTables.clear();selectedTables.addAll(tg.tableIds);
+                        selectedGroups.clear();selectedGroups.addAll(tg.groupIds);refresh[0].run();
+                    });
+                    more.setOnClickListener(v->{haptic(v);showTotalGroupActions(tg,refresh[0],selectedTables,selectedGroups);});
+                    list.addView(row,new LinearLayout.LayoutParams(-1,dp(62)));
+                }
+            }
+
+            TextView gh=text("NHÓM",11,true);gh.setTextColor(muted);gh.setPadding(dp(6),dp(10),0,dp(4));
+            list.addView(gh,new LinearLayout.LayoutParams(-1,dp(38)));
+            for(GroupModel g:orderedGroups()){
+                LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(8),dp(2),dp(6),dp(2));
+                CheckBox cb=new CheckBox(this);cb.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));cb.setChecked(selectedGroups.contains(g.id));
+                LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
+                TextView n=text(g.name,14,true);
+                TextView m=text(inGroup(g.id).size()+" bảng • "+fmt(groupTotal(g.id)),11,false);m.setTextColor(muted);
+                info.addView(n);info.addView(m);
+                row.addView(cb,new LinearLayout.LayoutParams(dp(48),dp(56)));
+                row.addView(info,new LinearLayout.LayoutParams(0,dp(56),1));
+                cb.setOnCheckedChangeListener((b,on)->{
+                    if(on)selectedGroups.add(g.id);else selectedGroups.remove(g.id);
+                    totalValue.setText(fmt(selectedCustomTotal(selectedTables,selectedGroups)));
+                    totalCount.setText(selectedCustomTableCount(selectedTables,selectedGroups)+" bảng thực tế");
+                });
+                info.setOnClickListener(v->{cb.setChecked(!cb.isChecked());});
+                list.addView(row,new LinearLayout.LayoutParams(-1,dp(58)));
+            }
+
+            TextView th=text("BẢNG",11,true);th.setTextColor(muted);th.setPadding(dp(6),dp(10),0,dp(4));
+            list.addView(th,new LinearLayout.LayoutParams(-1,dp(38)));
+            for(TableModel t:tables){
+                LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(8),dp(2),dp(6),dp(2));
+                CheckBox cb=new CheckBox(this);cb.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));cb.setChecked(selectedTables.contains(t.id));
+                LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
+                TextView n=text(t.title,14,true);
+                String gn=groupNameFor(t.groupId);
+                TextView m=text((gn.isEmpty()?"Chưa nhóm":gn)+" • "+fmt(t.total()),11,false);m.setTextColor(muted);
+                info.addView(n);info.addView(m);
+                row.addView(cb,new LinearLayout.LayoutParams(dp(48),dp(54)));
+                row.addView(info,new LinearLayout.LayoutParams(0,dp(54),1));
+                cb.setOnCheckedChangeListener((b,on)->{
+                    if(on)selectedTables.add(t.id);else selectedTables.remove(t.id);
+                    totalValue.setText(fmt(selectedCustomTotal(selectedTables,selectedGroups)));
+                    totalCount.setText(selectedCustomTableCount(selectedTables,selectedGroups)+" bảng thực tế");
+                });
+                info.setOnClickListener(v->{cb.setChecked(!cb.isChecked());});
+                list.addView(row,new LinearLayout.LayoutParams(-1,dp(56)));
+            }
+        };
+        refresh[0].run();
+
+        allTables.setOnClickListener(v->{
+            haptic(v);selectedGroups.clear();selectedTables.clear();
+            for(TableModel t:tables)selectedTables.add(t.id);refresh[0].run();
+        });
+        allGroups.setOnClickListener(v->{
+            haptic(v);selectedTables.clear();selectedGroups.clear();
+            for(GroupModel g:groups)selectedGroups.add(g.id);refresh[0].run();
+        });
+        clear.setOnClickListener(v->{haptic(v);selectedTables.clear();selectedGroups.clear();refresh[0].run();});
+        close.setOnClickListener(v->dlg.dismiss());
+        dashboard.setOnClickListener(v->{haptic(v);showDashboard();});
+
+        saveGroup.setOnClickListener(v->{
+            haptic(v);
+            if(selectedCustomTableCount(selectedTables,selectedGroups)==0){
+                Toast.makeText(this,"Chưa chọn bảng hoặc nhóm",Toast.LENGTH_SHORT).show();return;
+            }
+            EditText e=new EditText(this);e.setSingleLine();e.setHint("Ví dụ: Doanh thu khu vực Bắc");
+            new AlertDialog.Builder(this).setTitle("Tạo nhóm cộng tổng").setView(padded(e))
+                .setMessage("Nhóm cộng tổng chỉ lưu cách chọn để tính tổng. Không di chuyển bảng và không thay đổi nhóm dữ liệu hiện có.")
+                .setPositiveButton("Tạo",(d,w)->{
+                    String name=e.getText().toString().trim();
+                    if(name.isEmpty())name="Nhóm cộng tổng "+(totalGroups.size()+1);
+                    TotalGroupModel tg=new TotalGroupModel();tg.id=id();tg.name=name;
+                    tg.tableIds.addAll(selectedTables);tg.groupIds.addAll(selectedGroups);
+                    totalGroups.add(tg);saveNow();refresh[0].run();
+                    Toast.makeText(this,"Đã tạo nhóm cộng tổng",Toast.LENGTH_SHORT).show();
+                }).setNegativeButton("Hủy",null).show();
+        });
+
+        dlg.setContentView(root);
+        dlg.setOnShowListener(x->{
+            Window w=dlg.getWindow();if(w==null)return;
+            w.setBackgroundDrawableResource(android.R.color.transparent);
+            int sw=getResources().getConfiguration().screenWidthDp;
+            if(sw<600){
+                w.setGravity(Gravity.BOTTOM);
+                w.setLayout(WindowManager.LayoutParams.MATCH_PARENT,(int)(getResources().getDisplayMetrics().heightPixels*.90f));
+            }else{
+                w.setGravity(Gravity.CENTER);
+                w.setLayout(Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(760)),
+                        (int)(getResources().getDisplayMetrics().heightPixels*.84f));
+            }
+        });
+        dlg.show();
+    }
+
     void showDashboard(){
         int calc=0,cancel=0,locked=0;
         double total=0;
@@ -3941,7 +4217,17 @@ public class MainActivity extends Activity {
     }
 
     void showSettingsDialog(){
-        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(18),dp(8),dp(18),0);
+        ScrollView settingsScroll=new ScrollView(this);
+        settingsScroll.setFillViewport(true);
+        settingsScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        installScrollHaptics(settingsScroll);
+
+        LinearLayout box=new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(18),dp(10),dp(18),dp(18));
+        settingsScroll.addView(box,new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,ViewGroup.LayoutParams.WRAP_CONTENT));
+
         TextView t=text("Chế độ nhập",14,true);box.addView(t);
         RadioGroup rg=new RadioGroup(this);
         String[] labels={"Kiểu List Calculator (tự xuống dòng)","Enter/Tab tự chuyển ô","Thủ công"};
@@ -3972,44 +4258,147 @@ public class MainActivity extends Activity {
         for(int i=0;i<scrollLabels.length;i++){RadioButton r=new RadioButton(this);r.setText(scrollLabels[i]);r.setId(400+i);scrollHaptics.addView(r);}
         scrollHaptics.check(400+scrollHapticLevel);box.addView(scrollHaptics);
 
-        TextView holdTitle=text("Nhấn giữ để xóa dòng",14,true);holdTitle.setPadding(0,dp(14),0,0);box.addView(holdTitle);
-        TextView holdValue=text("",12,true);holdValue.setTextColor(accent);box.addView(holdValue);
-        TextView holdDesc=text("Kéo thanh để chọn thời gian giữ trước khi mở hộp Xóa dòng. Chỉ áp dụng thao tác xóa dòng; giữ STT để kéo dòng vẫn giữ thời gian hệ thống.",11,false);
-        holdDesc.setTextColor(muted);box.addView(holdDesc);
+        TextView holdTitle=text("Thời gian nhấn giữ để xóa dòng",14,true);
+        holdTitle.setPadding(0,dp(16),0,0);
+        box.addView(holdTitle);
+
+        TextView holdDesc=text("Áp dụng giống nhau ở màn ngoài và màn trong. Giữ ô Đơn giá / SL / Thành tiền / Tên đại lý / Số lượng để mở Xóa dòng. Ô STT có ký hiệu ☰ vẫn dành riêng cho kéo dòng.",11,false);
+        holdDesc.setTextColor(muted);
+        box.addView(holdDesc);
+
+        LinearLayout holdCard=new LinearLayout(this);
+        holdCard.setOrientation(LinearLayout.VERTICAL);
+        holdCard.setPadding(dp(12),dp(10),dp(12),dp(10));
+        GradientDrawable holdCardBg=new GradientDrawable();
+        holdCardBg.setColor(Color.rgb(243,246,250));
+        holdCardBg.setStroke(dp(1),Color.rgb(218,220,224));
+        holdCardBg.setCornerRadius(dp(18));
+        holdCard.setBackground(holdCardBg);
+
+        TextView holdValue=text("",16,true);
+        holdValue.setTextColor(accent);
+        holdValue.setGravity(Gravity.CENTER);
+        holdCard.addView(holdValue,new LinearLayout.LayoutParams(-1,dp(34)));
 
         SeekBar deleteHoldSeek=new SeekBar(this);
-        deleteHoldSeek.setMax(9); // 300ms + 0..9 × 100ms = 300..1200ms
-        deleteHoldSeek.setProgress(Math.max(0,Math.min(9,(deleteRowHoldMs-300)/100)));
-        java.util.function.IntConsumer updateHoldLabel=ms->{
-            holdValue.setText(String.format(Locale.getDefault(),"Thời gian hiện tại: %.1f giây",ms/1000f));
-        };
-        updateHoldLabel.accept(300+deleteHoldSeek.getProgress()*100);
-        deleteHoldSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            @Override public void onProgressChanged(SeekBar s,int progress,boolean fromUser){
-                updateHoldLabel.accept(300+progress*100);
-            }
-            @Override public void onStartTrackingTouch(SeekBar s){}
-            @Override public void onStopTrackingTouch(SeekBar s){}
-        });
-        box.addView(deleteHoldSeek,new LinearLayout.LayoutParams(-1,dp(48)));
+        deleteHoldSeek.setMax(18); // 300ms + 18*50ms = 1200ms
+        int initialHoldProgress=Math.max(0,Math.min(18,(deleteRowHoldMs-300)/50));
+        deleteHoldSeek.setProgress(initialHoldProgress);
+        holdCard.addView(deleteHoldSeek,new LinearLayout.LayoutParams(-1,dp(50)));
 
         LinearLayout holdEnds=new LinearLayout(this);holdEnds.setGravity(Gravity.CENTER_VERTICAL);
-        TextView fast=text("0,3s • nhanh",10,false);fast.setTextColor(muted);
-        TextView slow=text("1,2s • chậm",10,false);slow.setTextColor(muted);slow.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
-        holdEnds.addView(fast,new LinearLayout.LayoutParams(0,dp(24),1));
-        holdEnds.addView(slow,new LinearLayout.LayoutParams(0,dp(24),1));
-        box.addView(holdEnds);
+        TextView fast=text("0,3 giây • nhanh",10,false);fast.setTextColor(muted);
+        TextView slow=text("1,2 giây • chậm",10,false);slow.setTextColor(muted);slow.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        holdEnds.addView(fast,new LinearLayout.LayoutParams(0,dp(22),1));
+        holdEnds.addView(slow,new LinearLayout.LayoutParams(0,dp(22),1));
+        holdCard.addView(holdEnds);
 
-        new AlertDialog.Builder(this).setTitle("Cài đặt").setView(box)
+        LinearLayout holdPresets=new LinearLayout(this);
+        holdPresets.setPadding(0,dp(6),0,0);
+        Button hold300=smallActionButton("0,3s");
+        Button hold500=smallActionButton("0,5s");
+        Button hold800=smallActionButton("0,8s");
+        Button hold1200=smallActionButton("1,2s");
+        holdPresets.addView(hold300,new LinearLayout.LayoutParams(0,dp(40),1));
+        holdPresets.addView(hold500,new LinearLayout.LayoutParams(0,dp(40),1));
+        holdPresets.addView(hold800,new LinearLayout.LayoutParams(0,dp(40),1));
+        holdPresets.addView(hold1200,new LinearLayout.LayoutParams(0,dp(40),1));
+        holdCard.addView(holdPresets);
+
+        Button testDeleteHold=smallActionButton("Giữ nút này để thử thời gian xóa dòng");
+        testDeleteHold.setTextColor(accent);
+        holdCard.addView(testDeleteHold,new LinearLayout.LayoutParams(-1,dp(48)));
+        box.addView(holdCard);
+
+        final int[] draftDeleteHold={300+deleteHoldSeek.getProgress()*50};
+        java.util.function.IntConsumer updateHoldUi=ms->{
+            ms=Math.max(300,Math.min(1200,ms));
+            draftDeleteHold[0]=ms;
+            holdValue.setText(String.format(Locale.getDefault(),"%.2f giây",ms/1000f).replace(".00","").replace(".50",".5"));
+        };
+        updateHoldUi.accept(draftDeleteHold[0]);
+
+        deleteHoldSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar s,int progress,boolean fromUser){
+                updateHoldUi.accept(300+progress*50);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s){}
+            @Override public void onStopTrackingTouch(SeekBar s){
+                // Áp dụng ngay để người dùng có thể thử mà không cần đóng Cài đặt.
+                deleteRowHoldMs=draftDeleteHold[0];
+                getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                        .putInt(DELETE_HOLD_KEY,deleteRowHoldMs).apply();
+                hapticTick(s);
+            }
+        });
+
+        View.OnClickListener presetHold=v->{
+            int ms=v==hold300?300:(v==hold500?500:(v==hold800?800:1200));
+            deleteHoldSeek.setProgress((ms-300)/50);
+            updateHoldUi.accept(ms);
+            deleteRowHoldMs=ms;
+            getSharedPreferences(PREFS,MODE_PRIVATE).edit()
+                    .putInt(DELETE_HOLD_KEY,deleteRowHoldMs).apply();
+            hapticTick(v);
+        };
+        hold300.setOnClickListener(presetHold);
+        hold500.setOnClickListener(presetHold);
+        hold800.setOnClickListener(presetHold);
+        hold1200.setOnClickListener(presetHold);
+
+        final Handler testHoldHandler=new Handler(Looper.getMainLooper());
+        final boolean[] testHoldArmed={false};
+        final Runnable testHoldFire=()->{
+            if(!testHoldArmed[0])return;
+            testHoldArmed[0]=false;
+            hapticDanger(testDeleteHold);
+            testDeleteHold.setText("✓ Đã đủ thời gian • "+String.format(Locale.getDefault(),"%.2fs",draftDeleteHold[0]/1000f));
+            testDeleteHold.postDelayed(()->testDeleteHold.setText("Giữ nút này để thử thời gian xóa dòng"),1100);
+        };
+        testDeleteHold.setOnTouchListener((v,e)->{
+            int a=e.getActionMasked();
+            if(a==MotionEvent.ACTION_DOWN){
+                testHoldArmed[0]=true;
+                testHoldHandler.removeCallbacks(testHoldFire);
+                testHoldHandler.postDelayed(testHoldFire,draftDeleteHold[0]);
+                return true;
+            }
+            if(a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL){
+                testHoldArmed[0]=false;
+                testHoldHandler.removeCallbacks(testHoldFire);
+                return true;
+            }
+            return true;
+        });
+
+        AlertDialog settingsDialog=new AlertDialog.Builder(this)
+            .setTitle("Cài đặt")
+            .setView(settingsScroll)
             .setPositiveButton("Lưu",(d,w)->{
                 int id=rg.getCheckedRadioButtonId();fastInputMode=Math.max(0,id-100);
                 shareHideBlank=cb.isChecked();
                 densityMode=Math.max(0,density.getCheckedRadioButtonId()-200);
                 hapticStyle=Math.max(0,haptics.getCheckedRadioButtonId()-300);
                 scrollHapticLevel=Math.max(0,scrollHaptics.getCheckedRadioButtonId()-400);
-                deleteRowHoldMs=300+deleteHoldSeek.getProgress()*100;
-                saveUiState();renderAll();hapticConfirm(box);Toast.makeText(this,"Đã lưu cài đặt",Toast.LENGTH_SHORT).show();
-            }).setNegativeButton("Hủy",null).show();
+                deleteRowHoldMs=draftDeleteHold[0];
+                saveUiState();renderAll();hapticConfirm(box);
+                Toast.makeText(this,"Đã lưu cài đặt • Giữ xóa dòng "+deleteRowHoldMs+" ms",Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Đóng",null)
+            .create();
+
+        settingsDialog.setOnShowListener(x->{
+            Window w=settingsDialog.getWindow();
+            if(w!=null){
+                int screenH=getResources().getDisplayMetrics().heightPixels;
+                int maxH=(int)(screenH*(compact?0.88f:0.82f));
+                w.setLayout(compact?WindowManager.LayoutParams.MATCH_PARENT:
+                        Math.min(getResources().getDisplayMetrics().widthPixels-dp(40),dp(620)),
+                        maxH);
+                w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+            }
+        });
+        settingsDialog.show();
     }
 
     @Override public boolean dispatchKeyEvent(KeyEvent e){
@@ -4464,7 +4853,7 @@ public class MainActivity extends Activity {
         saveScheduled=true;
         saveHandler.postAtTime(()->saveNow(),"SAVE",SystemClock.uptimeMillis()+350);
     }
-    void saveNow(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());root.put("groups",ga).put("tables",ta);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();saveUiState();saveScheduled=false;}catch(Exception ignored){saveScheduled=false;}}
+    void saveNow(){try{JSONObject root=new JSONObject();JSONArray ga=new JSONArray();for(GroupModel g:groups)ga.put(g.json());JSONArray ta=new JSONArray();for(TableModel t:tables)ta.put(t.json());JSONArray tga=new JSONArray();for(TotalGroupModel g:totalGroups)tga.put(g.json());root.put("groups",ga).put("tables",ta).put("totalGroups",tga);getSharedPreferences(PREFS,MODE_PRIVATE).edit().putString(DATA,root.toString()).apply();saveUiState();saveScheduled=false;}catch(Exception ignored){saveScheduled=false;}}
     void flushSave(){
         if(saveScheduled)saveNow();
     }
@@ -4474,10 +4863,35 @@ public class MainActivity extends Activity {
         super.onPause();
     }
 
-    void load(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(DATA,null);if(s!=null){try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));return;}catch(Exception ignored){}}migrateOld();}
+    void load(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(DATA,null);if(s!=null){try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++)tables.add(TableModel.from(ta.getJSONObject(i)));JSONArray tga=o.optJSONArray("totalGroups");if(tga!=null)for(int i=0;i<tga.length();i++)totalGroups.add(TotalGroupModel.from(tga.getJSONObject(i)));return;}catch(Exception ignored){}}migrateOld();}
     void migrateOld(){String s=getSharedPreferences(PREFS,MODE_PRIVATE).getString(OLD_DATA,null);if(s==null)return;try{JSONObject o=new JSONObject(s);JSONArray ga=o.optJSONArray("groups");if(ga!=null)for(int i=0;i<ga.length();i++)groups.add(GroupModel.from(ga.getJSONObject(i)));JSONArray ta=o.optJSONArray("tables");if(ta!=null)for(int i=0;i<ta.length();i++){JSONObject x=ta.getJSONObject(i);TableModel t=new TableModel();t.id=x.optString("id",id());t.type=x.optString("type","calc");t.title=x.optString("title","Bảng");t.groupId=x.optString("groupId","");t.updated=System.currentTimeMillis();if("cancel".equals(t.type)){JSONArray c=x.optJSONArray("cancelRows");if(c!=null)for(int j=0;j<c.length();j++){JSONObject z=c.optJSONObject(j);t.cancelRows.add(new CancelRow(z.optString("agent"),z.optLong("qty")));}}else{JSONArray v=x.optJSONArray("values");if(v!=null)for(int j=0;j<v.length();j++){CalcRow cr=new CalcRow();cr.price=v.optDouble(j);cr.qty=1;t.calcRows.add(cr);}}tables.add(t);}save();}catch(Exception ignored){}}
 
     TableModel selected(){return findTable(selectedId);}TableModel findTable(String id){if(id==null)return null;for(TableModel t:tables)if(id.equals(t.id))return t;return null;}ArrayList<TableModel> inGroup(String gid){ArrayList<TableModel> a=new ArrayList<>();for(TableModel t:tables)if(gid.equals(t.groupId))a.add(t);return a;}double groupTotal(String gid){double x=0;for(TableModel t:tables)if(gid.equals(t.groupId))x+=t.total();return x;}
+
+    static class TotalGroupModel{
+        String id,name;
+        final HashSet<String> tableIds=new HashSet<>();
+        final HashSet<String> groupIds=new HashSet<>();
+        long created=System.currentTimeMillis();
+
+        JSONObject json()throws Exception{
+            JSONObject o=new JSONObject().put("id",id).put("name",name).put("created",created);
+            JSONArray ta=new JSONArray();for(String s:tableIds)ta.put(s);
+            JSONArray ga=new JSONArray();for(String s:groupIds)ga.put(s);
+            o.put("tableIds",ta).put("groupIds",ga);
+            return o;
+        }
+
+        static TotalGroupModel from(JSONObject o){
+            TotalGroupModel g=new TotalGroupModel();
+            g.id=o.optString("id");
+            g.name=o.optString("name","Nhóm cộng tổng");
+            g.created=o.optLong("created",System.currentTimeMillis());
+            JSONArray ta=o.optJSONArray("tableIds");if(ta!=null)for(int i=0;i<ta.length();i++)g.tableIds.add(ta.optString(i));
+            JSONArray ga=o.optJSONArray("groupIds");if(ga!=null)for(int i=0;i<ga.length();i++)g.groupIds.add(ga.optString(i));
+            return g;
+        }
+    }
 
     static class GroupModel{
         String id,name;
