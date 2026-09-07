@@ -25,7 +25,8 @@ public class MainActivity extends Activity {
         FORMAT_KEY="number_format_mode", SELECTED_KEY="selected_table_id", ACTIVE_ROW_KEY="active_row",
         ACTIVE_FIELD_KEY="active_field", COLLAPSED_KEY="collapsed_groups", FAST_INPUT_KEY="fast_input_mode",
         SHARE_BLANK_KEY="share_hide_blank", DENSITY_KEY="density_mode", SIDEBAR_MODE_KEY="sidebar_compact_mode", CASH_BASE_KEY="cash_base_amount", CASH_SCOPE_KEY="cash_scope",
-        CASH_HISTORY_KEY="cash_history_v1", TEMPLATE_KEY="table_templates_v1", HAPTIC_STYLE_KEY="haptic_style_v1", SCROLL_HAPTIC_KEY="scroll_haptic_v1";
+        CASH_HISTORY_KEY="cash_history_v1", TEMPLATE_KEY="table_templates_v1", HAPTIC_STYLE_KEY="haptic_style_v1", SCROLL_HAPTIC_KEY="scroll_haptic_v1",
+        DELETE_HOLD_KEY="delete_row_hold_ms_v1";
     static final int REQ_BACKUP=501, REQ_RESTORE=502;
     final ArrayList<GroupModel> groups=new ArrayList<>();
     final ArrayList<TableModel> tables=new ArrayList<>();
@@ -64,6 +65,8 @@ public class MainActivity extends Activity {
     int densityMode=0; // 0=Auto, 1=Compact, 2=Comfortable
     int hapticStyle=2; // 0=Tắt, 1=Apple-like, 2=DualSense-like, 3=Samsung
     int scrollHapticLevel=1; // 0=Tắt, 1=Nhẹ, 2=Vừa
+    int deleteRowHoldMs=500; // thời gian giữ để mở Xóa dòng: 300..1200ms
+    final Set<View> suppressClickAfterDeleteHold=Collections.newSetFromMap(new WeakHashMap<View,Boolean>());
     int managerSortMode=0; // 0=kéo tay,1=tên,2=sửa mới,3=sửa cũ,4=tạo mới,5=tổng lớn,6=nhiều dòng
     View revealedSwipeRow=null;
     PopupWindow swipePreviewPopup=null, undoPopup=null;
@@ -114,6 +117,7 @@ public class MainActivity extends Activity {
         densityMode=p.getInt(DENSITY_KEY,0);
         hapticStyle=p.getInt(HAPTIC_STYLE_KEY,2);
         scrollHapticLevel=p.getInt(SCROLL_HAPTIC_KEY,1);
+        deleteRowHoldMs=Math.max(300,Math.min(1200,p.getInt(DELETE_HOLD_KEY,500)));
         sidebarCompactMode=p.getBoolean(SIDEBAR_MODE_KEY,false);
         cashBaseAmount=Double.longBitsToDouble(p.getLong(CASH_BASE_KEY,Double.doubleToLongBits(0)));
         cashScope=p.getInt(CASH_SCOPE_KEY,0);
@@ -467,8 +471,11 @@ public class MainActivity extends Activity {
     }
 
     void openTableNavigation(){
-        if(compact)openCoverDrawer();
-        else showTableManagerSheet();
+        // Thống nhất hành vi giữa màn ngoài và màn trong:
+        // nút QL luôn mở màn Quản lý bảng & nhóm đầy đủ.
+        // Drawer bên trái ở màn ngoài vẫn dùng cho duyệt nhanh bằng vuốt hoặc chạm tiêu đề bảng.
+        if(coverDrawerOpen)closeCoverDrawer();
+        showTableManagerSheet();
     }
 
     void openCoverDrawer(){
@@ -599,16 +606,21 @@ public class MainActivity extends Activity {
         if(swDp<600 && !landscape){
             tableBtn.setText("☰ QL");
             del.setText("⌫ Xóa");
-            undoBtn.setText("↶ Undo");
-            share.setText("↗ Share");
+            undoBtn.setText(swDp<390?"↶ Hoàn":"↶ Hoàn tác");
+            share.setText(swDp<390?"↗ Chia":"↗ Chia sẻ");
             addCalc.setText("＋ Tính");
             addCancel.setText("＋ Hủy");
-            tableBtn.setTextSize(12);del.setTextSize(12);undoBtn.setTextSize(12);share.setTextSize(12);
-            addCalc.setTextSize(13);addCancel.setTextSize(13);
-            tableBtn.setSingleLine(true);del.setSingleLine(true);undoBtn.setSingleLine(true);share.setSingleLine(true);
-            addCalc.setSingleLine(true);addCancel.setSingleLine(true);quick1000.setSingleLine(true);
-            tableBtn.setEllipsize(TextUtils.TruncateAt.END);del.setEllipsize(TextUtils.TruncateAt.END);
-            undoBtn.setEllipsize(TextUtils.TruncateAt.END);share.setEllipsize(TextUtils.TruncateAt.END);
+            tableBtn.setTextSize(11.5f);del.setTextSize(11.5f);undoBtn.setTextSize(11.0f);share.setTextSize(11.0f);
+            addCalc.setTextSize(12.5f);addCancel.setTextSize(12.5f);
+            Button[] compactTopButtons={tableBtn,del,undoBtn,share,quick1000,addCalc,addCancel};
+            for(Button b:compactTopButtons){
+                b.setSingleLine(true);
+                b.setMaxLines(1);
+                b.setEllipsize(TextUtils.TruncateAt.END);
+                b.setGravity(Gravity.CENTER);
+                b.setPadding(dp(4),0,dp(4),0);
+                b.setIncludeFontPadding(false);
+            }
         }
 
         // Phân cấp thị giác: thao tác chính nổi bật, thao tác nguy hiểm dịu hơn.
@@ -639,15 +651,15 @@ public class MainActivity extends Activity {
         if((compact && !compactLandscape)||(smallTablet && !landscape)){
             LinearLayout r1=new LinearLayout(this);r1.setGravity(Gravity.CENTER);
             LinearLayout r2=new LinearLayout(this);r2.setGravity(Gravity.CENTER);
-            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(42),1.35f));
-            r1.addView(del,new LinearLayout.LayoutParams(0,dp(42),1f));
-            r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(42),1.1f));
-            r1.addView(share,new LinearLayout.LayoutParams(0,dp(42),1f));
-            r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(42),.9f));
-            r2.addView(addCalc,new LinearLayout.LayoutParams(0,dp(42),1.25f));
-            r2.addView(addCancel,new LinearLayout.LayoutParams(0,dp(42),1.35f));
-            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(46)));
-            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(46)));
+            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+            r1.addView(del,new LinearLayout.LayoutParams(0,dp(44),1.00f));
+            r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+            r1.addView(share,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+            r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(44),.92f));
+            r2.addView(addCalc,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+            r2.addView(addCancel,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+            top.addView(r1,new LinearLayout.LayoutParams(-1,dp(48)));
+            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(48)));
         }else{
             int h=dp(compactLandscape?38:44);
             top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.32f));
@@ -1271,13 +1283,14 @@ public class MainActivity extends Activity {
         LinearLayout head=gridRow();
         int hh=dp(headerRowDp());
         head.setLayoutParams(new LinearLayout.LayoutParams(-1,hh));
-        TextView hSt=cell("STT",13,true,Gravity.CENTER);
+        TextView hSt=cell(compact?"#":"STT",compact?12:13,true,Gravity.CENTER);
+        hSt.setSingleLine(true);hSt.setMaxLines(1);hSt.setIncludeFontPadding(false);
         TextView hPrice=cell("Đơn giá",13,true,Gravity.CENTER);
         TextView hQty=cell("SL",13,true,Gravity.CENTER);
         TextView hTotal=cell("Thành tiền",13,true,Gravity.END|Gravity.CENTER_VERTICAL);
         fillCell(hSt,Color.rgb(245,247,250));fillCell(hPrice,Color.rgb(245,247,250));fillCell(hQty,Color.rgb(245,247,250));fillCell(hTotal,Color.rgb(245,247,250));
         hSt.setTextColor(muted);hPrice.setTextColor(muted);hQty.setTextColor(muted);hTotal.setTextColor(muted);
-        head.addView(hSt,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.45f));
+        head.addView(hSt,w(0,ViewGroup.LayoutParams.MATCH_PARENT,compact?0.58f:0.45f));
         head.addView(hPrice,w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
         head.addView(hQty,w(0,ViewGroup.LayoutParams.MATCH_PARENT,1));
         head.addView(hTotal,w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
@@ -1365,6 +1378,48 @@ public class MainActivity extends Activity {
         v.setTextColor(ink);
     }
 
+    boolean consumeDeleteHoldClick(View v){
+        return v!=null && suppressClickAfterDeleteHold.remove(v);
+    }
+
+    void installDeleteRowHold(View v,Runnable action){
+        if(v==null||action==null)return;
+        final int slop=ViewConfiguration.get(this).getScaledTouchSlop();
+        final float[] downX={0},downY={0};
+        final boolean[] armed={false};
+
+        final Runnable fire=()->{
+            if(!armed[0])return;
+            armed[0]=false;
+            suppressClickAfterDeleteHold.add(v);
+            hapticDanger(v);
+            action.run();
+        };
+
+        // Không dùng Android long-click mặc định vì timeout hệ thống không chỉnh riêng
+        // cho từng app/view được. Tự hẹn giờ để Cài đặt có hiệu lực chính xác.
+        v.setOnLongClickListener(null);
+        v.setOnTouchListener((view,e)->{
+            int a=e.getActionMasked();
+            if(a==MotionEvent.ACTION_DOWN){
+                suppressClickAfterDeleteHold.remove(view);
+                downX[0]=e.getX();downY[0]=e.getY();
+                armed[0]=true;
+                view.removeCallbacks(fire);
+                view.postDelayed(fire,deleteRowHoldMs);
+            }else if(a==MotionEvent.ACTION_MOVE){
+                if(Math.abs(e.getX()-downX[0])>slop||Math.abs(e.getY()-downY[0])>slop){
+                    armed[0]=false;
+                    view.removeCallbacks(fire);
+                }
+            }else if(a==MotionEvent.ACTION_UP||a==MotionEvent.ACTION_CANCEL){
+                armed[0]=false;
+                view.removeCallbacks(fire);
+            }
+            return false; // vẫn cho click/scroll RecyclerView hoạt động bình thường
+        });
+    }
+
     class CalcAdapter extends RecyclerView.Adapter<CalcAdapter.H>{
         final TableModel t;
         CalcAdapter(TableModel x){t=x;}
@@ -1411,23 +1466,18 @@ public class MainActivity extends Activity {
                     saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();
                 }
             });
-            h.p.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
-            h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
-            View.OnLongClickListener deleteRowsLong=v->{
-                haptic(v);
-                showRowDeleteDialog(t,row);
-                return true;
-            };
-            h.row.setOnLongClickListener(deleteRowsLong);
+            h.p.setOnClickListener(v->{if(consumeDeleteHoldClick(v))return;previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="price";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            h.q.setOnClickListener(v->{if(consumeDeleteHoldClick(v))return;previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            installDeleteRowHold(h.row,()->showRowDeleteDialog(t,row));
+            installDeleteRowHold(h.p,()->showRowDeleteDialog(t,row));
+            installDeleteRowHold(h.q,()->showRowDeleteDialog(t,row));
+            installDeleteRowHold(h.total,()->showRowDeleteDialog(t,row));
             h.st.setOnLongClickListener(v->{
                 if(r==null||r.blank())return true;
                 haptic(v);
                 if(rowTouchHelper!=null)rowTouchHelper.startDrag(h);
                 return true;
             });
-            h.p.setOnLongClickListener(deleteRowsLong);
-            h.q.setOnLongClickListener(deleteRowsLong);
-            h.total.setOnLongClickListener(deleteRowsLong);
         }
         @Override public int getItemCount(){return Math.max(8,t.calcRows.size());}
     }
@@ -1472,23 +1522,18 @@ public class MainActivity extends Activity {
                     explicitCellSelection=false;saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();
                 }
             });
-            h.a.setOnClickListener(v->{ensureCancelRow(t,row);editAgent(t,row);});
-            h.q.setOnClickListener(v->{previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
+            h.a.setOnClickListener(v->{if(consumeDeleteHoldClick(v))return;ensureCancelRow(t,row);editAgent(t,row);});
+            h.q.setOnClickListener(v->{if(consumeDeleteHoldClick(v))return;previousActiveRow=activeRow;activeRow=row;pendingScrollRow=row;activeField="qty";explicitCellSelection=true;ensureCancelRow(t,row);saveUiState();notifyDataSetChanged();previousActiveRow=activeRow;renderKeypads();});
 
-            View.OnLongClickListener deleteRowsLong=v->{
-                haptic(v);
-                showRowDeleteDialog(t,row);
-                return true;
-            };
-            h.row.setOnLongClickListener(deleteRowsLong);
+            installDeleteRowHold(h.row,()->showRowDeleteDialog(t,row));
+            installDeleteRowHold(h.a,()->showRowDeleteDialog(t,row));
+            installDeleteRowHold(h.q,()->showRowDeleteDialog(t,row));
             h.st.setOnLongClickListener(v->{
                 if(r==null||r.blank())return true;
                 haptic(v);
                 if(rowTouchHelper!=null)rowTouchHelper.startDrag(h);
                 return true;
             });
-            h.a.setOnLongClickListener(deleteRowsLong);
-            h.q.setOnLongClickListener(deleteRowsLong);
         }
         @Override public int getItemCount(){return Math.max(8,t.cancelRows.size());}
     }
@@ -2182,6 +2227,7 @@ public class MainActivity extends Activity {
             .putInt(DENSITY_KEY,densityMode)
             .putInt(HAPTIC_STYLE_KEY,hapticStyle)
             .putInt(SCROLL_HAPTIC_KEY,scrollHapticLevel)
+            .putInt(DELETE_HOLD_KEY,deleteRowHoldMs)
             .putBoolean(SIDEBAR_MODE_KEY,sidebarCompactMode)
             .putLong(CASH_BASE_KEY,Double.doubleToLongBits(cashBaseAmount))
             .putInt(CASH_SCOPE_KEY,cashScope)
@@ -2662,7 +2708,7 @@ public class MainActivity extends Activity {
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         TextView title=text("Quản lý bảng & nhóm",managerScreenW<380?18:20,true);
-        TextView hint=text(managerScreenW<420?"Tìm/lọc • Chọn nhiều • Giữ ≡ để kéo":"Tìm/lọc/sắp xếp • Chọn nhiều • Giữ ≡ để kéo",11,false);
+        TextView hint=text(managerScreenW<420?"Chọn tất cả • Xóa bảng • Giữ ≡ để kéo":"Tìm/lọc/sắp xếp • Chọn tất cả • Xóa bảng • Giữ ≡ để kéo",11,false);
         hint.setTextColor(muted);
         LinearLayout titleBox=new LinearLayout(this);titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.addView(title);titleBox.addView(hint);
@@ -3926,6 +3972,34 @@ public class MainActivity extends Activity {
         for(int i=0;i<scrollLabels.length;i++){RadioButton r=new RadioButton(this);r.setText(scrollLabels[i]);r.setId(400+i);scrollHaptics.addView(r);}
         scrollHaptics.check(400+scrollHapticLevel);box.addView(scrollHaptics);
 
+        TextView holdTitle=text("Nhấn giữ để xóa dòng",14,true);holdTitle.setPadding(0,dp(14),0,0);box.addView(holdTitle);
+        TextView holdValue=text("",12,true);holdValue.setTextColor(accent);box.addView(holdValue);
+        TextView holdDesc=text("Kéo thanh để chọn thời gian giữ trước khi mở hộp Xóa dòng. Chỉ áp dụng thao tác xóa dòng; giữ STT để kéo dòng vẫn giữ thời gian hệ thống.",11,false);
+        holdDesc.setTextColor(muted);box.addView(holdDesc);
+
+        SeekBar deleteHoldSeek=new SeekBar(this);
+        deleteHoldSeek.setMax(9); // 300ms + 0..9 × 100ms = 300..1200ms
+        deleteHoldSeek.setProgress(Math.max(0,Math.min(9,(deleteRowHoldMs-300)/100)));
+        java.util.function.IntConsumer updateHoldLabel=ms->{
+            holdValue.setText(String.format(Locale.getDefault(),"Thời gian hiện tại: %.1f giây",ms/1000f));
+        };
+        updateHoldLabel.accept(300+deleteHoldSeek.getProgress()*100);
+        deleteHoldSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            @Override public void onProgressChanged(SeekBar s,int progress,boolean fromUser){
+                updateHoldLabel.accept(300+progress*100);
+            }
+            @Override public void onStartTrackingTouch(SeekBar s){}
+            @Override public void onStopTrackingTouch(SeekBar s){}
+        });
+        box.addView(deleteHoldSeek,new LinearLayout.LayoutParams(-1,dp(48)));
+
+        LinearLayout holdEnds=new LinearLayout(this);holdEnds.setGravity(Gravity.CENTER_VERTICAL);
+        TextView fast=text("0,3s • nhanh",10,false);fast.setTextColor(muted);
+        TextView slow=text("1,2s • chậm",10,false);slow.setTextColor(muted);slow.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        holdEnds.addView(fast,new LinearLayout.LayoutParams(0,dp(24),1));
+        holdEnds.addView(slow,new LinearLayout.LayoutParams(0,dp(24),1));
+        box.addView(holdEnds);
+
         new AlertDialog.Builder(this).setTitle("Cài đặt").setView(box)
             .setPositiveButton("Lưu",(d,w)->{
                 int id=rg.getCheckedRadioButtonId();fastInputMode=Math.max(0,id-100);
@@ -3933,6 +4007,7 @@ public class MainActivity extends Activity {
                 densityMode=Math.max(0,density.getCheckedRadioButtonId()-200);
                 hapticStyle=Math.max(0,haptics.getCheckedRadioButtonId()-300);
                 scrollHapticLevel=Math.max(0,scrollHaptics.getCheckedRadioButtonId()-400);
+                deleteRowHoldMs=300+deleteHoldSeek.getProgress()*100;
                 saveUiState();renderAll();hapticConfirm(box);Toast.makeText(this,"Đã lưu cài đặt",Toast.LENGTH_SHORT).show();
             }).setNegativeButton("Hủy",null).show();
     }
@@ -4516,6 +4591,10 @@ public class MainActivity extends Activity {
         b.setTextColor(ink);
         b.setAllCaps(false);
         b.setGravity(Gravity.CENTER);
+        b.setSingleLine(true);
+        b.setMaxLines(1);
+        b.setIncludeFontPadding(false);
+        b.setEllipsize(TextUtils.TruncateAt.END);
         b.setMinWidth(0);
         b.setMinHeight(0);
         b.setPadding(dp(6),0,dp(6),0);
