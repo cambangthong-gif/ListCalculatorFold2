@@ -558,7 +558,7 @@ public class MainActivity extends Activity {
         Button settings=smallActionButton("⚙ Cài đặt");
         Button about=smallActionButton("ⓘ Giới thiệu");
         settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
-        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.8").setPositiveButton("Đóng",null).show();});
+        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.9").setPositiveButton("Đóng",null).show();});
         actions.addView(settings,new LinearLayout.LayoutParams(0,dp(42),1));
         actions.addView(about,new LinearLayout.LayoutParams(0,dp(42),1));
         box.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -566,6 +566,45 @@ public class MainActivity extends Activity {
     }
 
     double allTablesTotal(){double x=0;for(TableModel t:tables)x+=t.total();return x;}
+
+    void showCompactTopMenu(View anchor){
+        PopupMenu p=new PopupMenu(this,anchor);
+        p.getMenu().add("Quản lý bảng & nhóm");
+        p.getMenu().add("Xóa");
+        p.getMenu().add("Hoàn tác");
+        p.getMenu().add("Làm lại");
+        p.getMenu().add("Chia sẻ");
+        p.getMenu().add("Định dạng số • "+formatSample());
+        p.getMenu().add("Cộng tổng bảng & nhóm");
+        p.getMenu().add("Tổng quan");
+        p.getMenu().add("Cài đặt");
+
+        p.setOnMenuItemClickListener(item->{
+            String s=String.valueOf(item.getTitle());
+            haptic(anchor);
+            if(s.startsWith("Quản lý")){
+                showTableManagerSheet();
+            }else if(s.equals("Xóa")){
+                showMultiDeleteDialog();
+            }else if(s.equals("Hoàn tác")){
+                undoDelete();
+            }else if(s.equals("Làm lại")){
+                redoLast();
+            }else if(s.equals("Chia sẻ")){
+                showShareChooser();
+            }else if(s.startsWith("Định dạng")){
+                cycleNumberFormat();
+            }else if(s.startsWith("Cộng tổng")){
+                showTotalComposer();
+            }else if(s.equals("Tổng quan")){
+                showDashboard();
+            }else if(s.equals("Cài đặt")){
+                showSettingsDialog();
+            }
+            return true;
+        });
+        p.show();
+    }
 
     void buildScreen(){
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(247,249,252));
@@ -585,7 +624,7 @@ public class MainActivity extends Activity {
         lastWidthBucket=compact?0:(smallTablet?1:(largeTablet?3:2));
         LinearLayout top=new LinearLayout(this);
         boolean innerNarrow=smallTablet;
-        top.setOrientation(((compact && !compactLandscape)||(smallTablet && !landscape))?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
+        top.setOrientation((compact && !compactLandscape)?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
         top.setPadding(dp(10),dp(7),dp(10),dp(7));
         top.setBackgroundColor(Color.rgb(248,250,253));
@@ -598,6 +637,9 @@ public class MainActivity extends Activity {
         quick1000=topButton(formatSample());
         Button addCalc=topButton("");
         Button addCancel=topButton("");
+        Button moreTop=topButton("⋮");
+        moreTop.setContentDescription("Menu thao tác khác");
+        moreTop.setTextSize(20);
 
         setManagerButtonLabel(tableBtn,swDp,landscape);
         setTopButtonLabel(del,"⌫","Xóa","Xóa",swDp,landscape);
@@ -627,7 +669,7 @@ public class MainActivity extends Activity {
             addCancel.setText("＋ Hủy");
             tableBtn.setTextSize(11.5f);del.setTextSize(11.5f);undoBtn.setTextSize(11.0f);share.setTextSize(11.0f);
             addCalc.setTextSize(12.5f);addCancel.setTextSize(12.5f);
-            Button[] compactTopButtons={tableBtn,del,undoBtn,share,quick1000,addCalc,addCancel};
+            Button[] compactTopButtons={tableBtn,del,undoBtn,share,quick1000,addCalc,addCancel,moreTop};
             for(Button b:compactTopButtons){
                 b.setSingleLine(true);
                 b.setMaxLines(1);
@@ -646,6 +688,7 @@ public class MainActivity extends Activity {
         styleTopDanger(del);
         styleTopAdd(addCalc,false);
         styleTopAdd(addCancel,true);
+        styleTopSecondary(moreTop);
         if(swDp>=1000){
             quick1000.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_sort_by_size,0,0,0);
             quick1000.setCompoundDrawablePadding(dp(4));
@@ -662,35 +705,37 @@ public class MainActivity extends Activity {
         addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);});
         addCalc.setOnLongClickListener(v->{haptic(v);showAddMenu(v);return true;});
         addCancel.setOnLongClickListener(v->{haptic(v);showAddMenu(v);return true;});
+        moreTop.setOnClickListener(v->{haptic(v);showCompactTopMenu(v);});
+        moreTop.setOnLongClickListener(v->{haptic(v);showTableManagerSheet();return true;});
 
-        if((compact && !compactLandscape)||(smallTablet && !landscape)){
-            LinearLayout r1=new LinearLayout(this);r1.setGravity(Gravity.CENTER);
-            LinearLayout r2=new LinearLayout(this);r2.setGravity(Gravity.CENTER);
-            r1.addView(tableBtn,new LinearLayout.LayoutParams(0,dp(44),1.20f));
-            r1.addView(del,new LinearLayout.LayoutParams(0,dp(44),1.00f));
-            r1.addView(undoBtn,new LinearLayout.LayoutParams(0,dp(44),1.20f));
-            r1.addView(share,new LinearLayout.LayoutParams(0,dp(44),1.20f));
-            r2.addView(quick1000,new LinearLayout.LayoutParams(0,dp(44),.92f));
-            r2.addView(addCalc,new LinearLayout.LayoutParams(0,dp(44),1.20f));
-            r2.addView(addCancel,new LinearLayout.LayoutParams(0,dp(44),1.20f));
+        // Thanh thao tác thu gọn:
+        // - Màn ngoài: chỉ giữ 3 thao tác dùng nhiều nhất + menu ⋮.
+        // - Màn trong: sidebar đã đảm nhiệm quản lý bảng/nhóm, nên bỏ nút QL và Xóa khỏi hàng trên.
+        //   Các thao tác ít dùng chuyển vào menu ⋮ để tiết kiệm chiều cao và chiều ngang.
+        if(compact && !compactLandscape){
+            LinearLayout r1=new LinearLayout(this);
+            r1.setGravity(Gravity.CENTER);
+            r1.setPadding(0,0,0,0);
+            r1.addView(addCalc,new LinearLayout.LayoutParams(0,dp(46),1.28f));
+            r1.addView(addCancel,new LinearLayout.LayoutParams(0,dp(46),1.28f));
+            r1.addView(quick1000,new LinearLayout.LayoutParams(0,dp(46),.96f));
+            r1.addView(moreTop,new LinearLayout.LayoutParams(dp(54),dp(46)));
             top.addView(r1,new LinearLayout.LayoutParams(-1,dp(48)));
-            top.addView(r2,new LinearLayout.LayoutParams(-1,dp(48)));
         }else{
-            int h=dp(compactLandscape?38:44);
-            top.addView(tableBtn,new LinearLayout.LayoutParams(0,h,1.32f));
-            top.addView(del,new LinearLayout.LayoutParams(0,h,.92f));
-            top.addView(undoBtn,new LinearLayout.LayoutParams(0,h,1.02f));
-            top.addView(share,new LinearLayout.LayoutParams(0,h,.95f));
-            top.addView(quick1000,new LinearLayout.LayoutParams(0,h,.78f));
-            top.addView(addCalc,new LinearLayout.LayoutParams(0,h,1.18f));
-            top.addView(addCancel,new LinearLayout.LayoutParams(0,h,1.24f));
+            int h=dp(compactLandscape?40:46);
+            // Inner screen / landscape: một hàng duy nhất.
+            top.addView(undoBtn,new LinearLayout.LayoutParams(0,h,.86f));
+            top.addView(share,new LinearLayout.LayoutParams(0,h,.96f));
+            top.addView(quick1000,new LinearLayout.LayoutParams(0,h,.80f));
+            top.addView(addCalc,new LinearLayout.LayoutParams(0,h,1.10f));
+            top.addView(addCancel,new LinearLayout.LayoutParams(0,h,1.10f));
+            top.addView(moreTop,new LinearLayout.LayoutParams(dp(compactLandscape?48:54),h));
         }
 
         int topHeight;
-        boolean twoRowTop=(compact && !compactLandscape)||(smallTablet && !landscape);
-        if(compactLandscape)topHeight=dp(44);
-        else if(twoRowTop)topHeight=dp(tinyPhone?96:100);
-        else topHeight=dp(tablet?54:52);
+        if(compactLandscape)topHeight=dp(46);
+        else if(compact)topHeight=dp(52);
+        else topHeight=dp(56);
         root.addView(top,new LinearLayout.LayoutParams(-1,topHeight));
 
         if(compact){
@@ -946,7 +991,8 @@ public class MainActivity extends Activity {
     void addSidebarModeButton(){
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(8),dp(5),dp(4),dp(5));
         TextView label=text(sidebarCompactMode?"Bảng":"Bảng & nhóm",sidebarCompactMode?13:18,true);label.setTextColor(Color.rgb(32,33,36));label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setContentDescription("Bảng và nhóm; nhấn giữ để đổi chế độ rộng/gọn");
+        label.setContentDescription("Bảng và nhóm; chạm để quản lý, nhấn giữ để đổi chế độ rộng/gọn");
+        label.setOnClickListener(v->{haptic(v);if(compact)closeCoverDrawer();showTableManagerSheet();});
         label.setOnLongClickListener(v->{haptic(v);toggleSidebarMode();return true;});
 
         Button search=smallActionButton("⌕");search.setTextSize(19);search.setContentDescription("Tìm bảng và nhóm");
