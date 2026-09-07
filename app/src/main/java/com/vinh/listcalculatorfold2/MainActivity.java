@@ -25,7 +25,7 @@ public class MainActivity extends Activity {
         FORMAT_KEY="number_format_mode", SELECTED_KEY="selected_table_id", ACTIVE_ROW_KEY="active_row",
         ACTIVE_FIELD_KEY="active_field", COLLAPSED_KEY="collapsed_groups", FAST_INPUT_KEY="fast_input_mode",
         SHARE_BLANK_KEY="share_hide_blank", DENSITY_KEY="density_mode", SIDEBAR_MODE_KEY="sidebar_compact_mode", CASH_BASE_KEY="cash_base_amount", CASH_SCOPE_KEY="cash_scope",
-        CASH_HISTORY_KEY="cash_history_v1", TEMPLATE_KEY="table_templates_v1";
+        CASH_HISTORY_KEY="cash_history_v1", TEMPLATE_KEY="table_templates_v1", HAPTIC_STYLE_KEY="haptic_style_v1", SCROLL_HAPTIC_KEY="scroll_haptic_v1";
     static final int REQ_BACKUP=501, REQ_RESTORE=502;
     final ArrayList<GroupModel> groups=new ArrayList<>();
     final ArrayList<TableModel> tables=new ArrayList<>();
@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     double cashBaseAmount=0;
     int cashScope=0; // 0=bảng hiện tại, 1=nhóm hiện tại
     int densityMode=0; // 0=Auto, 1=Compact, 2=Comfortable
+    int hapticStyle=2; // 0=Tắt, 1=Apple-like, 2=DualSense-like, 3=Samsung
+    int scrollHapticLevel=1; // 0=Tắt, 1=Nhẹ, 2=Vừa
     int managerSortMode=0; // 0=kéo tay,1=tên,2=sửa mới,3=sửa cũ,4=tạo mới,5=tổng lớn,6=nhiều dòng
     View revealedSwipeRow=null;
     PopupWindow swipePreviewPopup=null, undoPopup=null;
@@ -93,7 +95,7 @@ public class MainActivity extends Activity {
         super.onCreate(b);
         if(android.os.Build.VERSION.SDK_INT>=21){
             getWindow().setStatusBarColor(Color.WHITE);
-            getWindow().setNavigationBarColor(Color.WHITE);
+            getWindow().setNavigationBarColor(Color.rgb(248,250,252));
         }
         if(android.os.Build.VERSION.SDK_INT>=23){
             getWindow().getDecorView().setSystemUiVisibility(
@@ -104,6 +106,8 @@ public class MainActivity extends Activity {
         fastInputMode=p.getInt(FAST_INPUT_KEY,0);
         shareHideBlank=p.getBoolean(SHARE_BLANK_KEY,true);
         densityMode=p.getInt(DENSITY_KEY,0);
+        hapticStyle=p.getInt(HAPTIC_STYLE_KEY,2);
+        scrollHapticLevel=p.getInt(SCROLL_HAPTIC_KEY,1);
         sidebarCompactMode=p.getBoolean(SIDEBAR_MODE_KEY,false);
         cashBaseAmount=Double.longBitsToDouble(p.getLong(CASH_BASE_KEY,Double.doubleToLongBits(0)));
         cashScope=p.getInt(CASH_SCOPE_KEY,0);
@@ -141,6 +145,10 @@ public class MainActivity extends Activity {
         int bucket=c.screenWidthDp<600?0:1;
         boolean land=(bucket==0 && c.screenWidthDp>c.screenHeightDp);
         if(bucket!=lastWidthBucket || land!=compactLandscape)buildScreen();
+        else{
+            View content=findViewById(android.R.id.content);
+            if(content!=null)content.post(()->content.requestApplyInsets());
+        }
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent e){
@@ -322,10 +330,54 @@ public class MainActivity extends Activity {
         }else{
             int res=getResources().getIdentifier("status_bar_height","dimen","android");
             int top=res>0?getResources().getDimensionPixelSize(res):0;
-            ViewGroup.LayoutParams lp=spacer.getLayoutParams();
+            ViewGroup.LayoutParams lp=v.getLayoutParams();
             lp.height=top;
-            spacer.setLayoutParams(lp);
+            v.setLayoutParams(lp);
         }
+    }
+
+    void applyRootBottomSafeArea(View root){
+        if(root==null)return;
+
+        // Cách triệt để: đặt safe-area trực tiếp lên ROOT.
+        // Toàn bộ footer + keypad sẽ bị đẩy lên trên navigation bar thay vì chỉ
+        // thêm một spacer ở cuối, nên Samsung 3-button navigation không thể đè
+        // lên hàng phím cuối.
+        final int baseLeft=root.getPaddingLeft();
+        final int baseTop=root.getPaddingTop();
+        final int baseRight=root.getPaddingRight();
+
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            int bottom=0;
+
+            if(android.os.Build.VERSION.SDK_INT>=30){
+                android.graphics.Insets nav=insets.getInsetsIgnoringVisibility(
+                        android.view.WindowInsets.Type.navigationBars());
+                android.graphics.Insets tap=insets.getInsets(
+                        android.view.WindowInsets.Type.tappableElement());
+                android.graphics.Insets mandatory=insets.getInsets(
+                        android.view.WindowInsets.Type.mandatorySystemGestures());
+
+                bottom=Math.max(nav.bottom,Math.max(tap.bottom,mandatory.bottom));
+            }else if(android.os.Build.VERSION.SDK_INT>=23){
+                bottom=Math.max(insets.getSystemWindowInsetBottom(),insets.getStableInsetBottom());
+            }
+
+            // Fallback riêng cho Samsung/OEM nếu WindowInsets trả quá nhỏ.
+            if(bottom<=dp(8)){
+                int res=getResources().getIdentifier("navigation_bar_height","dimen","android");
+                int resourceBottom=res>0?getResources().getDimensionPixelSize(res):0;
+                if(resourceBottom>dp(24))bottom=resourceBottom;
+            }
+
+            int safeBottom=bottom>0?bottom+dp(6):0;
+            if(v.getPaddingBottom()!=safeBottom){
+                v.setPadding(baseLeft,baseTop,baseRight,safeBottom);
+            }
+            return insets;
+        });
+
+        root.post(()->root.requestApplyInsets());
     }
 
 
@@ -572,7 +624,7 @@ public class MainActivity extends Activity {
         }
 
         LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(244,247,251));middle.setPadding(dp(2),dp(4),dp(2),dp(2));
-        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(4),dp(4),dp(4),dp(4));sidebar.setBackgroundColor(Color.rgb(252,253,255));leftScroll.addView(sidebar);
+        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(4),dp(4),dp(4),dp(4));sidebar.setBackgroundColor(Color.rgb(252,253,255));leftScroll.addView(sidebar);installScrollHaptics(leftScroll);
         int sideDp=responsiveSideDp(swDp);
         if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
         else sidebar=null;
@@ -640,7 +692,9 @@ public class MainActivity extends Activity {
         keypadHost.setBackgroundColor(Color.rgb(244,247,251));
         int keypadDp=responsiveKeypadDp(swDp,shDp,landscape);
         root.addView(keypadHost,new LinearLayout.LayoutParams(-1,dp(keypadDp)));
+
         setContentView(root);
+        applyRootBottomSafeArea(root);
 
         addCalc.setOnClickListener(v->{haptic(v);addCalcTable(true);});
         addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);}); del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();}); undoBtn.setOnClickListener(v->{haptic(v);undoDelete();}); share.setOnClickListener(v->{haptic(v);showShareChooser();}); quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();}); tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
@@ -1049,6 +1103,7 @@ public class MainActivity extends Activity {
                 else Collections.swap(t.calcRows,a,b);
                 activeRow=b;previousActiveRow=-1;
                 adapter.notifyItemMoved(a,b);
+                hapticStep(rv);
                 return true;
             }
             @Override public void onSwiped(RecyclerView.ViewHolder vh,int dir){}
@@ -1097,6 +1152,7 @@ public class MainActivity extends Activity {
         ensureBlankCalc(t);
         gridRecycler=new RecyclerView(this);
         gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        installScrollHaptics(gridRecycler);
         gridRecycler.setHasFixedSize(true);
         gridRecycler.setItemViewCacheSize(18);
         gridRecycler.getRecycledViewPool().setMaxRecycledViews(0,24);
@@ -1154,6 +1210,7 @@ public class MainActivity extends Activity {
         ensureBlankCancel(t);
         gridRecycler=new RecyclerView(this);
         gridRecycler.setLayoutManager(new LinearLayoutManager(this));
+        installScrollHaptics(gridRecycler);
         gridRecycler.setHasFixedSize(true);
         gridRecycler.setItemViewCacheSize(18);
         gridRecycler.getRecycledViewPool().setMaxRecycledViews(0,24);
@@ -1888,7 +1945,7 @@ public class MainActivity extends Activity {
             root.put("selectedId",selectedId==null?"":selectedId);
             root.put("activeRow",activeRow).put("activeField",activeField);
             root.put("numberFormatMode",numberFormatMode).put("fastInputMode",fastInputMode);
-            root.put("shareHideBlank",shareHideBlank).put("densityMode",densityMode);
+            root.put("shareHideBlank",shareHideBlank).put("densityMode",densityMode).put("hapticStyle",hapticStyle).put("scrollHapticLevel",scrollHapticLevel);
             JSONArray ca=new JSONArray();for(String s:collapsedGroups)ca.put(s);root.put("collapsed",ca);
             return root.toString();
         }catch(Exception e){return "{}";}
@@ -1896,6 +1953,8 @@ public class MainActivity extends Activity {
 
 
     void showUndoSnackbar(String message){
+        if(message!=null&&message.toLowerCase(Locale.getDefault()).contains("xóa"))hapticDanger(gridHost);
+        else hapticConfirm(gridHost);
         if(undoPopup!=null)undoPopup.dismiss();
         LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(14),0,dp(8),0);
         GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(30,41,59));bg.setCornerRadius(dp(16));bar.setBackground(bg);
@@ -1930,7 +1989,7 @@ public class MainActivity extends Activity {
             while(redoStack.size()>HISTORY_LIMIT){redoStack.removeFirst();if(!redoLabelStack.isEmpty())redoLabelStack.removeFirst();}
             undoSnapshot=undoStack.peekLast();
             restoreStateJson(snapshot);
-            Toast.makeText(this,"Đã hoàn tác: "+label,Toast.LENGTH_SHORT).show();
+            hapticConfirm(gridHost);Toast.makeText(this,"Đã hoàn tác: "+label,Toast.LENGTH_SHORT).show();
             return;
         }
         if(undoSnapshot!=null){
@@ -1951,7 +2010,7 @@ public class MainActivity extends Activity {
         String label=redoLabelStack.isEmpty()?"Thao tác":redoLabelStack.removeLast();
         undoStack.addLast(current);undoLabelStack.addLast(label);
         restoreStateJson(snapshot);
-        Toast.makeText(this,"Đã làm lại: "+label,Toast.LENGTH_SHORT).show();
+        hapticConfirm(gridHost);Toast.makeText(this,"Đã làm lại: "+label,Toast.LENGTH_SHORT).show();
     }
 
     void restoreStateJson(String json){
@@ -1968,6 +2027,8 @@ public class MainActivity extends Activity {
             fastInputMode=o.optInt("fastInputMode",fastInputMode);
             shareHideBlank=o.optBoolean("shareHideBlank",shareHideBlank);
             densityMode=o.optInt("densityMode",densityMode);
+            hapticStyle=o.optInt("hapticStyle",hapticStyle);
+            scrollHapticLevel=o.optInt("scrollHapticLevel",scrollHapticLevel);
             JSONArray ca=o.optJSONArray("collapsed");if(ca!=null)for(int i=0;i<ca.length();i++)collapsedGroups.add(ca.optString(i));
             save();renderAll();
         }catch(Exception e){Toast.makeText(this,"Không thể khôi phục dữ liệu",Toast.LENGTH_LONG).show();}
@@ -1984,6 +2045,8 @@ public class MainActivity extends Activity {
             .putInt(FAST_INPUT_KEY,fastInputMode)
             .putBoolean(SHARE_BLANK_KEY,shareHideBlank)
             .putInt(DENSITY_KEY,densityMode)
+            .putInt(HAPTIC_STYLE_KEY,hapticStyle)
+            .putInt(SCROLL_HAPTIC_KEY,scrollHapticLevel)
             .putBoolean(SIDEBAR_MODE_KEY,sidebarCompactMode)
             .putLong(CASH_BASE_KEY,Double.doubleToLongBits(cashBaseAmount))
             .putInt(CASH_SCOPE_KEY,cashScope)
@@ -2534,6 +2597,7 @@ public class MainActivity extends Activity {
         root.addView(selectionBar,new LinearLayout.LayoutParams(-1,dp(50)));
 
         ScrollView sv=new ScrollView(this);
+        installScrollHaptics(sv);
         LinearLayout list=new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
         sv.addView(list);
@@ -3708,12 +3772,33 @@ public class MainActivity extends Activity {
         String[] dlabels={"Tự động","Compact - nhiều dòng hơn","Comfortable - dễ chạm hơn"};
         for(int i=0;i<dlabels.length;i++){RadioButton r=new RadioButton(this);r.setText(dlabels[i]);r.setId(200+i);density.addView(r);}
         density.check(200+densityMode);box.addView(density);
+
+        TextView htitle=text("Kiểu rung haptic",14,true);htitle.setPadding(0,dp(12),0,0);box.addView(htitle);
+        TextView hdesc=text("DualSense-like dùng chuỗi rung ngắn + thay đổi biên độ để tạo cảm giác có nhịp/texture.",11,false);hdesc.setTextColor(muted);box.addView(hdesc);
+        RadioGroup haptics=new RadioGroup(this);
+        String[] hlabels={"Tắt","Apple-like • tick gọn","DualSense-like • nhịp + texture","Samsung • rung hệ thống"};
+        for(int i=0;i<hlabels.length;i++){RadioButton r=new RadioButton(this);r.setText(hlabels[i]);r.setId(300+i);haptics.addView(r);}
+        haptics.check(300+hapticStyle);box.addView(haptics);
+
+        Button testHaptic=smallActionButton("Thử rung đã chọn");
+        testHaptic.setOnClickListener(v->{int m=Math.max(0,haptics.getCheckedRadioButtonId()-300);int oldMode=hapticStyle;hapticStyle=m;hapticConfirm(v);hapticStyle=oldMode;});
+        box.addView(testHaptic,new LinearLayout.LayoutParams(-1,dp(44)));
+
+        TextView scrollTitle=text("Haptic khi cuộn",14,true);scrollTitle.setPadding(0,dp(12),0,0);box.addView(scrollTitle);
+        TextView scrollDesc=text("Rung một tick nhỏ khi danh sách vượt qua một nấc; cuộn nhanh sẽ tự giới hạn tần suất.",11,false);scrollDesc.setTextColor(muted);box.addView(scrollDesc);
+        RadioGroup scrollHaptics=new RadioGroup(this);
+        String[] scrollLabels={"Tắt","Nhẹ • khuyên dùng","Vừa"};
+        for(int i=0;i<scrollLabels.length;i++){RadioButton r=new RadioButton(this);r.setText(scrollLabels[i]);r.setId(400+i);scrollHaptics.addView(r);}
+        scrollHaptics.check(400+scrollHapticLevel);box.addView(scrollHaptics);
+
         new AlertDialog.Builder(this).setTitle("Cài đặt").setView(box)
             .setPositiveButton("Lưu",(d,w)->{
                 int id=rg.getCheckedRadioButtonId();fastInputMode=Math.max(0,id-100);
                 shareHideBlank=cb.isChecked();
                 densityMode=Math.max(0,density.getCheckedRadioButtonId()-200);
-                saveUiState();renderAll();Toast.makeText(this,"Đã lưu cài đặt",Toast.LENGTH_SHORT).show();
+                hapticStyle=Math.max(0,haptics.getCheckedRadioButtonId()-300);
+                scrollHapticLevel=Math.max(0,scrollHaptics.getCheckedRadioButtonId()-400);
+                saveUiState();renderAll();hapticConfirm(box);Toast.makeText(this,"Đã lưu cài đặt",Toast.LENGTH_SHORT).show();
             }).setNegativeButton("Hủy",null).show();
     }
 
@@ -4326,7 +4411,116 @@ public class MainActivity extends Activity {
         b.setStateListAnimator(null);
         return b;
     }
-    TextView text(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(ink);v.setGravity(Gravity.CENTER_VERTICAL);if(bold)v.setTypeface(android.graphics.Typeface.DEFAULT,1);v.setPadding(dp(4),dp(2),dp(4),dp(2));return v;}View padded(View v){LinearLayout l=new LinearLayout(this);l.setPadding(dp(20),0,dp(20),0);l.addView(v,new LinearLayout.LayoutParams(-1,-2));return l;}LinearLayout.LayoutParams w(int width,int height,float weight){return new LinearLayout.LayoutParams(width,height,weight);}void haptic(View v){v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);}int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}String id(){return UUID.randomUUID().toString();}double parseNum(String s){try{return s==null||s.isEmpty()?0:Double.parseDouble(s.replace(',','.'));}catch(Exception e){return 0;}}long parseLong(String s){try{return s==null||s.isEmpty()?0:Long.parseLong(s);}catch(Exception e){return 0;}}String plain(double n){return n==(long)n?String.valueOf((long)n):String.valueOf(n).replace('.',',');}String fmt(double n){
+    void installScrollHaptics(ScrollView sv){
+        if(sv==null)return;
+        final int[] lastBucket={-1};
+        final long[] lastTick={0};
+        sv.setOnScrollChangeListener((View v,int sx,int sy,int osx,int osy)->{
+            if(scrollHapticLevel==0||hapticStyle==0)return;
+            int step=dp(scrollHapticLevel==1?44:34);
+            int bucket=step<=0?0:sy/step;
+            long now=SystemClock.uptimeMillis();
+            if(lastBucket[0]<0){lastBucket[0]=bucket;return;}
+            if(bucket!=lastBucket[0] && now-lastTick[0]>80){
+                lastBucket[0]=bucket;lastTick[0]=now;hapticScroll(v);
+            }
+        });
+    }
+
+    void installScrollHaptics(RecyclerView rv){
+        if(rv==null)return;
+        final int[] acc={0};
+        final long[] lastTick={0};
+        rv.addOnScrollListener(new RecyclerView.OnScrollListener(){
+            @Override public void onScrolled(RecyclerView r,int dx,int dy){
+                if(scrollHapticLevel==0||hapticStyle==0)return;
+                acc[0]+=Math.abs(dy);
+                int step=dp(scrollHapticLevel==1?42:32);
+                long now=SystemClock.uptimeMillis();
+                if(acc[0]>=step && now-lastTick[0]>80){
+                    acc[0]=0;lastTick[0]=now;hapticScroll(r);
+                }
+            }
+        });
+    }
+
+    void hapticScroll(View v){
+        if(scrollHapticLevel==0||hapticStyle==0)return;
+        try{
+            if(hapticStyle==3){if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);return;}
+            android.os.Vibrator vib=appVibrator();
+            if(vib==null||!vib.hasVibrator()){if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);return;}
+            if(hapticStyle==1 && android.os.Build.VERSION.SDK_INT>=29){
+                vib.vibrate(android.os.VibrationEffect.createPredefined(android.os.VibrationEffect.EFFECT_TICK));return;
+            }
+            if(android.os.Build.VERSION.SDK_INT>=26){
+                int amp=scrollHapticLevel==1?38:70;
+                long ms=scrollHapticLevel==1?4:6;
+                vib.vibrate(android.os.VibrationEffect.createOneShot(ms,amp));
+            }else if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
+        }catch(Exception ignored){try{if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);}catch(Exception ignored2){}}
+    }
+
+    TextView text(String s,int sp,boolean bold){TextView v=new TextView(this);v.setText(s);v.setTextSize(sp);v.setTextColor(ink);v.setGravity(Gravity.CENTER_VERTICAL);if(bold)v.setTypeface(android.graphics.Typeface.DEFAULT,1);v.setPadding(dp(4),dp(2),dp(4),dp(2));return v;}View padded(View v){LinearLayout l=new LinearLayout(this);l.setPadding(dp(20),0,dp(20),0);l.addView(v,new LinearLayout.LayoutParams(-1,-2));return l;}LinearLayout.LayoutParams w(int width,int height,float weight){return new LinearLayout.LayoutParams(width,height,weight);}void haptic(View v){performStyledHaptic(v,0);}
+    void hapticStep(View v){performStyledHaptic(v,1);}
+    void hapticConfirm(View v){performStyledHaptic(v,2);}
+    void hapticDanger(View v){performStyledHaptic(v,3);}
+
+    android.os.Vibrator appVibrator(){
+        try{
+            if(android.os.Build.VERSION.SDK_INT>=31){
+                android.os.VibratorManager vm=(android.os.VibratorManager)getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                return vm==null?null:vm.getDefaultVibrator();
+            }
+            return (android.os.Vibrator)getSystemService(Context.VIBRATOR_SERVICE);
+        }catch(Exception e){return null;}
+    }
+
+    void performStyledHaptic(View v,int kind){
+        if(hapticStyle==0)return;
+        try{
+            if(hapticStyle==3){
+                if(v!=null)v.performHapticFeedback(kind==3?HapticFeedbackConstants.LONG_PRESS:(kind==1?HapticFeedbackConstants.CLOCK_TICK:HapticFeedbackConstants.KEYBOARD_TAP));
+                return;
+            }
+
+            android.os.Vibrator vib=appVibrator();
+            if(vib==null||!vib.hasVibrator()){
+                if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                return;
+            }
+
+            if(hapticStyle==1){
+                if(android.os.Build.VERSION.SDK_INT>=29){
+                    int effect=kind==3?android.os.VibrationEffect.EFFECT_HEAVY_CLICK:(kind==2?android.os.VibrationEffect.EFFECT_DOUBLE_CLICK:android.os.VibrationEffect.EFFECT_TICK);
+                    vib.vibrate(android.os.VibrationEffect.createPredefined(effect));
+                }else if(v!=null)v.performHapticFeedback(kind==3?HapticFeedbackConstants.LONG_PRESS:HapticFeedbackConstants.KEYBOARD_TAP);
+                return;
+            }
+
+            // DualSense-like: rất ngắn, có khoảng nghỉ và thay đổi amplitude để tạo "texture".
+            if(android.os.Build.VERSION.SDK_INT>=26){
+                long[] timing;
+                int[] amp;
+                if(kind==1){ // bước kéo / đổi dòng: micro tick
+                    timing=new long[]{0,5,5,7}; amp=new int[]{0,55,0,105};
+                }else if(kind==2){ // xác nhận: hai nhịp tăng lực
+                    timing=new long[]{0,7,8,11,10,15}; amp=new int[]{0,70,0,125,0,185};
+                }else if(kind==3){ // cảnh báo / xóa: trầm và rõ hơn
+                    timing=new long[]{0,10,7,15,8,20}; amp=new int[]{0,115,0,175,0,225};
+                }else{ // tap thường: hai xung cực ngắn
+                    timing=new long[]{0,4,4,6}; amp=new int[]{0,45,0,90};
+                }
+                vib.vibrate(android.os.VibrationEffect.createWaveform(timing,amp,-1));
+            }else if(v!=null){
+                v.performHapticFeedback(kind==3?HapticFeedbackConstants.LONG_PRESS:HapticFeedbackConstants.KEYBOARD_TAP);
+            }
+        }catch(Exception ignored){
+            try{if(v!=null)v.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);}catch(Exception ignored2){}
+        }
+    }
+
+    int dp(int n){return (int)(n*getResources().getDisplayMetrics().density+.5f);}String id(){return UUID.randomUUID().toString();}double parseNum(String s){try{return s==null||s.isEmpty()?0:Double.parseDouble(s.replace(',','.'));}catch(Exception e){return 0;}}long parseLong(String s){try{return s==null||s.isEmpty()?0:Long.parseLong(s);}catch(Exception e){return 0;}}String plain(double n){return n==(long)n?String.valueOf((long)n):String.valueOf(n).replace('.',',');}String fmt(double n){
         NumberFormat f;
         if(numberFormatMode==1) f=NumberFormat.getNumberInstance(Locale.US);
         else if(numberFormatMode==2){
