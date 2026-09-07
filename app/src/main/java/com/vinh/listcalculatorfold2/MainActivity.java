@@ -77,19 +77,20 @@ public class MainActivity extends Activity {
     HashSet<String> managerDragSelection=new HashSet<>();
     final Handler saveHandler=new Handler(Looper.getMainLooper());
     boolean saveScheduled=false;
-    int navy=Color.rgb(23,55,94),
-        navy2=Color.rgb(241,246,252),
-        pale=Color.rgb(238,245,255),
-        paper=Color.rgb(250,252,255),
-        ink=Color.rgb(28,39,55),
-        rule=Color.rgb(222,229,239),
-        red=Color.rgb(211,47,47);
-    int accent=Color.rgb(35,99,210),
-        accentSoft=Color.rgb(237,244,255),
-        selectedBg=Color.rgb(226,238,255),
-        groupBg=Color.rgb(244,247,251),
-        keypadBg=Color.rgb(246,249,253),
-        muted=Color.rgb(103,116,137);
+    // Google / Material 3 inspired palette
+    int navy=Color.rgb(20,49,86),
+        navy2=Color.rgb(240,246,255),
+        pale=Color.rgb(237,244,255),
+        paper=Color.rgb(248,250,253),
+        ink=Color.rgb(31,31,31),
+        rule=Color.rgb(218,220,224),
+        red=Color.rgb(186,26,26);
+    int accent=Color.rgb(11,87,208),
+        accentSoft=Color.rgb(232,240,254),
+        selectedBg=Color.rgb(222,235,255),
+        groupBg=Color.rgb(245,247,250),
+        keypadBg=Color.rgb(247,249,252),
+        muted=Color.rgb(95,99,104);
 
     @Override public void onCreate(Bundle b){
         super.onCreate(b);
@@ -330,9 +331,9 @@ public class MainActivity extends Activity {
         }else{
             int res=getResources().getIdentifier("status_bar_height","dimen","android");
             int top=res>0?getResources().getDimensionPixelSize(res):0;
-            ViewGroup.LayoutParams lp=v.getLayoutParams();
+            ViewGroup.LayoutParams lp=spacer.getLayoutParams();
             lp.height=top;
-            v.setLayoutParams(lp);
+            spacer.setLayoutParams(lp);
         }
     }
 
@@ -456,7 +457,7 @@ public class MainActivity extends Activity {
     }
 
     void buildScreen(){
-        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(248,250,252));
+        LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(247,249,252));
         View sheetInsetSpacer=new View(this);
         sheetInsetSpacer.setBackgroundColor(Color.WHITE);
         root.addView(sheetInsetSpacer,new LinearLayout.LayoutParams(-1,0));
@@ -475,9 +476,9 @@ public class MainActivity extends Activity {
         boolean innerNarrow=smallTablet;
         top.setOrientation(((compact && !compactLandscape)||(smallTablet && !landscape))?LinearLayout.VERTICAL:LinearLayout.HORIZONTAL);
         top.setGravity(Gravity.CENTER_VERTICAL);
-        top.setPadding(dp(8),dp(6),dp(8),dp(6));
-        top.setBackgroundColor(Color.rgb(250,252,255));
-        top.setElevation(dp(1));
+        top.setPadding(dp(10),dp(7),dp(10),dp(7));
+        top.setBackgroundColor(Color.rgb(248,250,253));
+        top.setElevation(0);
 
         tableBtn=topButton("");
         Button del=topButton("");
@@ -581,9 +582,9 @@ public class MainActivity extends Activity {
             currentBar.setGravity(Gravity.CENTER_VERTICAL);
             currentBar.setPadding(dp(10),dp(4),dp(10),dp(4));
             GradientDrawable cbg=new GradientDrawable();
-            cbg.setColor(Color.rgb(252,253,255));
-            cbg.setStroke(dp(1),Color.rgb(218,226,237));
-            cbg.setCornerRadius(dp(16));
+            cbg.setColor(Color.WHITE);
+            cbg.setStroke(dp(1),Color.rgb(218,220,224));
+            cbg.setCornerRadius(dp(22));
             currentBar.setBackground(cbg);
             currentBar.setElevation(dp(1));
 
@@ -623,25 +624,26 @@ public class MainActivity extends Activity {
             compactGroupTitle=null;
         }
 
-        LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(244,247,251));middle.setPadding(dp(2),dp(4),dp(2),dp(2));
-        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(4),dp(4),dp(4),dp(4));sidebar.setBackgroundColor(Color.rgb(252,253,255));leftScroll.addView(sidebar);installScrollHaptics(leftScroll);
+        LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(247,249,252));middle.setPadding(dp(6),dp(6),dp(6),dp(4));
+        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(8),dp(8),dp(8),dp(8));sidebar.setBackgroundColor(Color.rgb(248,250,253));leftScroll.addView(sidebar);installScrollHaptics(leftScroll);
         int sideDp=responsiveSideDp(swDp);
         if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
         else sidebar=null;
-        LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setBackgroundColor(Color.WHITE);
+        LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setPadding(dp(4),0,0,0);right.setBackgroundColor(Color.rgb(248,250,253));
         if(!compact){
-            breadcrumbTitle=text("",14,true);breadcrumbTitle.setTextColor(Color.rgb(73,89,112));
-            breadcrumbTitle.setPadding(dp(14),0,dp(12),0);
+            breadcrumbTitle=text("",15,true);breadcrumbTitle.setTextColor(Color.rgb(32,33,36));
+            breadcrumbTitle.setPadding(dp(16),0,dp(12),0);
             breadcrumbTitle.setGravity(Gravity.CENTER_VERTICAL);
             right.addView(breadcrumbTitle,new LinearLayout.LayoutParams(-1,dp(40)));
         }else breadcrumbTitle=null;
-        gridHost=new LinearLayout(this);gridHost.setOrientation(LinearLayout.VERTICAL);gridHost.setBackgroundColor(Color.WHITE);gridHost.setElevation(dp(1));right.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
+        gridHost=new LinearLayout(this);gridHost.setOrientation(LinearLayout.VERTICAL);
+        GradientDrawable gridBg=new GradientDrawable();gridBg.setColor(Color.WHITE);gridBg.setStroke(dp(1),Color.rgb(225,228,232));gridBg.setCornerRadius(dp(18));gridHost.setBackground(gridBg);gridHost.setElevation(0);right.addView(gridHost,new LinearLayout.LayoutParams(-1,0,1));
         LinearLayout footer=new LinearLayout(this);footer.setGravity(Gravity.CENTER_VERTICAL);footer.setPadding(dp(10),dp(4),dp(10),dp(4));
-        GradientDrawable footerBg=new GradientDrawable();footerBg.setColor(Color.rgb(250,252,255));footerBg.setStroke(dp(1),Color.rgb(222,229,239));footerBg.setCornerRadius(dp(14));footer.setBackground(footerBg);
+        GradientDrawable footerBg=new GradientDrawable();footerBg.setColor(Color.WHITE);footerBg.setStroke(dp(1),Color.rgb(225,228,232));footerBg.setCornerRadius(dp(20));footer.setBackground(footerBg);
         pageIndicator=text("1/1",13,false);
         grandTotal=text("0",compact?21:27,true);grandTotal.setTextColor(accent);grandTotal.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
         grandTotal.setPadding(dp(8),0,dp(8),0);
-        GradientDrawable totalChipBg=new GradientDrawable();totalChipBg.setColor(Color.rgb(237,244,255));totalChipBg.setCornerRadius(dp(12));grandTotal.setBackground(totalChipBg);
+        GradientDrawable totalChipBg=new GradientDrawable();totalChipBg.setColor(Color.rgb(232,240,254));totalChipBg.setCornerRadius(dp(18));grandTotal.setBackground(totalChipBg);
         int footerH=compactLandscape?40:(compact?52:(largeTablet?54:50));
 
         LinearLayout footerLeft=new LinearLayout(this);
@@ -662,7 +664,7 @@ public class MainActivity extends Activity {
         currentGroupTotal.setVisibility(View.GONE);
         currentGroupTotal.setPadding(dp(6),0,dp(6),0);
         GradientDrawable gtb=new GradientDrawable();
-        gtb.setColor(Color.rgb(244,247,251));gtb.setStroke(dp(1),Color.rgb(226,232,240));gtb.setCornerRadius(dp(12));
+        gtb.setColor(Color.rgb(243,246,250));gtb.setStroke(dp(1),Color.rgb(225,228,232));gtb.setCornerRadius(dp(18));
         currentGroupTotal.setBackground(gtb);
         currentGroupTotal.setOnClickListener(v->{
             TableModel ct=selected();
@@ -676,9 +678,9 @@ public class MainActivity extends Activity {
         cashRemainderView.setTextColor(Color.rgb(22,101,52));
         cashRemainderView.setPadding(dp(4),0,dp(4),0);
         GradientDrawable cbg=new GradientDrawable();
-        cbg.setColor(Color.rgb(240,253,244));
-        cbg.setStroke(dp(1),Color.rgb(187,247,208));
-        cbg.setCornerRadius(dp(12));
+        cbg.setColor(Color.rgb(230,246,236));
+        cbg.setStroke(dp(1),Color.rgb(199,230,208));
+        cbg.setCornerRadius(dp(18));
         cashRemainderView.setBackground(cbg);
         cashRemainderView.setOnClickListener(v->{haptic(v);showCashRemainderDialog();});
         footer.addView(cashRemainderView,new LinearLayout.LayoutParams(0,dp(compact?40:42),compact?1.05f:1.2f));
@@ -689,7 +691,7 @@ public class MainActivity extends Activity {
         root.addView(middle,new LinearLayout.LayoutParams(-1,0,1));
         keypadHost=new LinearLayout(this);keypadHost.setOrientation(LinearLayout.HORIZONTAL);
         keypadHost.setPadding(dp(tinyPhone?1:3),0,dp(tinyPhone?1:3),dp(4));
-        keypadHost.setBackgroundColor(Color.rgb(244,247,251));
+        keypadHost.setBackgroundColor(Color.rgb(247,249,252));
         int keypadDp=responsiveKeypadDp(swDp,shDp,landscape);
         root.addView(keypadHost,new LinearLayout.LayoutParams(-1,dp(keypadDp)));
 
@@ -794,15 +796,18 @@ public class MainActivity extends Activity {
     void addSidebarModeButton(){
         LinearLayout bar=new LinearLayout(this);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(4),dp(3),dp(4),dp(3));
-        Button toggle=smallActionButton(sidebarCompactMode?"▸ Rộng":"◂ Gọn");
-        toggle.setOnClickListener(v->{haptic(v);toggleSidebarMode();});
-        TextView label=text(sidebarCompactMode?"Bảng":"DANH SÁCH BẢNG",11,true);
-        label.setTextColor(muted);
+        bar.setPadding(dp(8),dp(5),dp(4),dp(5));
+        TextView label=text(sidebarCompactMode?"Bảng":"Bảng & nhóm",sidebarCompactMode?12:17,true);
+        label.setTextColor(Color.rgb(32,33,36));
         label.setGravity(Gravity.CENTER_VERTICAL);
-        bar.addView(label,new LinearLayout.LayoutParams(0,dp(34),1));
-        bar.addView(toggle,new LinearLayout.LayoutParams(dp(sidebarCompactMode?58:68),dp(32)));
-        sidebar.addView(bar,new LinearLayout.LayoutParams(-1,dp(38)));
+        Button toggle=smallActionButton(sidebarCompactMode?"›":"‹ Gọn");
+        toggle.setOnClickListener(v->{haptic(v);toggleSidebarMode();});
+        if(!sidebarCompactMode){
+            toggle.setTextColor(accent);
+        }
+        bar.addView(label,new LinearLayout.LayoutParams(0,dp(42),1));
+        bar.addView(toggle,new LinearLayout.LayoutParams(dp(sidebarCompactMode?48:70),dp(38)));
+        sidebar.addView(bar,new LinearLayout.LayoutParams(-1,dp(52)));
     }
 
     void renderSidebar(){
@@ -827,7 +832,7 @@ public class MainActivity extends Activity {
         pinZone.setTextColor(muted);
         pinZone.setGravity(Gravity.CENTER);
         pinZone.setPadding(dp(6),dp(4),dp(6),dp(4));
-        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(248,250,252));bg.setStroke(dp(1),rule);bg.setCornerRadius(dp(10));pinZone.setBackground(bg);
+        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(243,246,250));bg.setStroke(dp(1),Color.rgb(225,228,232));bg.setCornerRadius(dp(16));pinZone.setBackground(bg);
         pinZone.setOnDragListener((v,e)->{
             if(e.getAction()==DragEvent.ACTION_DRAG_ENTERED){v.setAlpha(.55f);return true;}
             if(e.getAction()==DragEvent.ACTION_DRAG_EXITED){v.setAlpha(1f);return true;}
@@ -899,7 +904,7 @@ public class MainActivity extends Activity {
     void addSidebarSection(String gid,GroupModel group){
         if(group!=null){
             LinearLayout gh=new LinearLayout(this);gh.setGravity(Gravity.CENTER_VERTICAL);gh.setPadding(dp(8),dp(5),dp(6),dp(5));
-            GradientDrawable ghBg=new GradientDrawable();ghBg.setColor(groupBg);ghBg.setStroke(dp(1),Color.rgb(229,234,242));ghBg.setCornerRadius(dp(12));gh.setBackground(ghBg);
+            GradientDrawable ghBg=new GradientDrawable();ghBg.setColor(Color.rgb(243,246,250));ghBg.setStroke(dp(1),Color.rgb(225,228,232));ghBg.setCornerRadius(dp(18));gh.setBackground(ghBg);
             int gw=getResources().getConfiguration().screenWidthDp;
             TextView n=text(sidebarCompactMode
                     ?((group.pinned?"📌 ":"")+(collapsedGroups.contains(gid)?"▸ ":"▾ ")+shortSidebarTitle(group.name))
@@ -966,8 +971,8 @@ public class MainActivity extends Activity {
     View sidebarItem(TableModel t,String gid){
         LinearLayout item=new LinearLayout(this);item.setOrientation(LinearLayout.HORIZONTAL);item.setTag(t.id);item.setGravity(Gravity.CENTER_VERTICAL);
         item.setPadding(dp(6),dp(4),dp(4),dp(4));GradientDrawable itemBg=new GradientDrawable();
-        itemBg.setColor(t.id.equals(selectedId)?Color.rgb(232,242,255):Color.TRANSPARENT);
-        itemBg.setCornerRadius(dp(12));
+        itemBg.setColor(t.id.equals(selectedId)?Color.rgb(222,235,255):Color.TRANSPARENT);
+        itemBg.setCornerRadius(dp(18));
         item.setBackground(itemBg);
 
         View typeStripe=new View(this);
@@ -1141,7 +1146,7 @@ public class MainActivity extends Activity {
         TextView hPrice=cell("Đơn giá",13,true,Gravity.CENTER);
         TextView hQty=cell("SL",13,true,Gravity.CENTER);
         TextView hTotal=cell("Thành tiền",13,true,Gravity.END|Gravity.CENTER_VERTICAL);
-        fillCell(hSt,Color.rgb(245,248,252));fillCell(hPrice,Color.rgb(245,248,252));fillCell(hQty,Color.rgb(245,248,252));fillCell(hTotal,Color.rgb(245,248,252));
+        fillCell(hSt,Color.rgb(245,247,250));fillCell(hPrice,Color.rgb(245,247,250));fillCell(hQty,Color.rgb(245,247,250));fillCell(hTotal,Color.rgb(245,247,250));
         hSt.setTextColor(muted);hPrice.setTextColor(muted);hQty.setTextColor(muted);hTotal.setTextColor(muted);
         head.addView(hSt,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.45f));
         head.addView(hPrice,w(0,ViewGroup.LayoutParams.MATCH_PARENT,2));
@@ -1175,11 +1180,11 @@ public class MainActivity extends Activity {
     LinearLayout cancelSummaryCard(TableModel t){
         LinearLayout card=new LinearLayout(this);card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(10),dp(5),dp(10),dp(5));
-        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(255,249,240));bg.setCornerRadius(dp(16));bg.setStroke(dp(1),Color.rgb(248,211,159));
+        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.rgb(255,248,239));bg.setCornerRadius(dp(20));bg.setStroke(dp(1),Color.rgb(246,218,180));
         card.setBackground(bg);
-        TextView left=text("🎟  "+t.title,13,true);left.setTextColor(ink);
+        TextView left=text("🎟  "+t.title,14,true);left.setTextColor(Color.rgb(60,64,67));
         TextView mid=text(cancelNamedAgents(t)+" đại lý",12,false);mid.setTextColor(muted);mid.setGravity(Gravity.CENTER);
-        TextView right=text("SL "+fmt(cancelTotalQty(t)),14,true);right.setTextColor(Color.rgb(194,65,12));right.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
+        TextView right=text("SL  "+fmt(cancelTotalQty(t)),16,true);right.setTextColor(Color.rgb(180,83,9));right.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
         cancelSummaryAgentsView=mid;
         cancelSummaryQtyView=right;
         card.addView(left,new LinearLayout.LayoutParams(0,dp(34),1.35f));
@@ -1196,7 +1201,7 @@ public class MainActivity extends Activity {
         TextView hs=cell("#",13,true,Gravity.CENTER);
         TextView ha=cell("Tên đại lý",14,true,Gravity.START|Gravity.CENTER_VERTICAL);
         TextView hq=cell("Số lượng",14,true,Gravity.END|Gravity.CENTER_VERTICAL);
-        fillCell(hs,Color.rgb(255,249,240));fillCell(ha,Color.rgb(255,249,240));fillCell(hq,Color.rgb(255,249,240));
+        fillCell(hs,Color.rgb(250,247,242));fillCell(ha,Color.rgb(250,247,242));fillCell(hq,Color.rgb(250,247,242));
         int hh=dp(headerRowDp());
         head.setLayoutParams(new LinearLayout.LayoutParams(-1,hh));
         head.addView(hs,w(0,ViewGroup.LayoutParams.MATCH_PARENT,0.38f));
@@ -1373,7 +1378,8 @@ public class MainActivity extends Activity {
 
     LinearLayout buildCancelQuickPanel(TableModel t){
         LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(dp(10),dp(8),dp(8),dp(6));box.setGravity(Gravity.TOP);
+        box.setPadding(dp(10),dp(8),dp(8),dp(8));box.setGravity(Gravity.TOP);
+        GradientDrawable quickBg=new GradientDrawable();quickBg.setColor(Color.WHITE);quickBg.setStroke(dp(1),Color.rgb(225,228,232));quickBg.setCornerRadius(dp(20));box.setBackground(quickBg);
 
         LinearLayout header=new LinearLayout(this);header.setGravity(Gravity.CENTER_VERTICAL);
         TextView icon=text("🎟",22,false);icon.setGravity(Gravity.CENTER);
@@ -1448,10 +1454,10 @@ public class MainActivity extends Activity {
 
     LinearLayout buildPad(String label,String field){
         LinearLayout wrap=new LinearLayout(this);wrap.setOrientation(LinearLayout.VERTICAL);wrap.setPadding(dp(5),dp(5),dp(5),dp(3));
-        GradientDrawable wrapBg=new GradientDrawable();wrapBg.setColor(Color.rgb(248,250,253));wrapBg.setCornerRadius(dp(16));wrap.setBackground(wrapBg);
+        GradientDrawable wrapBg=new GradientDrawable();wrapBg.setColor(Color.rgb(243,246,250));wrapBg.setStroke(dp(1),Color.rgb(232,234,237));wrapBg.setCornerRadius(dp(20));wrap.setBackground(wrapBg);
         TextView lab=text(label,compact?14:15,field.equals(activeField));
         lab.setTextColor(field.equals(activeField)?accent:muted);lab.setGravity(Gravity.CENTER);
-        GradientDrawable labBg=new GradientDrawable();labBg.setColor(field.equals(activeField)?Color.rgb(235,243,255):Color.TRANSPARENT);labBg.setCornerRadius(dp(10));lab.setBackground(labBg);
+        GradientDrawable labBg=new GradientDrawable();labBg.setColor(field.equals(activeField)?Color.rgb(232,240,254):Color.TRANSPARENT);labBg.setCornerRadius(dp(14));lab.setBackground(labBg);
         wrap.addView(lab,new LinearLayout.LayoutParams(-1,dp(compactLandscape?22:30)));String[][] keys={{"7","8","9"},{"4","5","6"},{"1","2","3"},{"⌫","0","C"}};for(String[] row:keys){LinearLayout rr=new LinearLayout(this);rr.setPadding(0,0,dp(3),dp(3));for(String k:row){Button b=keyButton(k);b.setOnClickListener(v->{haptic(v);handleKey(field,k);});rr.addView(b,w(0,-1,1));}wrap.addView(rr,new LinearLayout.LayoutParams(-1,0,1));}return wrap;
     }
 
@@ -3203,9 +3209,9 @@ public class MainActivity extends Activity {
     Button smallActionButton(String s){
         Button b=new Button(this);
         b.setText(s);b.setAllCaps(false);b.setTextSize(13);b.setMinHeight(0);b.setMinWidth(0);
-        b.setTextColor(ink);b.setPadding(dp(8),0,dp(8),0);
+        b.setTextColor(Color.rgb(60,64,67));b.setPadding(dp(10),0,dp(10),0);
         GradientDrawable d=new GradientDrawable();
-        d.setColor(Color.rgb(238,244,252));d.setStroke(dp(1),Color.rgb(218,228,240));d.setCornerRadius(dp(12));
+        d.setColor(Color.rgb(243,246,250));d.setStroke(dp(1),Color.rgb(218,220,224));d.setCornerRadius(dp(18));
         b.setBackground(d);b.setStateListAnimator(null);
         return b;
     }
@@ -3214,11 +3220,11 @@ public class MainActivity extends Activity {
         Button b=smallActionButton(s);
         b.setTextSize(16);
         b.setPadding(dp(18),0,dp(18),0);
-        b.setMinHeight(dp(54));
+        b.setMinHeight(dp(56));
         GradientDrawable d=new GradientDrawable();
-        d.setColor(Color.rgb(230,240,252));
-        d.setStroke(dp(1),Color.rgb(196,214,238));
-        d.setCornerRadius(dp(24));
+        d.setColor(Color.rgb(232,240,254));
+        d.setStroke(dp(1),Color.rgb(210,225,249));
+        d.setCornerRadius(dp(28));
         b.setBackground(d);
         b.setStateListAnimator(null);
         return b;
@@ -4292,8 +4298,8 @@ public class MainActivity extends Activity {
 
     void markActive(TextView v){
         GradientDrawable d=new GradientDrawable();
-        d.setColor(Color.rgb(255,247,247));
-        d.setStroke(dp(2),Color.rgb(215,55,55));
+        d.setColor(Color.rgb(238,244,255));
+        d.setStroke(dp(2),Color.rgb(26,115,232));
         v.setBackground(d);
         v.setTextColor(red);
         AlphaAnimation a=new AlphaAnimation(.72f,1f);
@@ -4356,7 +4362,7 @@ public class MainActivity extends Activity {
         return r;
     }TextView cell(String s,int sp,boolean bold,int gravity){if(compact)sp=Math.max(11,sp-2);TextView v=text(s,sp,bold);v.setGravity(gravity);int cw=getResources().getConfiguration().screenWidthDp;
         int cp=cw<380?5:(cw<600?7:(cw<840?7:9));
-        v.setPadding(dp(cp),0,dp(cp),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),rule);v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
+        v.setPadding(dp(cp),0,dp(cp),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(dp(1),Color.rgb(225,228,232));v.setBackground(d);return v;}LinearLayout shareRow(){LinearLayout r=new LinearLayout(this);r.setOrientation(LinearLayout.HORIZONTAL);return r;}TextView shareCell(String s,boolean bold,int gravity){TextView v=text(s,14,bold);v.setGravity(gravity|Gravity.CENTER_VERTICAL);v.setPadding(dp(8),0,dp(8),0);GradientDrawable d=new GradientDrawable();d.setColor(Color.WHITE);d.setStroke(1,Color.LTGRAY);v.setBackground(d);return v;}
     void applyButtonStyle(Button b,int bg,int fg,int stroke,int radius){
         if(b==null)return;
         b.setTextColor(fg);
@@ -4365,13 +4371,13 @@ public class MainActivity extends Activity {
         b.setBackground(d);b.setStateListAnimator(null);
     }
 
-    void styleTopPrimary(Button b){applyButtonStyle(b,Color.rgb(237,244,255),Color.rgb(28,75,151),Color.rgb(201,218,244),16);}
-    void styleTopSecondary(Button b){applyButtonStyle(b,Color.WHITE,ink,Color.rgb(218,226,237),16);}
-    void styleTopShare(Button b){applyButtonStyle(b,Color.rgb(239,250,246),Color.rgb(24,112,78),Color.rgb(190,231,214),16);}
-    void styleTopDanger(Button b){applyButtonStyle(b,Color.rgb(255,245,245),Color.rgb(185,44,44),Color.rgb(244,204,204),16);}
+    void styleTopPrimary(Button b){applyButtonStyle(b,Color.rgb(232,240,254),Color.rgb(11,87,208),Color.rgb(210,225,249),20);}
+    void styleTopSecondary(Button b){applyButtonStyle(b,Color.rgb(250,252,255),Color.rgb(60,64,67),Color.rgb(218,220,224),20);}
+    void styleTopShare(Button b){applyButtonStyle(b,Color.rgb(230,246,236),Color.rgb(19,115,51),Color.rgb(199,230,208),20);}
+    void styleTopDanger(Button b){applyButtonStyle(b,Color.rgb(252,232,230),Color.rgb(179,38,30),Color.rgb(244,201,197),20);}
     void styleTopAdd(Button b,boolean cancel){
-        if(cancel)applyButtonStyle(b,Color.rgb(255,248,238),Color.rgb(176,91,18),Color.rgb(245,213,171),16);
-        else applyButtonStyle(b,Color.rgb(235,243,255),Color.rgb(30,91,183),Color.rgb(194,216,248),16);
+        if(cancel)applyButtonStyle(b,Color.rgb(254,244,232),Color.rgb(180,83,9),Color.rgb(246,218,180),20);
+        else applyButtonStyle(b,Color.rgb(232,240,254),Color.rgb(11,87,208),Color.rgb(210,225,249),20);
     }
 
     Button topButton(String s){
@@ -4386,9 +4392,9 @@ public class MainActivity extends Activity {
         b.setPadding(dp(6),0,dp(6),0);
 
         GradientDrawable d=new GradientDrawable();
-        d.setColor(Color.WHITE);
-        d.setStroke(dp(1),Color.rgb(218,226,237));
-        d.setCornerRadius(dp(16));
+        d.setColor(Color.rgb(250,252,255));
+        d.setStroke(dp(1),Color.rgb(218,220,224));
+        d.setCornerRadius(dp(20));
         b.setBackground(d);
         b.setStateListAnimator(null);
         return b;
@@ -4404,10 +4410,10 @@ public class MainActivity extends Activity {
         b.setPadding(dp(4),0,dp(4),0);
         GradientDrawable d=new GradientDrawable();
         d.setColor(Color.WHITE);
-        d.setStroke(dp(1),Color.rgb(216,224,235));
-        d.setCornerRadius(dp(16));
+        d.setStroke(dp(1),Color.rgb(218,220,224));
+        d.setCornerRadius(dp(22));
         b.setBackground(d);
-        b.setElevation(dp(2));
+        b.setElevation(dp(1));
         b.setStateListAnimator(null);
         return b;
     }
