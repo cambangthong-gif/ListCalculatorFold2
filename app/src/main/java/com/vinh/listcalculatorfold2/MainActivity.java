@@ -558,7 +558,7 @@ public class MainActivity extends Activity {
         Button settings=smallActionButton("⚙ Cài đặt");
         Button about=smallActionButton("ⓘ Giới thiệu");
         settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
-        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.6").setPositiveButton("Đóng",null).show();});
+        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.7").setPositiveButton("Đóng",null).show();});
         actions.addView(settings,new LinearLayout.LayoutParams(0,dp(42),1));
         actions.addView(about,new LinearLayout.LayoutParams(0,dp(42),1));
         box.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -4104,7 +4104,12 @@ public class MainActivity extends Activity {
                 CheckBox cb=new CheckBox(this);cb.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));cb.setChecked(selectedTables.contains(t.id));
                 LinearLayout info=new LinearLayout(this);info.setOrientation(LinearLayout.VERTICAL);
                 TextView n=text(t.title,14,true);
-                String gn=groupNameFor(t.groupId);
+                String gn="";
+                if(t.groupId!=null&&!t.groupId.isEmpty()){
+                    for(GroupModel gg:groups){
+                        if(t.groupId.equals(gg.id)){gn=gg.name;break;}
+                    }
+                }
                 TextView m=text((gn.isEmpty()?"Chưa nhóm":gn)+" • "+fmt(t.total()),11,false);m.setTextColor(muted);
                 info.addView(n);info.addView(m);
                 row.addView(cb,new LinearLayout.LayoutParams(dp(48),dp(54)));
