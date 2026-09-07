@@ -31,6 +31,11 @@ public class MainActivity extends Activity {
     final ArrayList<TableModel> tables=new ArrayList<>();
     LinearLayout sidebar, gridHost, keypadHost;
     ScrollView gridScroll;
+    FrameLayout coverFrame;
+    View coverDrawerView, coverScrimView, coverEdgeHandle;
+    boolean coverDrawerOpen=false;
+    float coverDrawerTouchX=0, coverDrawerTouchY=0;
+    TextView sidebarGrandView;
     RecyclerView gridRecycler;
     TextView pageIndicator, grandTotal, currentGroupTotal, cashRemainderView, compactTableTitle, compactGroupTitle, breadcrumbTitle;
     TextView cancelSummaryQtyView, cancelSummaryAgentsView, cancelQuickQtyView;
@@ -150,6 +155,11 @@ public class MainActivity extends Activity {
             View content=findViewById(android.R.id.content);
             if(content!=null)content.post(()->content.requestApplyInsets());
         }
+    }
+
+    @Override public void onBackPressed(){
+        if(coverDrawerOpen){closeCoverDrawer();return;}
+        super.onBackPressed();
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent e){
@@ -456,6 +466,85 @@ public class MainActivity extends Activity {
         }
     }
 
+    void openTableNavigation(){
+        if(compact)openCoverDrawer();
+        else showTableManagerSheet();
+    }
+
+    void openCoverDrawer(){
+        if(!compact||coverDrawerView==null)return;
+        coverDrawerOpen=true;
+        if(coverScrimView!=null){
+            coverScrimView.setVisibility(View.VISIBLE);
+            coverScrimView.animate().alpha(.28f).setDuration(160).start();
+        }
+        coverDrawerView.setVisibility(View.VISIBLE);
+        coverDrawerView.animate().translationX(0f).setDuration(190).setInterpolator(new DecelerateInterpolator()).start();
+        haptic(coverDrawerView);
+    }
+
+    void closeCoverDrawer(){
+        if(coverDrawerView==null)return;
+        coverDrawerOpen=false;
+        float w=coverDrawerView.getWidth()>0?coverDrawerView.getWidth():dp(320);
+        coverDrawerView.animate().translationX(-w).setDuration(170).setInterpolator(new AccelerateInterpolator()).withEndAction(()->{
+            if(!coverDrawerOpen)coverDrawerView.setVisibility(View.INVISIBLE);
+        }).start();
+        if(coverScrimView!=null)coverScrimView.animate().alpha(0f).setDuration(150).withEndAction(()->{
+            if(!coverDrawerOpen)coverScrimView.setVisibility(View.GONE);
+        }).start();
+    }
+
+    void installCoverDrawerSwipe(View edge,View drawer){
+        if(edge!=null)edge.setOnTouchListener((v,e)->{
+            if(e.getAction()==MotionEvent.ACTION_DOWN){coverDrawerTouchX=e.getRawX();coverDrawerTouchY=e.getRawY();return true;}
+            if(e.getAction()==MotionEvent.ACTION_UP){
+                float dx=e.getRawX()-coverDrawerTouchX,dy=e.getRawY()-coverDrawerTouchY;
+                if(dx>dp(34)&&Math.abs(dx)>Math.abs(dy)*1.25f)openCoverDrawer();
+                return true;
+            }
+            return true;
+        });
+        if(drawer!=null)drawer.setOnTouchListener((v,e)->{
+            if(e.getAction()==MotionEvent.ACTION_DOWN){coverDrawerTouchX=e.getRawX();coverDrawerTouchY=e.getRawY();return false;}
+            if(e.getAction()==MotionEvent.ACTION_UP){
+                float dx=e.getRawX()-coverDrawerTouchX,dy=e.getRawY()-coverDrawerTouchY;
+                if(dx<-dp(52)&&Math.abs(dx)>Math.abs(dy)*1.2f){closeCoverDrawer();return true;}
+            }
+            return false;
+        });
+    }
+
+    View buildSidebarBottomPanel(){
+        LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(8),dp(8),dp(8),dp(8));
+
+        LinearLayout totalCard=new LinearLayout(this);totalCard.setGravity(Gravity.CENTER_VERTICAL);totalCard.setPadding(dp(12),dp(6),dp(10),dp(6));
+        GradientDrawable bg=new GradientDrawable();bg.setColor(Color.WHITE);bg.setStroke(dp(1),Color.rgb(225,228,232));bg.setCornerRadius(dp(18));totalCard.setBackground(bg);
+        TextView chart=text("▥",24,true);chart.setTextColor(accent);chart.setGravity(Gravity.CENTER);
+        LinearLayout labels=new LinearLayout(this);labels.setOrientation(LinearLayout.VERTICAL);
+        TextView cap=text("Tổng cộng",11,false);cap.setTextColor(muted);
+        sidebarGrandView=text("0",17,true);sidebarGrandView.setTextColor(ink);
+        labels.addView(cap);labels.addView(sidebarGrandView);
+        TextView arrow=text("›",26,true);arrow.setGravity(Gravity.CENTER);arrow.setTextColor(navy);
+        totalCard.addView(chart,new LinearLayout.LayoutParams(dp(42),dp(48)));
+        totalCard.addView(labels,new LinearLayout.LayoutParams(0,dp(48),1));
+        totalCard.addView(arrow,new LinearLayout.LayoutParams(dp(30),dp(48)));
+        totalCard.setOnClickListener(v->{haptic(v);showDashboard();});
+        box.addView(totalCard,new LinearLayout.LayoutParams(-1,dp(62)));
+
+        LinearLayout actions=new LinearLayout(this);actions.setGravity(Gravity.CENTER_VERTICAL);actions.setPadding(0,dp(6),0,0);
+        Button settings=smallActionButton("⚙ Cài đặt");
+        Button about=smallActionButton("ⓘ Giới thiệu");
+        settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
+        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.0").setPositiveButton("Đóng",null).show();});
+        actions.addView(settings,new LinearLayout.LayoutParams(0,dp(42),1));
+        actions.addView(about,new LinearLayout.LayoutParams(0,dp(42),1));
+        box.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
+        return box;
+    }
+
+    double allTablesTotal(){double x=0;for(TableModel t:tables)x+=t.total();return x;}
+
     void buildScreen(){
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setBackgroundColor(Color.rgb(247,249,252));
         View sheetInsetSpacer=new View(this);
@@ -535,7 +624,7 @@ public class MainActivity extends Activity {
             quick1000.setCompoundDrawablePadding(dp(4));
         }
 
-        tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
+        tableBtn.setOnClickListener(v->{haptic(v);openTableNavigation();});
         del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();});
         undoBtn.setOnClickListener(v->{haptic(v);undoDelete();});
         undoBtn.setOnLongClickListener(v->{haptic(v);redoLast();return true;});
@@ -616,7 +705,7 @@ public class MainActivity extends Activity {
 
             prev.setOnClickListener(v->{haptic(v);animateTablePageChange(false);});
             next.setOnClickListener(v->{haptic(v);animateTablePageChange(true);});
-            labels.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
+            labels.setOnClickListener(v->{haptic(v);openCoverDrawer();});
 
             root.addView(currentBar,new LinearLayout.LayoutParams(-1,dp(compactLandscape?36:46)));
         }else{
@@ -625,10 +714,19 @@ public class MainActivity extends Activity {
         }
 
         LinearLayout middle=new LinearLayout(this);middle.setOrientation(LinearLayout.HORIZONTAL);middle.setBackgroundColor(Color.rgb(247,249,252));middle.setPadding(dp(6),dp(6),dp(6),dp(4));
-        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(8),dp(8),dp(8),dp(8));sidebar.setBackgroundColor(Color.rgb(248,250,253));leftScroll.addView(sidebar);installScrollHaptics(leftScroll);
+        ScrollView leftScroll=new ScrollView(this);leftScroll.setFillViewport(true);
+        sidebar=new LinearLayout(this);sidebar.setOrientation(LinearLayout.VERTICAL);sidebar.setPadding(dp(8),dp(8),dp(8),dp(8));sidebar.setBackgroundColor(Color.rgb(248,250,253));
+        leftScroll.addView(sidebar);installScrollHaptics(leftScroll);
         int sideDp=responsiveSideDp(swDp);
-        if(!compact) middle.addView(leftScroll,new LinearLayout.LayoutParams(dp(sideDp),-1));
-        else sidebar=null;
+
+        LinearLayout sideColumn=new LinearLayout(this);sideColumn.setOrientation(LinearLayout.VERTICAL);sideColumn.setBackgroundColor(Color.rgb(248,250,253));
+        if(compact){
+            View drawerTopSpacer=new View(this);drawerTopSpacer.setBackgroundColor(Color.rgb(248,250,253));sideColumn.addView(drawerTopSpacer,new LinearLayout.LayoutParams(-1,0));applyTopSystemInset(drawerTopSpacer);
+        }
+        sideColumn.addView(leftScroll,new LinearLayout.LayoutParams(-1,0,1));
+        sideColumn.addView(buildSidebarBottomPanel(),new LinearLayout.LayoutParams(-1,dp(122)));
+        if(!compact)middle.addView(sideColumn,new LinearLayout.LayoutParams(dp(sideDp),-1));
+
         LinearLayout right=new LinearLayout(this);right.setOrientation(LinearLayout.VERTICAL);right.setPadding(dp(4),0,0,0);right.setBackgroundColor(Color.rgb(248,250,253));
         if(!compact){
             breadcrumbTitle=text("",15,true);breadcrumbTitle.setTextColor(Color.rgb(32,33,36));
@@ -695,11 +793,36 @@ public class MainActivity extends Activity {
         int keypadDp=responsiveKeypadDp(swDp,shDp,landscape);
         root.addView(keypadHost,new LinearLayout.LayoutParams(-1,dp(keypadDp)));
 
-        setContentView(root);
+        if(compact){
+            coverFrame=new FrameLayout(this);
+            coverFrame.setBackgroundColor(Color.rgb(247,249,252));
+            coverFrame.addView(root,new FrameLayout.LayoutParams(-1,-1));
+
+            coverScrimView=new View(this);coverScrimView.setBackgroundColor(Color.BLACK);coverScrimView.setAlpha(0f);coverScrimView.setVisibility(View.GONE);
+            coverScrimView.setOnClickListener(v->closeCoverDrawer());
+            coverFrame.addView(coverScrimView,new FrameLayout.LayoutParams(-1,-1));
+
+            int drawerDp=Math.min(340,Math.max(292,(int)(swDp*.86f)));
+            coverDrawerView=sideColumn;
+            GradientDrawable drawerBg=new GradientDrawable();drawerBg.setColor(Color.rgb(248,250,253));drawerBg.setCornerRadii(new float[]{0,0,dp(24),dp(24),dp(24),dp(24),0,0});
+            coverDrawerView.setBackground(drawerBg);coverDrawerView.setElevation(dp(12));coverDrawerView.setVisibility(View.INVISIBLE);
+            FrameLayout.LayoutParams drawerLp=new FrameLayout.LayoutParams(dp(drawerDp),-1,Gravity.START);
+            coverFrame.addView(coverDrawerView,drawerLp);
+
+            coverEdgeHandle=new View(this);coverEdgeHandle.setBackgroundColor(Color.TRANSPARENT);
+            FrameLayout.LayoutParams edgeLp=new FrameLayout.LayoutParams(dp(24),-1,Gravity.START);
+            coverFrame.addView(coverEdgeHandle,edgeLp);
+            installCoverDrawerSwipe(coverEdgeHandle,coverDrawerView);
+            coverDrawerView.post(()->coverDrawerView.setTranslationX(-coverDrawerView.getWidth()));
+            setContentView(coverFrame);
+        }else{
+            coverFrame=null;coverDrawerView=null;coverScrimView=null;coverEdgeHandle=null;coverDrawerOpen=false;
+            setContentView(root);
+        }
         applyRootBottomSafeArea(root);
 
         addCalc.setOnClickListener(v->{haptic(v);addCalcTable(true);});
-        addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);}); del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();}); undoBtn.setOnClickListener(v->{haptic(v);undoDelete();}); share.setOnClickListener(v->{haptic(v);showShareChooser();}); quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();}); tableBtn.setOnClickListener(v->{haptic(v);showTableManagerSheet();});
+        addCancel.setOnClickListener(v->{haptic(v);addCancelTable(true);}); del.setOnClickListener(v->{haptic(v);showMultiDeleteDialog();}); undoBtn.setOnClickListener(v->{haptic(v);undoDelete();}); share.setOnClickListener(v->{haptic(v);showShareChooser();}); quick1000.setOnClickListener(v->{haptic(v);cycleNumberFormat();}); tableBtn.setOnClickListener(v->{haptic(v);openTableNavigation();});
         renderAll();
     }
 
@@ -794,20 +917,26 @@ public class MainActivity extends Activity {
     }
 
     void addSidebarModeButton(){
-        LinearLayout bar=new LinearLayout(this);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(8),dp(5),dp(4),dp(5));
-        TextView label=text(sidebarCompactMode?"Bảng":"Bảng & nhóm",sidebarCompactMode?12:17,true);
-        label.setTextColor(Color.rgb(32,33,36));
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        Button toggle=smallActionButton(sidebarCompactMode?"›":"‹ Gọn");
-        toggle.setOnClickListener(v->{haptic(v);toggleSidebarMode();});
+        LinearLayout bar=new LinearLayout(this);bar.setGravity(Gravity.CENTER_VERTICAL);bar.setPadding(dp(8),dp(5),dp(4),dp(5));
+        TextView label=text(sidebarCompactMode?"Bảng":"Bảng & nhóm",sidebarCompactMode?13:18,true);label.setTextColor(Color.rgb(32,33,36));label.setGravity(Gravity.CENTER_VERTICAL);
+        label.setContentDescription("Bảng và nhóm; nhấn giữ để đổi chế độ rộng/gọn");
+        label.setOnLongClickListener(v->{haptic(v);toggleSidebarMode();return true;});
+
+        Button search=smallActionButton("⌕");search.setTextSize(19);search.setContentDescription("Tìm bảng và nhóm");
+        Button add=smallActionButton("+");add.setTextSize(24);add.setTextColor(Color.WHITE);add.setContentDescription("Tạo bảng hoặc nhóm");
+        GradientDrawable addBg=new GradientDrawable();addBg.setColor(Color.rgb(66,133,244));addBg.setCornerRadius(dp(16));add.setBackground(addBg);
+        search.setOnClickListener(v->{haptic(v);if(compact)closeCoverDrawer();showTableManagerSheet();});
+        add.setOnClickListener(v->{haptic(v);showAddMenu(v);});
+
+        bar.addView(label,new LinearLayout.LayoutParams(0,dp(44),1));
         if(!sidebarCompactMode){
-            toggle.setTextColor(accent);
+            bar.addView(search,new LinearLayout.LayoutParams(dp(44),dp(40)));
+            bar.addView(add,new LinearLayout.LayoutParams(dp(44),dp(40)));
+        }else{
+            Button wide=smallActionButton("›");wide.setTextColor(accent);wide.setOnClickListener(v->{haptic(v);toggleSidebarMode();});
+            bar.addView(wide,new LinearLayout.LayoutParams(dp(44),dp(40)));
         }
-        bar.addView(label,new LinearLayout.LayoutParams(0,dp(42),1));
-        bar.addView(toggle,new LinearLayout.LayoutParams(dp(sidebarCompactMode?48:70),dp(38)));
-        sidebar.addView(bar,new LinearLayout.LayoutParams(-1,dp(52)));
+        sidebar.addView(bar,new LinearLayout.LayoutParams(-1,dp(54)));
     }
 
     void renderSidebar(){
@@ -817,11 +946,11 @@ public class MainActivity extends Activity {
         sidebarGroupTotalViews.clear();
         sidebar.removeAllViews();
         addSidebarModeButton();
-        addPinnedDropZone();
         if(!sidebarSelectedIds.isEmpty())addSidebarSelectionBar();
         for(GroupModel g:orderedGroups())if(g.pinned)addSidebarSection(g.id,g);
         addSidebarSection(UNGROUPED,null);
         for(GroupModel g:orderedGroups())if(!g.pinned)addSidebarSection(g.id,g);
+        if(sidebarGrandView!=null)sidebarGrandView.setText(fmt(allTablesTotal()));
         sidebar.setOnDragListener((v,e)->true);
     }
 
@@ -1003,7 +1132,7 @@ public class MainActivity extends Activity {
         if(!sidebarCompactMode)item.addView(more,new LinearLayout.LayoutParams(dp(34),dp(58)));
 
         pick.setOnCheckedChangeListener((b,on)->{if(on)sidebarSelectedIds.add(t.id);else sidebarSelectedIds.remove(t.id);renderSidebar();});
-        View.OnClickListener select=v->{selectedId=t.id;activeRow=0;activeField="cancel".equals(t.type)?"qty":"price";explicitCellSelection=false;renderAll();};
+        View.OnClickListener select=v->{selectedId=t.id;activeRow=0;activeField="cancel".equals(t.type)?"qty":"price";explicitCellSelection=false;if(compact)closeCoverDrawer();renderAll();};
         info.setOnClickListener(select);
         title.setOnClickListener(select);
 
