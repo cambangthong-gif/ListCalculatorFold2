@@ -558,7 +558,7 @@ public class MainActivity extends Activity {
         Button settings=smallActionButton("⚙ Cài đặt");
         Button about=smallActionButton("ⓘ Giới thiệu");
         settings.setOnClickListener(v->{haptic(v);showSettingsDialog();});
-        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.7").setPositiveButton("Đóng",null).show();});
+        about.setOnClickListener(v->{haptic(v);new AlertDialog.Builder(this).setTitle("ListCalculatorFold2").setMessage("Máy tính danh sách tối ưu cho điện thoại và màn hình gập.\n\nPhiên bản 2.8.8").setPositiveButton("Đóng",null).show();});
         actions.addView(settings,new LinearLayout.LayoutParams(0,dp(42),1));
         actions.addView(about,new LinearLayout.LayoutParams(0,dp(42),1));
         box.addView(actions,new LinearLayout.LayoutParams(-1,dp(50)));
@@ -4333,7 +4333,7 @@ public class MainActivity extends Activity {
                 deleteRowHoldMs=draftDeleteHold[0];
                 getSharedPreferences(PREFS,MODE_PRIVATE).edit()
                         .putInt(DELETE_HOLD_KEY,deleteRowHoldMs).apply();
-                hapticTick(s);
+                hapticStep(s);
             }
         });
 
@@ -4344,7 +4344,7 @@ public class MainActivity extends Activity {
             deleteRowHoldMs=ms;
             getSharedPreferences(PREFS,MODE_PRIVATE).edit()
                     .putInt(DELETE_HOLD_KEY,deleteRowHoldMs).apply();
-            hapticTick(v);
+            hapticStep(v);
         };
         hold300.setOnClickListener(presetHold);
         hold500.setOnClickListener(presetHold);
