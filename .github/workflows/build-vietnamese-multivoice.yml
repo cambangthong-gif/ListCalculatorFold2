@@ -142,11 +142,12 @@ jobs:
           s = re.sub(r'versionName\s+"[^"]+"', 'versionName "1.0-vi-multivoice"', s, count=1)
           p.write_text(s)
 
-          # The upstream manifest hard-codes Firebase provider authority to its old app ID.
-          # Make it follow applicationId so our separate package merges cleanly.
           p = Path('app/src/main/AndroidManifest.xml')
           s = p.read_text()
+          s = s.replace('com.CodeBySonu.VoxSherpa.androidx-startup', '${applicationId}.androidx-startup')
           s = s.replace('com.CodeBySonu.VoxSherpa.firebaseinitprovider', '${applicationId}.firebaseinitprovider')
+          s = s.replace('com.CodeBySonu.VoxSherpa.provider', '${applicationId}.provider')
+          s = s.replace('android:label="VoxSherpa TTS"', 'android:label="Vietnamese AI TTS"')
           p.write_text(s)
 
           p = Path('app/src/main/res/values/strings.xml')
