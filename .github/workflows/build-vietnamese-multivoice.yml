@@ -112,7 +112,6 @@ jobs:
           from pathlib import Path
           import re
 
-          # Seed catalog whenever the main app or Android TTS service starts.
           p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/MainActivity.java')
           s = p.read_text()
           needle = 'super.onCreate(_savedInstanceState);'
@@ -127,7 +126,6 @@ jobs:
               s = s.replace(needle, needle + '\n        com.CodeBySonu.VoxSherpa.VietnameseVoiceCatalog.seed(this);', 1)
           p.write_text(s)
 
-          # Keep our curated models when VoxSherpa syncs its own online catalog.
           p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java')
           s = p.read_text()
           old = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx")) {'
@@ -136,7 +134,6 @@ jobs:
               s = s.replace(old, new)
           p.write_text(s)
 
-          # Rename app, use a separate package, ARM64 only, and mark this build.
           p = Path('app/build.gradle')
           s = p.read_text()
           s = s.replace('applicationId "com.CodeBySonu.VoxSherpa"', 'applicationId "com.cambangthong.VietnameseAITTS"')
@@ -145,13 +142,19 @@ jobs:
           s = re.sub(r'versionName\s+"[^"]+"', 'versionName "1.0-vi-multivoice"', s, count=1)
           p.write_text(s)
 
+          # The upstream manifest hard-codes Firebase provider authority to its old app ID.
+          # Make it follow applicationId so our separate package merges cleanly.
+          p = Path('app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          s = s.replace('com.CodeBySonu.VoxSherpa.firebaseinitprovider', '${applicationId}.firebaseinitprovider')
+          p.write_text(s)
+
           p = Path('app/src/main/res/values/strings.xml')
           if p.exists():
               s = p.read_text()
               s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Vietnamese AI TTS</string>', s, count=1)
               p.write_text(s)
 
-          # Make Vietnamese resolution explicit and deterministic.
           p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/TtsLocaleHelper.java')
           s = p.read_text()
           marker = 'if (search.contains("portuguese")) return new Locale("pt");'
