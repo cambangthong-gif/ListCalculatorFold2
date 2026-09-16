@@ -1,0 +1,421 @@
+name: Build VietVoice TTS v1.2
+
+on:
+  push:
+    branches:
+      - ngocngan-tts-build
+    paths:
+      - '.github/workflows/build-vietvoice-v12.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Clone VoxSherpa source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/CodeBySonu95/VoxSherpa-TTS.git vox
+
+      - name: Patch VietVoice branding and Vietnamese catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+
+          cat > app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseVoiceCatalog.java <<'JAVA'
+          package com.CodeBySonu.VoxSherpa;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import com.google.gson.Gson;
+          import com.google.gson.reflect.TypeToken;
+          import java.lang.reflect.Type;
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.HashSet;
+
+          public final class VietnameseVoiceCatalog {
+              private VietnameseVoiceCatalog() {}
+              private static final String BASE = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/";
+              private static final String TOKENS = BASE + "tokens.txt";
+
+              public static synchronized void seed(Context context) {
+                  if (context == null) return;
+                  try {
+                      SharedPreferences sp = context.getSharedPreferences("sp1", Context.MODE_PRIVATE);
+                      Gson gson = new Gson();
+                      Type type = new TypeToken<ArrayList<HashMap<String, Object>>>(){}.getType();
+                      ArrayList<HashMap<String, Object>> list = gson.fromJson(sp.getString("models_data", "[]"), type);
+                      if (list == null) list = new ArrayList<>();
+                      HashSet<String> urls = new HashSet<>();
+                      for (HashMap<String, Object> m : list) {
+                          Object u = m.get("model_url");
+                          if (u != null) urls.add(u.toString());
+                      }
+
+                      add(list, urls, "Ngọc Ngạn", "Male", "ngocngan3701.onnx", "Kể chuyện, giọng nam rõ");
+                      add(list, urls, "Ngọc Huyền New", "Female", "ngochuyennew.onnx", "Nữ tự nhiên, review/kể chuyện");
+                      add(list, urls, "Ngọc Huyền", "Female", "ngochuyen.onnx", "Nữ sáng, dễ nghe");
+                      add(list, urls, "Duy Oryx", "Male", "duyoryx3175.onnx", "Nam trầm");
+                      add(list, urls, "Ban Mai", "Female", "banmai.onnx", "Nữ phát thanh");
+                      add(list, urls, "Chiếu Thành", "Male", "chieuthanh.onnx", "Nam rõ chữ");
+                      add(list, urls, "Lạc Phi", "Male", "lacphi.onnx", "Nam kể chuyện");
+                      add(list, urls, "Mai Phương", "Female", "maiphuong.onnx", "Nữ dịu");
+                      add(list, urls, "Mạnh Dũng", "Male", "manhdung.onnx", "Nam chắc giọng");
+                      add(list, urls, "Minh Khang", "Male", "minhkhang.onnx", "Nam tự nhiên");
+                      add(list, urls, "Minh Quang", "Male", "minhquang.onnx", "Nam trung tính");
+                      add(list, urls, "Minh Thu", "Female", "minhthu.onnx", "Nữ nhẹ");
+                      add(list, urls, "Phương Trang", "Female", "phuongtrang.onnx", "Nữ rõ chữ");
+                      add(list, urls, "Tài An", "Male", "taian4.onnx", "Nam đọc truyện");
+                      add(list, urls, "Thanh Phương", "Female", "thanhphuong2.onnx", "Nữ tự nhiên");
+                      add(list, urls, "Thiện Tâm", "Male", "thientam.onnx", "Nam ấm");
+                      add(list, urls, "Việt Thảo", "Male", "vietthao3886.onnx", "Nam kể chuyện");
+
+                      sp.edit().putString("models_data", gson.toJson(list)).apply();
+                  } catch (Throwable ignored) {}
+              }
+
+              private static void add(ArrayList<HashMap<String, Object>> list, HashSet<String> urls,
+                                      String name, String gender, String file, String note) {
+                  String modelUrl = BASE + file;
+                  if (urls.contains(modelUrl)) return;
+                  HashMap<String, Object> m = new HashMap<>();
+                  m.put("name", name);
+                  m.put("type", "Piper / VITS");
+                  m.put("language", "Vietnamese");
+                  m.put("gender", gender);
+                  m.put("quality", "Neural");
+                  m.put("size", "63.5 MB");
+                  m.put("model_url", modelUrl);
+                  m.put("tokens_url", TOKENS);
+                  m.put("description", note);
+                  m.put("is_downloading", "false");
+                  m.put("download_progress", "0");
+                  m.put("builtin_vi", "true");
+                  list.add(m);
+                  urls.add(modelUrl);
+              }
+          }
+          JAVA
+
+          cat > app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseDirectDownloader.java <<'JAVA'
+          package com.CodeBySonu.VoxSherpa;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.os.Environment;
+          import android.os.Handler;
+          import android.os.Looper;
+          import android.widget.Toast;
+          import com.google.gson.Gson;
+          import com.google.gson.reflect.TypeToken;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.lang.reflect.Type;
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.concurrent.ConcurrentHashMap;
+          import java.util.concurrent.TimeUnit;
+          import okhttp3.Call;
+          import okhttp3.Callback;
+          import okhttp3.OkHttpClient;
+          import okhttp3.Request;
+          import okhttp3.Response;
+          import okhttp3.ResponseBody;
+
+          public final class VietnameseDirectDownloader {
+              private VietnameseDirectDownloader() {}
+              private static final OkHttpClient CLIENT = new OkHttpClient.Builder()
+                      .followRedirects(true).followSslRedirects(true)
+                      .connectTimeout(30, TimeUnit.SECONDS)
+                      .readTimeout(5, TimeUnit.MINUTES)
+                      .callTimeout(15, TimeUnit.MINUTES)
+                      .build();
+              private static final ConcurrentHashMap<String, Call> CALLS = new ConcurrentHashMap<>();
+              private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+              public static void download(Context context, HashMap<String, Object> item, Runnable uiRefresh) {
+                  if (context == null || item == null) return;
+                  final Context app = context.getApplicationContext();
+                  final String modelUrl = str(item.get("model_url"));
+                  final String tokensUrl = str(item.get("tokens_url"));
+                  if (modelUrl.isEmpty() || tokensUrl.isEmpty()) {
+                      toast(app, "Thiếu liên kết model hoặc tokens");
+                      return;
+                  }
+                  if (CALLS.containsKey(modelUrl)) return;
+
+                  File dir = app.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
+                  if (dir == null) dir = app.getFilesDir();
+                  if (!dir.exists()) dir.mkdirs();
+                  final File modelFile = new File(dir, "vi_" + safeName(modelUrl) + ".onnx");
+                  final File tokensFile = new File(dir, "vi_tokens.txt");
+
+                  item.put("is_downloading", "true");
+                  item.put("download_progress", "0");
+                  item.put("handler_running", "direct");
+                  item.remove("download_error");
+                  persist(app, item);
+                  refresh(uiRefresh);
+
+                  if (tokensFile.exists() && tokensFile.length() > 100) {
+                      downloadModel(app, item, modelUrl, modelFile, tokensFile, uiRefresh);
+                  } else {
+                      Request req = new Request.Builder().url(tokensUrl).header("User-Agent", "VietVoice-TTS/1.2").build();
+                      Call tokenCall = CLIENT.newCall(req);
+                      CALLS.put(modelUrl, tokenCall);
+                      tokenCall.enqueue(new Callback() {
+                          @Override public void onFailure(Call call, java.io.IOException e) {
+                              fail(app, item, modelUrl, modelFile, tokensFile, uiRefresh, "Không tải được tokens: " + e.getMessage());
+                          }
+                          @Override public void onResponse(Call call, Response response) {
+                              try (Response r = response) {
+                                  if (!r.isSuccessful() || r.body() == null) throw new java.io.IOException("HTTP " + r.code());
+                                  writeBody(r.body(), tokensFile, null);
+                                  downloadModel(app, item, modelUrl, modelFile, tokensFile, uiRefresh);
+                              } catch (Throwable t) {
+                                  fail(app, item, modelUrl, modelFile, tokensFile, uiRefresh, "Lỗi tokens: " + t.getMessage());
+                              }
+                          }
+                      });
+                  }
+              }
+
+              private static void downloadModel(Context app, HashMap<String, Object> item, String modelUrl,
+                                                File modelFile, File tokensFile, Runnable uiRefresh) {
+                  Request req = new Request.Builder().url(modelUrl).header("User-Agent", "VietVoice-TTS/1.2").build();
+                  Call call = CLIENT.newCall(req);
+                  CALLS.put(modelUrl, call);
+                  call.enqueue(new Callback() {
+                      @Override public void onFailure(Call call, java.io.IOException e) {
+                          fail(app, item, modelUrl, modelFile, tokensFile, uiRefresh, "Tải giọng thất bại: " + e.getMessage());
+                      }
+                      @Override public void onResponse(Call call, Response response) {
+                          try (Response r = response) {
+                              if (!r.isSuccessful() || r.body() == null) throw new java.io.IOException("HTTP " + r.code());
+                              final int[] last = {-1};
+                              writeBody(r.body(), modelFile, p -> {
+                                  if (p != last[0] && (p == 100 || p - last[0] >= 2)) {
+                                      last[0] = p;
+                                      item.put("download_progress", String.valueOf(p));
+                                      if (p % 10 == 0) persist(app, item);
+                                      refresh(uiRefresh);
+                                  }
+                              });
+                              if (modelFile.length() < 10_000_000L) throw new java.io.IOException("Model tải về quá nhỏ");
+                              item.put("onnx_path", modelFile.getAbsolutePath());
+                              item.put("tokens_path", tokensFile.getAbsolutePath());
+                              item.put("is_downloading", "false");
+                              item.put("download_progress", "100");
+                              item.remove("handler_running");
+                              item.remove("download_error");
+                              persist(app, item);
+                              try { com.CodeBySonu.VoxSherpa.system.TtsDefaultHelper.syncDefaultVoices(app); } catch (Throwable ignored) {}
+                              CALLS.remove(modelUrl);
+                              refresh(uiRefresh);
+                              toast(app, "Đã tải xong " + str(item.get("name")));
+                          } catch (Throwable t) {
+                              fail(app, item, modelUrl, modelFile, tokensFile, uiRefresh, "Tải giọng thất bại: " + t.getMessage());
+                          }
+                      }
+                  });
+              }
+
+              public static void cancel(Context context, HashMap<String, Object> item, Runnable uiRefresh) {
+                  if (context == null || item == null) return;
+                  String key = str(item.get("model_url"));
+                  Call c = CALLS.remove(key);
+                  if (c != null) c.cancel();
+                  item.put("is_downloading", "false");
+                  item.put("download_progress", "0");
+                  item.remove("handler_running");
+                  persist(context.getApplicationContext(), item);
+                  refresh(uiRefresh);
+                  toast(context.getApplicationContext(), "Đã hủy tải giọng");
+              }
+
+              private interface Progress { void onProgress(int percent); }
+
+              private static void writeBody(ResponseBody body, File out, Progress progress) throws java.io.IOException {
+                  long total = body.contentLength();
+                  try (InputStream in = body.byteStream(); FileOutputStream fos = new FileOutputStream(out, false)) {
+                      byte[] buf = new byte[64 * 1024];
+                      long done = 0;
+                      int n;
+                      while ((n = in.read(buf)) != -1) {
+                          fos.write(buf, 0, n);
+                          done += n;
+                          if (progress != null && total > 0) progress.onProgress((int)Math.min(99, done * 100L / total));
+                      }
+                      fos.flush();
+                  }
+                  if (progress != null) progress.onProgress(100);
+              }
+
+              private static void fail(Context app, HashMap<String, Object> item, String key,
+                                       File modelFile, File tokensFile, Runnable uiRefresh, String msg) {
+                  CALLS.remove(key);
+                  if (modelFile.exists() && !str(item.get("onnx_path")).equals(modelFile.getAbsolutePath())) modelFile.delete();
+                  item.put("is_downloading", "false");
+                  item.put("download_progress", "0");
+                  item.put("download_error", msg == null ? "Unknown" : msg);
+                  item.remove("handler_running");
+                  persist(app, item);
+                  refresh(uiRefresh);
+                  toast(app, msg == null ? "Tải giọng thất bại" : msg);
+              }
+
+              private static void persist(Context context, HashMap<String, Object> item) {
+                  try {
+                      SharedPreferences sp = context.getSharedPreferences("sp1", Context.MODE_PRIVATE);
+                      Gson gson = new Gson();
+                      Type type = new TypeToken<ArrayList<HashMap<String, Object>>>(){}.getType();
+                      ArrayList<HashMap<String, Object>> list = gson.fromJson(sp.getString("models_data", "[]"), type);
+                      if (list == null) list = new ArrayList<>();
+                      String url = str(item.get("model_url"));
+                      boolean found = false;
+                      for (HashMap<String, Object> m : list) {
+                          if (url.equals(str(m.get("model_url")))) {
+                              m.clear(); m.putAll(item); found = true; break;
+                          }
+                      }
+                      if (!found) list.add(new HashMap<>(item));
+                      sp.edit().putString("models_data", gson.toJson(list)).apply();
+                  } catch (Throwable ignored) {}
+              }
+
+              private static String safeName(String url) {
+                  String s = url.substring(url.lastIndexOf('/') + 1);
+                  if (s.endsWith(".onnx")) s = s.substring(0, s.length() - 5);
+                  return s.replaceAll("[^A-Za-z0-9._-]", "_");
+              }
+              private static String str(Object o) { return o == null ? "" : String.valueOf(o); }
+              private static void refresh(Runnable r) { if (r != null) MAIN.post(r); }
+              private static void toast(Context c, String s) { MAIN.post(() -> Toast.makeText(c, s, Toast.LENGTH_LONG).show()); }
+          }
+          JAVA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Seed catalog at app startup and Models page startup.
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/MainActivity.java')
+          s = p.read_text()
+          needle = 'super.onCreate(_savedInstanceState);'
+          if needle in s and 'VietnameseVoiceCatalog.seed(this);' not in s:
+              s = s.replace(needle, needle + '\n\t\tVietnameseVoiceCatalog.seed(this);', 1)
+          p.write_text(s)
+
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java')
+          s = p.read_text()
+          # Keep built-in VI voices during online catalog cleanup.
+          old = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx")) {'
+          new = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx") && !localUrl.contains("doof-ferb/nghitts-copy")) {'
+          s = s.replace(old, new)
+
+          # Use robust OkHttp downloader for our HF/Xet Vietnamese models.
+          marker = '} else if (!isDownloaded) {\n\t\t\t\t\t\tString onnxUrl = item.containsKey("model_url") ? item.get("model_url").toString() : "";'
+          insert = '''} else if (!isDownloaded) {\n\t\t\t\t\t\tif (item.containsKey("builtin_vi") && "true".equalsIgnoreCase(String.valueOf(item.get("builtin_vi")))) {\n\t\t\t\t\t\t\tcom.CodeBySonu.VoxSherpa.VietnameseDirectDownloader.download(context, item, () -> {\n\t\t\t\t\t\t\t\tif (binding.recyclerviewModels.getAdapter() != null) binding.recyclerviewModels.getAdapter().notifyDataSetChanged();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\tString onnxUrl = item.containsKey("model_url") ? item.get("model_url").toString() : "";'''
+          if marker not in s:
+              marker = marker.replace('\n','\r\n')
+              insert = insert.replace('\n','\r\n')
+          if marker in s:
+              s = s.replace(marker, insert, 1)
+          else:
+              raise SystemExit('download marker not found')
+
+          # Route cancel button for direct VI downloader before DownloadManager parsing.
+          old = 'if (isDownloading) {\n\t\t\t\t\t\ttry {'
+          new = '''if (isDownloading) {\n\t\t\t\t\t\tif (item.containsKey("builtin_vi") && "true".equalsIgnoreCase(String.valueOf(item.get("builtin_vi")))) {\n\t\t\t\t\t\t\tcom.CodeBySonu.VoxSherpa.VietnameseDirectDownloader.cancel(context, item, () -> {\n\t\t\t\t\t\t\t\tif (binding.recyclerviewModels.getAdapter() != null) binding.recyclerviewModels.getAdapter().notifyDataSetChanged();\n\t\t\t\t\t\t\t});\n\t\t\t\t\t\t\treturn;\n\t\t\t\t\t\t}\n\t\t\t\t\t\ttry {'''
+          if old not in s:
+              old = old.replace('\n','\r\n'); new = new.replace('\n','\r\n')
+          if old in s:
+              s = s.replace(old, new, 1)
+          else:
+              raise SystemExit('cancel marker not found')
+          p.write_text(s)
+
+          # Explicit Vietnamese locale support.
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/TtsLocaleHelper.java')
+          s = p.read_text()
+          marker = 'if (search.contains("portuguese")) return new Locale("pt");'
+          if marker in s and 'search.contains("vietnamese")' not in s:
+              s = s.replace(marker, marker + '\n        if (search.contains("vietnamese") || search.equals("vi")) return new Locale("vi");')
+          p.write_text(s)
+
+          # Separate package + ARM64 + version.
+          p = Path('app/build.gradle')
+          s = p.read_text()
+          s = s.replace('applicationId "com.CodeBySonu.VoxSherpa"', 'applicationId "com.cambangthong.VietVoiceTTS"')
+          s = s.replace("abiFilters 'arm64-v8a', 'x86_64'", "abiFilters 'arm64-v8a'")
+          s = re.sub(r'versionCode\s+\d+', 'versionCode 1200', s, count=1)
+          s = re.sub(r'versionName\s+"[^"]+"', 'versionName "1.2-vietnamese"', s, count=1)
+          p.write_text(s)
+
+          # Authorities and visible engine label.
+          p = Path('app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          s = s.replace('com.CodeBySonu.VoxSherpa.androidx-startup', '${applicationId}.androidx-startup')
+          s = s.replace('com.CodeBySonu.VoxSherpa.firebaseinitprovider', '${applicationId}.firebaseinitprovider')
+          s = s.replace('com.CodeBySonu.VoxSherpa.provider', '${applicationId}.provider')
+          s = s.replace('android:label="VoxSherpa TTS"', 'android:label="VietVoice TTS"')
+          s = s.replace('android:label="VoxSherpa"', 'android:label="VietVoice TTS"')
+          p.write_text(s)
+
+          p = Path('app/src/main/res/values/strings.xml')
+          if p.exists():
+              s = p.read_text()
+              s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">VietVoice TTS</string>', s, count=1)
+              p.write_text(s)
+
+          # Replace only visible exact VoxSherpa text in layouts, never class paths.
+          for p in Path('app/src/main/res/layout').glob('*.xml'):
+              s = p.read_text()
+              s = s.replace('android:text="VoxSherpa"', 'android:text="VietVoice TTS"')
+              s = s.replace('>VoxSherpa<', '>VietVoice TTS<')
+              p.write_text(s)
+          PY
+
+          grep -n 'VietnameseDirectDownloader.download' app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java
+          grep -n 'VietnameseDirectDownloader.cancel' app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon -x test -x lint --stacktrace
+
+      - name: Verify and package APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+          APK="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BT/apksigner" verify --verbose "$APK"
+          cp "$APK" ../VietVoice-TTS-v1.2-ZFold6-arm64.apk
+          cd ..
+          sha256sum VietVoice-TTS-v1.2-ZFold6-arm64.apk | tee SHA256-vietvoice-v12.txt
+          ls -lh VietVoice-TTS-v1.2-ZFold6-arm64.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: VietVoice-TTS-v1.2-ZFold6-arm64
+          path: |
+            VietVoice-TTS-v1.2-ZFold6-arm64.apk
+            SHA256-vietvoice-v12.txt
+          if-no-files-found: error
