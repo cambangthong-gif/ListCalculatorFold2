@@ -11,18 +11,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: zulu
           java-version: '17'
 
-      - name: Clone VoxSherpa source
+      - name: Clone Sherpa TTS engine source
         shell: bash
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/CodeBySonu95/VoxSherpa-TTS.git vox
 
-      - name: Add curated Vietnamese voice catalog
+      - name: Build standalone Vietnamese UI and voice catalog
         shell: bash
         run: |
           set -euo pipefail
@@ -42,8 +42,7 @@ jobs:
 
           public final class VietnameseVoiceCatalog {
               private VietnameseVoiceCatalog() {}
-
-              private static final String TOKENS = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/tokens.txt?download=true";
+              public static final String TOKENS = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/tokens.txt?download=true";
               private static final String BASE = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/";
               private static final String READEXA = "https://huggingface.co/spaces/yncmobile/SRT-TTS-03/resolve/main/";
 
@@ -55,33 +54,31 @@ jobs:
                       Type type = new TypeToken<ArrayList<HashMap<String, Object>>>(){}.getType();
                       ArrayList<HashMap<String, Object>> list = gson.fromJson(sp.getString("models_data", "[]"), type);
                       if (list == null) list = new ArrayList<>();
-
                       HashSet<String> urls = new HashSet<>();
                       for (HashMap<String, Object> m : list) {
                           Object u = m.get("model_url");
                           if (u != null) urls.add(u.toString());
                       }
 
-                      add(list, urls, "Ngọc Ngạn", "Male", BASE + "ngocngan3701.onnx?download=true", "Giọng kể chuyện");
-                      add(list, urls, "Ngọc Huyền New", "Female", BASE + "ngochuyennew.onnx?download=true", "Giọng review/kể chuyện");
-                      add(list, urls, "Ngọc Huyền", "Female", BASE + "ngochuyen.onnx?download=true", "Giọng nữ");
-                      add(list, urls, "Duy Oryx", "Male", BASE + "duyoryx3175.onnx?download=true", "Giọng nam trầm");
-                      add(list, urls, "Quang Minh (Readexa)", "Male", READEXA + "QuangMinh.onnx?download=true", "Giọng Readexa");
-                      add(list, urls, "Phương Mai (Readexa)", "Female", READEXA + "phuongmai1.onnx?download=true", "Giọng Readexa");
-                      add(list, urls, "Ban Mai", "Female", BASE + "banmai.onnx?download=true", "Giọng nữ");
-                      add(list, urls, "Chiếu Thành", "Male", BASE + "chieuthanh.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Lạc Phi", "Male", BASE + "lacphi.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Mai Phương", "Female", BASE + "maiphuong.onnx?download=true", "Giọng nữ");
-                      add(list, urls, "Mạnh Dũng", "Male", BASE + "manhdung.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Minh Khang", "Male", BASE + "minhkhang.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Minh Quang", "Male", BASE + "minhquang.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Minh Thu", "Female", BASE + "minhthu.onnx?download=true", "Giọng nữ");
-                      add(list, urls, "Phương Trang", "Female", BASE + "phuongtrang.onnx?download=true", "Giọng nữ");
-                      add(list, urls, "Tài An", "Male", BASE + "taian4.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Thanh Phương", "Female", BASE + "thanhphuong2.onnx?download=true", "Giọng Việt");
-                      add(list, urls, "Thiện Tâm", "Male", BASE + "thientam.onnx?download=true", "Giọng nam");
-                      add(list, urls, "Việt Thảo", "Male", BASE + "vietthao3886.onnx?download=true", "Giọng nam");
-
+                      add(list, urls, "Ngọc Ngạn", "Nam", BASE + "ngocngan3701.onnx?download=true", "Kể chuyện, giọng trầm");
+                      add(list, urls, "Ngọc Huyền New", "Nữ", BASE + "ngochuyennew.onnx?download=true", "Kể chuyện / review");
+                      add(list, urls, "Ngọc Huyền", "Nữ", BASE + "ngochuyen.onnx?download=true", "Giọng nữ rõ");
+                      add(list, urls, "Duy Oryx", "Nam", BASE + "duyoryx3175.onnx?download=true", "Nam trầm");
+                      add(list, urls, "Quang Minh", "Nam", READEXA + "QuangMinh.onnx?download=true", "Readexa");
+                      add(list, urls, "Phương Mai", "Nữ", READEXA + "phuongmai1.onnx?download=true", "Readexa");
+                      add(list, urls, "Ban Mai", "Nữ", BASE + "banmai.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Chiếu Thành", "Nam", BASE + "chieuthanh.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Lạc Phi", "Nam", BASE + "lacphi.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Mai Phương", "Nữ", BASE + "maiphuong.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Mạnh Dũng", "Nam", BASE + "manhdung.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Khang", "Nam", BASE + "minhkhang.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Quang", "Nam", BASE + "minhquang.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Thu", "Nữ", BASE + "minhthu.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Phương Trang", "Nữ", BASE + "phuongtrang.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Tài An", "Nam", BASE + "taian4.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Thanh Phương", "Nữ", BASE + "thanhphuong2.onnx?download=true", "Giọng Việt");
+                      add(list, urls, "Thiện Tâm", "Nam", BASE + "thientam.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Việt Thảo", "Nam", BASE + "vietthao3886.onnx?download=true", "Giọng nam");
                       sp.edit().putString("models_data", gson.toJson(list)).apply();
                   } catch (Throwable ignored) {}
               }
@@ -95,7 +92,7 @@ jobs:
                   m.put("language", "Vietnamese");
                   m.put("gender", gender);
                   m.put("quality", "Neural");
-                  m.put("size", "63.5 MB");
+                  m.put("size", "~64 MB");
                   m.put("model_url", modelUrl);
                   m.put("tokens_url", TOKENS);
                   m.put("description", note);
@@ -108,64 +105,198 @@ jobs:
           }
           JAVA
 
+          cat > app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseTtsActivity.java <<'JAVA'
+          package com.CodeBySonu.VoxSherpa;
+
+          import android.app.*;
+          import android.os.*;
+          import android.content.*;
+          import android.graphics.Color;
+          import android.graphics.Typeface;
+          import android.speech.tts.TextToSpeech;
+          import android.view.*;
+          import android.widget.*;
+          import androidx.appcompat.app.AppCompatActivity;
+          import com.google.gson.Gson;
+          import com.google.gson.reflect.TypeToken;
+          import org.json.JSONObject;
+          import java.io.*;
+          import java.net.*;
+          import java.util.*;
+          import java.util.concurrent.*;
+
+          public class VietnameseTtsActivity extends AppCompatActivity {
+              private LinearLayout list;
+              private TextView headerStatus;
+              private final ExecutorService executor = Executors.newSingleThreadExecutor();
+              private TextToSpeech tts;
+              private final Gson gson = new Gson();
+
+              @Override protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  VietnameseVoiceCatalog.seed(this);
+                  buildUi();
+                  refresh();
+              }
+
+              private int dp(int v) { return (int)(v * getResources().getDisplayMetrics().density + .5f); }
+              private TextView tv(String text, float sp, boolean bold) {
+                  TextView v = new TextView(this);
+                  v.setText(text); v.setTextSize(sp); v.setTextColor(Color.rgb(30,30,35));
+                  if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+                  return v;
+              }
+              private Button btn(String text) {
+                  Button b = new Button(this); b.setText(text); b.setAllCaps(false); b.setMinHeight(dp(46)); return b;
+              }
+
+              private void buildUi() {
+                  getWindow().setStatusBarColor(Color.rgb(247,247,250));
+                  getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+                  LinearLayout root = new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
+                  root.setPadding(dp(18),dp(16),dp(18),dp(12)); root.setBackgroundColor(Color.rgb(247,247,250));
+                  TextView title = tv("Vietnamese AI TTS", 28, true); root.addView(title);
+                  TextView sub = tv("Giọng đọc tiếng Việt offline cho Moon+ Reader", 15, false);
+                  LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(-1,-2); sp.topMargin=dp(4); root.addView(sub,sp);
+                  headerStatus = tv("",14,false); LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2); hp.topMargin=dp(10); root.addView(headerStatus,hp);
+                  Button sys = btn("Mở cài đặt Văn bản thành giọng nói");
+                  sys.setOnClickListener(v -> { try { startActivity(new Intent("com.android.settings.TTS_SETTINGS")); } catch(Exception e) { startActivity(new Intent(android.provider.Settings.ACTION_SETTINGS)); }});
+                  LinearLayout.LayoutParams bp=new LinearLayout.LayoutParams(-1,-2); bp.topMargin=dp(10); root.addView(sys,bp);
+                  ScrollView sv = new ScrollView(this); list = new LinearLayout(this); list.setOrientation(LinearLayout.VERTICAL); sv.addView(list);
+                  LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,0,1); lp.topMargin=dp(12); root.addView(sv,lp);
+                  setContentView(root);
+              }
+
+              private ArrayList<HashMap<String,Object>> all() {
+                  try {
+                      ArrayList<HashMap<String,Object>> a = gson.fromJson(getSharedPreferences("sp1",MODE_PRIVATE).getString("models_data","[]"), new TypeToken<ArrayList<HashMap<String,Object>>>(){}.getType());
+                      return a == null ? new ArrayList<>() : a;
+                  } catch(Exception e) { return new ArrayList<>(); }
+              }
+              private String str(HashMap<String,Object> m,String k){ Object v=m.get(k); return v==null?"":v.toString(); }
+              private boolean installed(HashMap<String,Object> m){ String p=str(m,"onnx_path"); return !p.isEmpty() && new File(p).exists(); }
+              private String selectedPath() {
+                  try { return new JSONObject(getSharedPreferences("sp5",MODE_PRIVATE).getString("sys_tts_Vietnamese","{}" )).optString("onnx_path",""); } catch(Exception e){ return ""; }
+              }
+
+              private void refresh() {
+                  list.removeAllViews();
+                  String selected = selectedPath(); int count=0;
+                  for(HashMap<String,Object> m: all()) {
+                      if(!Boolean.TRUE.equals(m.get("builtin_vi"))) continue;
+                      count++;
+                      LinearLayout card=new LinearLayout(this); card.setOrientation(LinearLayout.VERTICAL); card.setPadding(dp(16),dp(13),dp(16),dp(13));
+                      android.graphics.drawable.GradientDrawable bg=new android.graphics.drawable.GradientDrawable(); bg.setColor(Color.WHITE); bg.setCornerRadius(dp(20));
+                      if(installed(m) && str(m,"onnx_path").equals(selected)) { bg.setStroke(dp(2),Color.rgb(50,95,220)); }
+                      card.setBackground(bg);
+                      String suffix = installed(m) ? (str(m,"onnx_path").equals(selected)?"  • Đang dùng":"  • Đã tải") : "";
+                      card.addView(tv(str(m,"name")+suffix,19,true));
+                      TextView info=tv(str(m,"gender")+" · "+str(m,"description")+" · "+str(m,"size"),13,false); LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,-2); ip.topMargin=dp(4); card.addView(info,ip);
+                      LinearLayout row=new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); row.setGravity(Gravity.CENTER_VERTICAL);
+                      Button download=btn(installed(m)?"Tải lại":"Tải giọng"); Button choose=btn("Chọn"); Button preview=btn("Nghe thử");
+                      download.setOnClickListener(v -> downloadVoice(m, download));
+                      choose.setEnabled(installed(m)); choose.setOnClickListener(v -> { setDefault(m); refresh(); Toast.makeText(this,"Đã chọn "+str(m,"name"),Toast.LENGTH_SHORT).show(); });
+                      preview.setEnabled(installed(m)); preview.setOnClickListener(v -> { setDefault(m); refresh(); speakPreview(str(m,"name")); });
+                      row.addView(download,new LinearLayout.LayoutParams(0,-2,1)); row.addView(choose,new LinearLayout.LayoutParams(0,-2,1)); row.addView(preview,new LinearLayout.LayoutParams(0,-2,1));
+                      LinearLayout.LayoutParams rp=new LinearLayout.LayoutParams(-1,-2); rp.topMargin=dp(8); card.addView(row,rp);
+                      LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2); cp.bottomMargin=dp(10); list.addView(card,cp);
+                  }
+                  headerStatus.setText(count+" giọng Việt · tải từng giọng để dùng offline");
+              }
+
+              private String safeName(String n){ return n.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+","_")+"_"+Math.abs(n.hashCode()); }
+              private void downloadVoice(HashMap<String,Object> model, Button button) {
+                  button.setEnabled(false); button.setText("Đang tải…");
+                  executor.execute(() -> {
+                      try {
+                          File dir=new File(getFilesDir(),"vi_voices"); if(!dir.exists()) dir.mkdirs();
+                          File tokens=new File(dir,"tokens.txt"); if(!tokens.exists() || tokens.length()<1000) download(str(model,"tokens_url"),tokens);
+                          File onnx=new File(dir,safeName(str(model,"name"))+".onnx"); download(str(model,"model_url"),onnx);
+                          if(onnx.length()<1000000) throw new IOException("Model tải không hợp lệ");
+                          ArrayList<HashMap<String,Object>> data=all();
+                          for(HashMap<String,Object> m:data) if(str(m,"model_url").equals(str(model,"model_url"))) { m.put("onnx_path",onnx.getAbsolutePath()); m.put("tokens_path",tokens.getAbsolutePath()); }
+                          getSharedPreferences("sp1",MODE_PRIVATE).edit().putString("models_data",gson.toJson(data)).apply();
+                          runOnUiThread(() -> { refresh(); Toast.makeText(this,"Đã tải "+str(model,"name"),Toast.LENGTH_SHORT).show(); });
+                      } catch(Exception e) {
+                          runOnUiThread(() -> { button.setEnabled(true); button.setText("Tải lại"); Toast.makeText(this,"Tải thất bại: "+e.getMessage(),Toast.LENGTH_LONG).show(); });
+                      }
+                  });
+              }
+              private void download(String url, File out) throws Exception {
+                  HttpURLConnection c=(HttpURLConnection)new URL(url).openConnection(); c.setConnectTimeout(20000); c.setReadTimeout(120000); c.setInstanceFollowRedirects(true); c.setRequestProperty("User-Agent","VietnameseAITTS/1.1");
+                  int code=c.getResponseCode(); if(code<200 || code>=400) throw new IOException("HTTP "+code);
+                  try(InputStream in=new BufferedInputStream(c.getInputStream()); OutputStream os=new BufferedOutputStream(new FileOutputStream(out))) { byte[] buf=new byte[65536]; int n; while((n=in.read(buf))>0) os.write(buf,0,n); }
+                  c.disconnect();
+              }
+              private void setDefault(HashMap<String,Object> m) {
+                  try {
+                      JSONObject j=new JSONObject(); j.put("model_type","vits"); j.put("onnx_path",str(m,"onnx_path")); j.put("tokens_path",str(m,"tokens_path")); j.put("voices_bin_path",""); j.put("speaker_id","-1");
+                      getSharedPreferences("sp5",MODE_PRIVATE).edit().putString("sys_tts_Vietnamese",j.toString()).apply();
+                  } catch(Exception ignored) {}
+              }
+              private void speakPreview(String voiceName) {
+                  if(tts!=null) { try{tts.stop();tts.shutdown();}catch(Exception ignored){} }
+                  tts=new TextToSpeech(this,status->{ if(status==TextToSpeech.SUCCESS){ tts.setLanguage(new Locale("vi","VN")); tts.setSpeechRate(1.0f); tts.speak("Xin chào. Đây là giọng "+voiceName+". Chúc bạn nghe truyện thật thoải mái.",TextToSpeech.QUEUE_FLUSH,null,"preview"); } else Toast.makeText(this,"Chưa khởi động được TTS",Toast.LENGTH_SHORT).show(); },getPackageName());
+              }
+              @Override protected void onDestroy(){ super.onDestroy(); executor.shutdownNow(); if(tts!=null){try{tts.stop();tts.shutdown();}catch(Exception ignored){}} }
+          }
+          JAVA
+
+          mkdir -p app/src/main/res/drawable
+          cat > app/src/main/res/drawable/ic_vietnamese_tts.xml <<'XML'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#315FDB" android:pathData="M54,4A50,50 0,1 0,54 104A50,50 0,1 0,54 4"/>
+            <path android:fillColor="#FFFFFF" android:pathData="M48,31h12a8,8 0,0 1,8 8v22a14,14 0,0 1,-28 0V39a8,8 0,0 1,8 -8M35,57h5v5a14,14 0,0 0,28 0v-5h5v5a19,19 0,0 1,-16 18.7V89h-6v-8.3A19,19 0,0 1,35 62z"/>
+          </vector>
+          XML
+
           python3 - <<'PY'
           from pathlib import Path
           import re
 
-          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/MainActivity.java')
-          s = p.read_text()
-          needle = 'super.onCreate(_savedInstanceState);'
+          # Seed catalog from the TTS service too, so Android sees Vietnamese models after install.
+          p=Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/VoxSherpaTtsService.java')
+          s=p.read_text(); needle='super.onCreate();'
           if needle in s and 'VietnameseVoiceCatalog.seed(this);' not in s:
-              s = s.replace(needle, needle + '\n\t\tVietnameseVoiceCatalog.seed(this);', 1)
+              s=s.replace(needle,needle+'\n        com.CodeBySonu.VoxSherpa.VietnameseVoiceCatalog.seed(this);',1)
           p.write_text(s)
 
-          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/VoxSherpaTtsService.java')
-          s = p.read_text()
-          needle = 'super.onCreate();'
-          if needle in s and 'VietnameseVoiceCatalog.seed(this);' not in s:
-              s = s.replace(needle, needle + '\n        com.CodeBySonu.VoxSherpa.VietnameseVoiceCatalog.seed(this);', 1)
-          p.write_text(s)
-
-          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java')
-          s = p.read_text()
-          old = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx")) {'
-          new = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx") && !localUrl.contains("doof-ferb/nghitts-copy") && !localUrl.contains("yncmobile/SRT-TTS-03")) {'
-          if old in s:
-              s = s.replace(old, new)
-          p.write_text(s)
-
-          p = Path('app/build.gradle')
-          s = p.read_text()
-          s = s.replace('applicationId "com.CodeBySonu.VoxSherpa"', 'applicationId "com.cambangthong.VietnameseAITTS"')
-          s = s.replace("abiFilters 'arm64-v8a', 'x86_64'", "abiFilters 'arm64-v8a'")
-          s = re.sub(r'versionCode\s+\d+', 'versionCode 1001', s, count=1)
-          s = re.sub(r'versionName\s+"[^"]+"', 'versionName "1.0-vi-multivoice"', s, count=1)
-          p.write_text(s)
-
-          p = Path('app/src/main/AndroidManifest.xml')
-          s = p.read_text()
-          s = s.replace('com.CodeBySonu.VoxSherpa.androidx-startup', '${applicationId}.androidx-startup')
-          s = s.replace('com.CodeBySonu.VoxSherpa.firebaseinitprovider', '${applicationId}.firebaseinitprovider')
-          s = s.replace('com.CodeBySonu.VoxSherpa.provider', '${applicationId}.provider')
-          s = s.replace('android:label="VoxSherpa TTS"', 'android:label="Vietnamese AI TTS"')
-          p.write_text(s)
-
-          p = Path('app/src/main/res/values/strings.xml')
-          if p.exists():
-              s = p.read_text()
-              s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Vietnamese AI TTS</string>', s, count=1)
-              p.write_text(s)
-
-          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/TtsLocaleHelper.java')
-          s = p.read_text()
-          marker = 'if (search.contains("portuguese")) return new Locale("pt");'
+          # Vietnamese locale recognition.
+          p=Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/TtsLocaleHelper.java')
+          s=p.read_text(); marker='if (search.contains("portuguese")) return new Locale("pt");'
           if marker in s and 'search.contains("vietnamese")' not in s:
-              s = s.replace(marker, marker + '\n        if (search.contains("vietnamese") || search.equals("vi")) return new Locale("vi");')
+              s=s.replace(marker,marker+'\n        if (search.contains("vietnamese") || search.equals("vi")) return new Locale("vi");')
           p.write_text(s)
+
+          # Separate package, ARM64-only, standalone version.
+          p=Path('app/build.gradle'); s=p.read_text()
+          s=s.replace('applicationId "com.CodeBySonu.VoxSherpa"','applicationId "com.cambangthong.VietnameseAITTS"')
+          s=s.replace("abiFilters 'arm64-v8a', 'x86_64'","abiFilters 'arm64-v8a'")
+          s=re.sub(r'versionCode\s+\d+','versionCode 1100',s,count=1)
+          s=re.sub(r'versionName\s+"[^"]+"','versionName "1.1-standalone"',s,count=1)
+          p.write_text(s)
+
+          # Replace only the launcher with our clean Vietnamese manager; upstream UI is no longer exposed.
+          p=Path('app/src/main/AndroidManifest.xml'); s=p.read_text()
+          s=s.replace('android:name=".MainActivity"','android:name=".VietnameseTtsActivity"',1)
+          s=s.replace('com.CodeBySonu.VoxSherpa.androidx-startup','${applicationId}.androidx-startup')
+          s=s.replace('com.CodeBySonu.VoxSherpa.firebaseinitprovider','${applicationId}.firebaseinitprovider')
+          s=s.replace('com.CodeBySonu.VoxSherpa.provider','${applicationId}.provider')
+          s=s.replace('android:label="VoxSherpa TTS"','android:label="Vietnamese AI TTS"')
+          s=s.replace('android:icon="@mipmap/ic_launcher"','android:icon="@drawable/ic_vietnamese_tts"')
+          p.write_text(s)
+
+          # System TTS gear button opens our activity, not VoxSherpa settings.
+          p=Path('app/src/main/res/xml/tts_engine.xml'); s=p.read_text()
+          s=s.replace('com.CodeBySonu.VoxSherpa.TtssettingsActivity','com.CodeBySonu.VoxSherpa.VietnameseTtsActivity')
+          p.write_text(s)
+
+          p=Path('app/src/main/res/values/strings.xml')
+          if p.exists():
+              s=p.read_text(); s=re.sub(r'<string name="app_name">.*?</string>','<string name="app_name">Vietnamese AI TTS</string>',s,count=1); p.write_text(s)
           PY
 
-          echo 'Patched Vietnamese voice list:'
-          grep -n 'add(list' app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseVoiceCatalog.java
+          grep -n 'VietnameseTtsActivity\|Vietnamese AI TTS' app/src/main/AndroidManifest.xml app/src/main/res/xml/tts_engine.xml
 
       - name: Build release APK
         shell: bash
@@ -184,16 +315,16 @@ jobs:
           test -n "$APK"
           BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
           "$BT/apksigner" verify --verbose "$APK"
-          cp "$APK" ../Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
+          cp "$APK" ../Vietnamese-AI-TTS-Standalone-ZFold6-arm64.apk
           cd ..
-          sha256sum Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk | tee SHA256-multivoice.txt
-          ls -lh Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
+          sha256sum Vietnamese-AI-TTS-Standalone-ZFold6-arm64.apk | tee SHA256-standalone.txt
+          ls -lh Vietnamese-AI-TTS-Standalone-ZFold6-arm64.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64
+          name: Vietnamese-AI-TTS-Standalone-ZFold6-arm64
           path: |
-            Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
-            SHA256-multivoice.txt
+            Vietnamese-AI-TTS-Standalone-ZFold6-arm64.apk
+            SHA256-standalone.txt
           if-no-files-found: error
