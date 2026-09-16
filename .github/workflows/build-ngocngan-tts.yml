@@ -1,0 +1,93 @@
+name: Build Ngoc Ngan TTS APK
+
+on:
+  push:
+    branches:
+      - ngocngan-tts-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Sherpa TTS engine and Ngoc Ngan model
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=""
+          for VER in 1.13.8 1.13.7 1.13.4; do
+            URL="https://huggingface.co/csukuangfj2/sherpa-onnx-apk/resolve/main/tts-engine-new/${VER}/sherpa-onnx-${VER}-arm64-v8a-vie-tts-engine-vits-piper-vi_VN-vais1000-medium.apk"
+            if curl -fL --retry 3 --retry-delay 2 "$URL" -o base.apk; then
+              BASE="$VER"
+              break
+            fi
+          done
+          test -n "$BASE"
+          echo "Using Sherpa base $BASE"
+          curl -fL --retry 5 --retry-delay 2 \
+            "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/ngocngan3701.onnx?download=true" \
+            -o ngocngan3701.onnx
+          curl -fL --retry 5 --retry-delay 2 \
+            "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/tokens.txt?download=true" \
+            -o ngocngan-tokens.txt
+          test $(stat -c%s ngocngan3701.onnx) -gt 50000000
+
+      - name: Patch model into Android TTS engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf inspect patch
+          mkdir inspect patch
+          unzip -q base.apk -d inspect
+          MODEL_PATH="$(find inspect/assets -type f -name 'vi_VN-vais1000-medium.onnx' | head -n 1)"
+          test -n "$MODEL_PATH"
+          REL_MODEL="${MODEL_PATH#inspect/}"
+          MODEL_DIR="$(dirname "$REL_MODEL")"
+          echo "Replacing $REL_MODEL"
+
+          cp base.apk patched-unsigned.apk
+          zip -q -d patched-unsigned.apk 'META-INF/*' || true
+
+          mkdir -p "patch/$MODEL_DIR"
+          cp ngocngan3701.onnx "patch/$REL_MODEL"
+          if [ -f "inspect/$MODEL_DIR/tokens.txt" ]; then
+            cp ngocngan-tokens.txt "patch/$MODEL_DIR/tokens.txt"
+          fi
+
+          (cd patch && zip -0 -q -u ../patched-unsigned.apk "$REL_MODEL")
+          if [ -f "patch/$MODEL_DIR/tokens.txt" ]; then
+            (cd patch && zip -q -u ../patched-unsigned.apk "$MODEL_DIR/tokens.txt")
+          fi
+
+      - name: Align and sign APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          echo "Build tools: $BT"
+          keytool -genkeypair -noprompt \
+            -keystore ngocngan-tts.keystore \
+            -storepass changeit -keypass changeit -alias ngocngan \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Ngoc Ngan TTS,O=Local,C=VN"
+          if "$BT/zipalign" -h 2>&1 | grep -q -- '-P'; then
+            "$BT/zipalign" -P 16 -f 4 patched-unsigned.apk aligned.apk
+          else
+            "$BT/zipalign" -f 4 patched-unsigned.apk aligned.apk
+          fi
+          "$BT/apksigner" sign \
+            --ks ngocngan-tts.keystore \
+            --ks-pass pass:changeit --key-pass pass:changeit \
+            --out NgocNgan-TTS-MoonReader-arm64.apk aligned.apk
+          "$BT/apksigner" verify --verbose NgocNgan-TTS-MoonReader-arm64.apk
+          sha256sum NgocNgan-TTS-MoonReader-arm64.apk | tee SHA256.txt
+          unzip -l NgocNgan-TTS-MoonReader-arm64.apk | grep -E 'vi_VN-vais1000-medium.onnx|tokens.txt' | head -20
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NgocNgan-TTS-MoonReader-arm64
+          path: |
+            NgocNgan-TTS-MoonReader-arm64.apk
+            SHA256.txt
+          if-no-files-found: error
