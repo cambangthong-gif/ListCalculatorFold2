@@ -1,0 +1,195 @@
+name: Build Vietnamese Multi Voice TTS
+
+on:
+  push:
+    branches:
+      - ngocngan-tts-build
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Clone VoxSherpa source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/CodeBySonu95/VoxSherpa-TTS.git vox
+
+      - name: Add curated Vietnamese voice catalog
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+
+          cat > app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseVoiceCatalog.java <<'JAVA'
+          package com.CodeBySonu.VoxSherpa;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import com.google.gson.Gson;
+          import com.google.gson.reflect.TypeToken;
+          import java.lang.reflect.Type;
+          import java.util.ArrayList;
+          import java.util.HashMap;
+          import java.util.HashSet;
+
+          public final class VietnameseVoiceCatalog {
+              private VietnameseVoiceCatalog() {}
+
+              private static final String TOKENS = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/tokens.txt?download=true";
+              private static final String BASE = "https://huggingface.co/doof-ferb/nghitts-copy/resolve/main/sherpa-onnx/";
+              private static final String READEXA = "https://huggingface.co/spaces/yncmobile/SRT-TTS-03/resolve/main/";
+
+              public static synchronized void seed(Context context) {
+                  if (context == null) return;
+                  try {
+                      SharedPreferences sp = context.getSharedPreferences("sp1", Context.MODE_PRIVATE);
+                      Gson gson = new Gson();
+                      Type type = new TypeToken<ArrayList<HashMap<String, Object>>>(){}.getType();
+                      ArrayList<HashMap<String, Object>> list = gson.fromJson(sp.getString("models_data", "[]"), type);
+                      if (list == null) list = new ArrayList<>();
+
+                      HashSet<String> urls = new HashSet<>();
+                      for (HashMap<String, Object> m : list) {
+                          Object u = m.get("model_url");
+                          if (u != null) urls.add(u.toString());
+                      }
+
+                      add(list, urls, "Ngọc Ngạn", "Male", BASE + "ngocngan3701.onnx?download=true", "Giọng kể chuyện");
+                      add(list, urls, "Ngọc Huyền New", "Female", BASE + "ngochuyennew.onnx?download=true", "Giọng review/kể chuyện");
+                      add(list, urls, "Ngọc Huyền", "Female", BASE + "ngochuyen.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Duy Oryx", "Male", BASE + "duyoryx3175.onnx?download=true", "Giọng nam trầm");
+                      add(list, urls, "Quang Minh (Readexa)", "Male", READEXA + "QuangMinh.onnx?download=true", "Giọng Readexa");
+                      add(list, urls, "Phương Mai (Readexa)", "Female", READEXA + "phuongmai1.onnx?download=true", "Giọng Readexa");
+                      add(list, urls, "Ban Mai", "Female", BASE + "banmai.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Chiếu Thành", "Male", BASE + "chieuthanh.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Lạc Phi", "Male", BASE + "lacphi.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Mai Phương", "Female", BASE + "maiphuong.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Mạnh Dũng", "Male", BASE + "manhdung.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Khang", "Male", BASE + "minhkhang.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Quang", "Male", BASE + "minhquang.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Minh Thu", "Female", BASE + "minhthu.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Phương Trang", "Female", BASE + "phuongtrang.onnx?download=true", "Giọng nữ");
+                      add(list, urls, "Tài An", "Male", BASE + "taian4.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Thanh Phương", "Female", BASE + "thanhphuong2.onnx?download=true", "Giọng Việt");
+                      add(list, urls, "Thiện Tâm", "Male", BASE + "thientam.onnx?download=true", "Giọng nam");
+                      add(list, urls, "Việt Thảo", "Male", BASE + "vietthao3886.onnx?download=true", "Giọng nam");
+
+                      sp.edit().putString("models_data", gson.toJson(list)).apply();
+                  } catch (Throwable ignored) {}
+              }
+
+              private static void add(ArrayList<HashMap<String, Object>> list, HashSet<String> urls,
+                                      String name, String gender, String modelUrl, String note) {
+                  if (urls.contains(modelUrl)) return;
+                  HashMap<String, Object> m = new HashMap<>();
+                  m.put("name", name);
+                  m.put("type", "Piper / VITS");
+                  m.put("language", "Vietnamese");
+                  m.put("gender", gender);
+                  m.put("quality", "Neural");
+                  m.put("size", "63.5 MB");
+                  m.put("model_url", modelUrl);
+                  m.put("tokens_url", TOKENS);
+                  m.put("description", note);
+                  m.put("is_downloading", "false");
+                  m.put("download_progress", "0");
+                  m.put("builtin_vi", true);
+                  list.add(m);
+                  urls.add(modelUrl);
+              }
+          }
+          JAVA
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # Seed catalog whenever the main app or Android TTS service starts.
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/MainActivity.java')
+          s = p.read_text()
+          needle = 'super.onCreate(_savedInstanceState);'
+          if needle in s and 'VietnameseVoiceCatalog.seed(this);' not in s:
+              s = s.replace(needle, needle + '\n\t\tVietnameseVoiceCatalog.seed(this);', 1)
+          p.write_text(s)
+
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/VoxSherpaTtsService.java')
+          s = p.read_text()
+          needle = 'super.onCreate();'
+          if needle in s and 'VietnameseVoiceCatalog.seed(this);' not in s:
+              s = s.replace(needle, needle + '\n        com.CodeBySonu.VoxSherpa.VietnameseVoiceCatalog.seed(this);', 1)
+          p.write_text(s)
+
+          # Keep our curated models when VoxSherpa syncs its own online catalog.
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/ModelsFragmentActivity.java')
+          s = p.read_text()
+          old = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx")) {'
+          new = 'if (!onlineUrls.contains(localUrl) && !localUrl.contains("mms-tts-multilingual-models-onnx") && !localUrl.contains("doof-ferb/nghitts-copy") && !localUrl.contains("yncmobile/SRT-TTS-03")) {'
+          if old in s:
+              s = s.replace(old, new)
+          p.write_text(s)
+
+          # Rename app, use a separate package, ARM64 only, and mark this build.
+          p = Path('app/build.gradle')
+          s = p.read_text()
+          s = s.replace('applicationId "com.CodeBySonu.VoxSherpa"', 'applicationId "com.cambangthong.VietnameseAITTS"')
+          s = s.replace("abiFilters 'arm64-v8a', 'x86_64'", "abiFilters 'arm64-v8a'")
+          s = re.sub(r'versionCode\s+\d+', 'versionCode 1001', s, count=1)
+          s = re.sub(r'versionName\s+"[^"]+"', 'versionName "1.0-vi-multivoice"', s, count=1)
+          p.write_text(s)
+
+          p = Path('app/src/main/res/values/strings.xml')
+          if p.exists():
+              s = p.read_text()
+              s = re.sub(r'<string name="app_name">.*?</string>', '<string name="app_name">Vietnamese AI TTS</string>', s, count=1)
+              p.write_text(s)
+
+          # Make Vietnamese resolution explicit and deterministic.
+          p = Path('app/src/main/java/com/CodeBySonu/VoxSherpa/system/TtsLocaleHelper.java')
+          s = p.read_text()
+          marker = 'if (search.contains("portuguese")) return new Locale("pt");'
+          if marker in s and 'search.contains("vietnamese")' not in s:
+              s = s.replace(marker, marker + '\n        if (search.contains("vietnamese") || search.equals("vi")) return new Locale("vi");')
+          p.write_text(s)
+          PY
+
+          echo 'Patched Vietnamese voice list:'
+          grep -n 'add(list' app/src/main/java/com/CodeBySonu/VoxSherpa/VietnameseVoiceCatalog.java
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon -x test -x lint --stacktrace
+
+      - name: Verify and package APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd vox
+          APK="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BT/apksigner" verify --verbose "$APK"
+          cp "$APK" ../Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
+          cd ..
+          sha256sum Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk | tee SHA256-multivoice.txt
+          ls -lh Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64
+          path: |
+            Vietnamese-AI-TTS-MultiVoice-ZFold6-arm64.apk
+            SHA256-multivoice.txt
+          if-no-files-found: error
