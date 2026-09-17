@@ -1,0 +1,76 @@
+name: Build ALAD Windows v3 Android-like pipeline
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v3-android-pipeline.yml'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch v2 to Android-like continuous streaming
+        shell: pwsh
+        run: |
+          $p = 'alad-windows-v2/Program.cs'
+          $c = Get-Content $p -Raw
+
+          # Version labels
+          $c = $c.Replace('ALAD Windows v2 — Live Dubbing', 'ALAD Windows v3 — Live Dubbing')
+          $c = $c.Replace('ALAD Windows v2', 'ALAD Windows v3')
+          $c = $c.Replace('Gemini sẵn sàng · Low latency', 'Gemini sẵn sàng · Android-like stream')
+
+          # Do not let local RMS/VAD decide when a speech turn ends.
+          $c = $c.Replace('            localVad.Reset();' + [Environment]::NewLine, '')
+          $c = $c.Replace('        localVad.Reset();' + [Environment]::NewLine, '')
+          $c = $c.Replace('                    if (lowLatency.Checked && localVad.Push(chunk)) gemini.SignalAudioStreamEnd();' + [Environment]::NewLine, '')
+
+          # Remove custom realtimeInputConfig completely. Gemini Live then uses its
+          # default automatic activity detection/activity handling, matching the
+          # simple continuous-stream behavior of ALAD Mobile much more closely.
+          $pattern = '(?s)        var realtimeInputConfig = new\s*\{.*?\r?\n        \};\r?\n\r?\n        object setup;'
+          $c = [regex]::Replace($c, $pattern, '        object setup;', 1)
+          $c = [regex]::Replace($c, '(?m)^\s*realtimeInputConfig,\s*\r?\n', '')
+
+          # SignalAudioStreamEnd remains compiled but is never called. This makes
+          # the input stream continuous: WASAPI -> PCM16 mono 16k -> 40 ms chunks -> Gemini.
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Verify Android-like patch
+        shell: pwsh
+        run: |
+          $c = Get-Content 'alad-windows-v2/Program.cs' -Raw
+          if ($c -match 'localVad\.Push\(') { throw 'local VAD call still present' }
+          if ($c -match 'activityHandling\s*=\s*"NO_INTERRUPTION"') { throw 'NO_INTERRUPTION still present' }
+          if ($c -match '^\s*realtimeInputConfig,' ) { throw 'custom realtimeInputConfig still attached' }
+          Write-Host 'Continuous streaming patch verified.'
+
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Rename
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE found' }
+          Move-Item $exe.FullName "out/${{ matrix.rid }}/ALAD-Windows-v3-${{ matrix.rid }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v3-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v3-${{ matrix.rid }}.exe
+          if-no-files-found: error
