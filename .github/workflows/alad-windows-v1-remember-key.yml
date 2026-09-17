@@ -1,0 +1,88 @@
+name: Build ALAD Windows remember key
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - 'alad-windows/**'
+      - '.github/workflows/alad-windows-v1-remember-key.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch UI and NAudio 3 migration
+        shell: pwsh
+        run: |
+          $p = 'alad-windows/Program.cs'
+          $c = Get-Content $p -Raw
+
+          $old = 'private readonly TextBox apiKey = new() { UseSystemPasswordChar = true };'
+          $new = @'
+          private readonly TextBox apiKey = new() { UseSystemPasswordChar = true };
+              private readonly CheckBox rememberKey = new() { Text = "Nhớ API key trên máy này", Checked = true, AutoSize = true };
+          '@
+          $c = $c.Replace($old, $new.Trim())
+
+          $old = 'Controls.Add(panel);'
+          $new = @'
+          Controls.Add(panel);
+                  try { apiKey.Text = SecureKeyStore.Load() ?? ""; } catch { }
+          '@
+          $c = $c.Replace($old, $new.Trim())
+
+          $old = 'AddRow(panel, 0, "Gemini API key", apiKey);'
+          $new = @'
+          var keyPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true };
+                  apiKey.Width = 430;
+                  keyPanel.Controls.Add(apiKey);
+                  keyPanel.Controls.Add(rememberKey);
+                  AddRow(panel, 0, "Gemini API key", keyPanel);
+          '@
+          $c = $c.Replace($old, $new.Trim())
+
+          $needle = 'if (string.IsNullOrWhiteSpace(apiKey.Text)) { MessageBox.Show("Nhập Gemini API key trước.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }'
+          $replacement = @'
+          if (string.IsNullOrWhiteSpace(apiKey.Text)) { MessageBox.Show("Nhập Gemini API key trước.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+                  try
+                  {
+                      if (rememberKey.Checked) SecureKeyStore.Save(apiKey.Text.Trim());
+                      else SecureKeyStore.Delete();
+                  }
+                  catch (Exception ex)
+                  {
+                      LogStatus("Không lưu được API key: " + ex.Message);
+                  }
+          '@
+          $c = $c.Replace($needle, $replacement.Trim())
+
+          $c = $c.Replace('BufferDuration = TimeSpan.FromSeconds(12), ', '')
+          $c = $c.Replace('outputBuffer.Read(temp, 0, temp.Length);', 'outputBuffer.Read(temp.AsSpan());')
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Restore
+        run: dotnet restore alad-windows/AladWindows.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows/AladWindows.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Rename executable
+        shell: pwsh
+        run: |
+          Move-Item "out/${{ matrix.rid }}/AladWindows.exe" "out/${{ matrix.rid }}/ALAD-Windows-${{ matrix.rid }}-Remember-Key.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-${{ matrix.rid }}-Remember-Key
+          path: out/${{ matrix.rid }}/ALAD-Windows-${{ matrix.rid }}-Remember-Key.exe
+          if-no-files-found: error
