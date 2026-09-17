@@ -14,8 +14,12 @@
       <DockPanel>
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
           <Button x:Name="OpenBookButton" Click="OpenBook_Click" Content="Mở EPUB"/>
-          <Button x:Name="PlayButton" Click="Play_Click" Content="Đọc chương"/>
+          <Button x:Name="PrevChapterButton" Click="PrevChapter_Click" Content="← Chương trước"/>
+          <Button x:Name="PlayButton" Click="Play_Click" Content="Đọc"/>
           <Button x:Name="StopButton" Click="Stop_Click" Content="Dừng"/>
+          <Button x:Name="NextChapterButton" Click="NextChapter_Click" Content="Chương sau →"/>
+          <CheckBox x:Name="AutoNextCheckBox" Content="Tự động qua chương" IsChecked="True"
+                    VerticalAlignment="Center" Margin="12,0,8,0" FontWeight="SemiBold"/>
           <Button x:Name="ExportButton" Click="Export_Click" Content="Xuất MP3"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
