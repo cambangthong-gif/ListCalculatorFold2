@@ -55,7 +55,6 @@ jobs:
           $g.FillPath($backBrush,$back)
           $g.FillPolygon((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(190,211,250))), [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(185,194),[System.Drawing.PointF]::new(218,232),[System.Drawing.PointF]::new(214,190)))
           $lineBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(106,148,216))
-          $g.FillRoundedRectangle = $null
           foreach($row in @(@(111,111,88),@(111,143,70),@(111,175,48))) {
             $rp = RoundedPath $row[0] $row[1] $row[2] 12 6
             $g.FillPath($lineBrush,$rp)
