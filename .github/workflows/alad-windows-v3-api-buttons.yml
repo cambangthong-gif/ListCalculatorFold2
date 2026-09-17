@@ -1,0 +1,153 @@
+name: Build ALAD Windows v3 API buttons
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v3-api-buttons.yml'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch Android-like stream and API key actions
+        shell: pwsh
+        run: |
+          $p = 'alad-windows-v2/Program.cs'
+          $c = Get-Content $p -Raw
+
+          # Keep the v3 Android-like continuous-stream behavior.
+          $c = $c.Replace('ALAD Windows v2 — Live Dubbing', 'ALAD Windows v3.1 — Live Dubbing')
+          $c = $c.Replace('ALAD Windows v2', 'ALAD Windows v3.1')
+          $c = $c.Replace('Gemini sẵn sàng · Low latency', 'Gemini sẵn sàng · Android-like stream')
+          $c = $c.Replace('            localVad.Reset();' + [Environment]::NewLine, '')
+          $c = $c.Replace('        localVad.Reset();' + [Environment]::NewLine, '')
+          $c = $c.Replace('                    if (lowLatency.Checked && localVad.Push(chunk)) gemini.SignalAudioStreamEnd();' + [Environment]::NewLine, '')
+          $pattern = '(?s)        var realtimeInputConfig = new\s*\{.*?\r?\n        \};\r?\n\r?\n        object setup;'
+          $c = [regex]::Replace($c, $pattern, '        object setup;', 1)
+          $c = [regex]::Replace($c, '(?m)^\s*realtimeInputConfig,\s*\r?\n', '')
+
+          # Replace the API key row with a responsive stacked block:
+          # textbox + remember checkbox + Get/Create + Paste buttons.
+          $keyPattern = '(?s)        var keyGrid = TwoColumnGrid\(\);\r?\n        apiKey\.Dock = DockStyle\.Fill;\r?\n        rememberKey\.Margin = new Padding\(12, 6, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(apiKey, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(rememberKey, 1, 0\);\r?\n        AddSetting\(root, "Gemini API key", keyGrid\);'
+          $keyReplacement = @'
+        var keyHost = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            RowCount = 2,
+            Margin = new Padding(0)
+        };
+        keyHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        apiKey.Dock = DockStyle.Top;
+        keyHost.Controls.Add(apiKey, 0, 0);
+
+        var keyActions = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            WrapContents = true,
+            Margin = new Padding(0, 8, 0, 0)
+        };
+        rememberKey.Margin = new Padding(0, 8, 14, 0);
+        var getApiKey = new Button
+        {
+            Text = "Tạo/Lấy API key",
+            AutoSize = true,
+            MinimumSize = new Size(135, 34),
+            Margin = new Padding(0, 0, 8, 0)
+        };
+        var pasteApiKey = new Button
+        {
+            Text = "Dán key",
+            AutoSize = true,
+            MinimumSize = new Size(90, 34),
+            Margin = new Padding(0)
+        };
+        getApiKey.Click += (_, _) =>
+        {
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "https://aistudio.google.com/app/apikey",
+                    UseShellExecute = true
+                });
+                status.Text = "Đã mở Google AI Studio để tạo/lấy API key";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Không mở được Google AI Studio", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+        pasteApiKey.Click += (_, _) =>
+        {
+            try
+            {
+                if (!Clipboard.ContainsText())
+                {
+                    MessageBox.Show("Clipboard chưa có API key.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    return;
+                }
+                var value = Clipboard.GetText().Trim();
+                if (string.IsNullOrWhiteSpace(value)) return;
+                apiKey.Text = value;
+                if (rememberKey.Checked) SecureKeyStore.Save(value);
+                status.Text = "Đã dán API key" + (rememberKey.Checked ? " và lưu an toàn" : "");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, "Không dán được API key", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        };
+        keyActions.Controls.Add(rememberKey);
+        keyActions.Controls.Add(getApiKey);
+        keyActions.Controls.Add(pasteApiKey);
+        keyHost.Controls.Add(keyActions, 0, 1);
+        AddSetting(root, "Gemini API key", keyHost);
+'@
+          $c2 = [regex]::Replace($c, $keyPattern, $keyReplacement, 1)
+          if ($c2 -eq $c) { throw 'API key UI block was not replaced' }
+          $c = $c2
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Verify patch
+        shell: pwsh
+        run: |
+          $c = Get-Content 'alad-windows-v2/Program.cs' -Raw
+          if ($c -match 'localVad\.Push\(') { throw 'local VAD call still present' }
+          if ($c -match 'activityHandling\s*=\s*"NO_INTERRUPTION"') { throw 'NO_INTERRUPTION still present' }
+          if ($c -notmatch 'Tạo/Lấy API key') { throw 'Get API key button missing' }
+          if ($c -notmatch 'Dán key') { throw 'Paste key button missing' }
+          if ($c -notmatch 'aistudio\.google\.com/app/apikey') { throw 'AI Studio URL missing' }
+          Write-Host 'v3.1 API actions verified.'
+
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Rename
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE found' }
+          Move-Item $exe.FullName "out/${{ matrix.rid }}/ALAD-Windows-v3.1-${{ matrix.rid }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v3.1-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v3.1-${{ matrix.rid }}.exe
+          if-no-files-found: error
