@@ -25,6 +25,8 @@ class UserPreferencesRepository(private val context: Context) {
 
         val DUB_MODE = stringPreferencesKey("dub_mode")
         val VOICE_NAME = stringPreferencesKey("voice_name")
+        val VOICE_SOURCE = stringPreferencesKey("voice_source")
+        val TTS_RATE = floatPreferencesKey("tts_rate")
         val MANUAL_SYNC_MS = intPreferencesKey("manual_sync_ms")
         val AUTO_SYNC = booleanPreferencesKey("auto_sync")
         val CATCH_UP = booleanPreferencesKey("catch_up")
@@ -37,11 +39,15 @@ class UserPreferencesRepository(private val context: Context) {
     }
     val apiKeyFlow: Flow<String> = context.dataStore.data.map { it[API_KEY] ?: "" }
     val sourceLangFlow: Flow<String> = context.dataStore.data.map { it[SOURCE_LANG] ?: "en" }
-    val targetLangFlow: Flow<String> = context.dataStore.data.map { it[TARGET_LANG] ?: "fa" }
+    val targetLangFlow: Flow<String> = context.dataStore.data.map { it[TARGET_LANG] ?: "vi" }
     val volumeRatioFlow: Flow<Float> = context.dataStore.data.map { it[VOLUME_RATIO] ?: 1.0f }
 
     val dubModeFlow: Flow<String> = context.dataStore.data.map { it[DUB_MODE] ?: "auto_duck" }
     val voiceNameFlow: Flow<String> = context.dataStore.data.map { it[VOICE_NAME] ?: "Kore" }
+    val voiceSourceFlow: Flow<String> = context.dataStore.data.map { it[VOICE_SOURCE] ?: "gemini" }
+    val ttsRateFlow: Flow<Float> = context.dataStore.data.map {
+        (it[TTS_RATE] ?: 1.0f).coerceIn(0.70f, 1.50f)
+    }
     val manualSyncMsFlow: Flow<Int> = context.dataStore.data.map { it[MANUAL_SYNC_MS] ?: 0 }
     val autoSyncFlow: Flow<Boolean> = context.dataStore.data.map { it[AUTO_SYNC] ?: true }
     val catchUpFlow: Flow<Boolean> = context.dataStore.data.map { it[CATCH_UP] ?: true }
@@ -50,50 +56,27 @@ class UserPreferencesRepository(private val context: Context) {
         (it[MAX_CATCH_UP_SPEED] ?: 1.15f).coerceIn(1.0f, 1.30f)
     }
 
-    suspend fun updateWsUrl(url: String) {
-        context.dataStore.edit { it[WS_URL] = url }
-    }
-
-    suspend fun updateApiKey(key: String) {
-        context.dataStore.edit { it[API_KEY] = key }
-    }
-
-    suspend fun updateSourceLang(lang: String) {
-        context.dataStore.edit { it[SOURCE_LANG] = lang }
-    }
-
-    suspend fun updateTargetLang(lang: String) {
-        context.dataStore.edit { it[TARGET_LANG] = lang }
-    }
-
+    suspend fun updateWsUrl(url: String) { context.dataStore.edit { it[WS_URL] = url } }
+    suspend fun updateApiKey(key: String) { context.dataStore.edit { it[API_KEY] = key } }
+    suspend fun updateSourceLang(lang: String) { context.dataStore.edit { it[SOURCE_LANG] = lang } }
+    suspend fun updateTargetLang(lang: String) { context.dataStore.edit { it[TARGET_LANG] = lang } }
     suspend fun updateVolumeRatio(ratio: Float) {
         context.dataStore.edit { it[VOLUME_RATIO] = ratio.coerceIn(0f, 1f) }
     }
-
-    suspend fun updateDubMode(mode: String) {
-        context.dataStore.edit { it[DUB_MODE] = mode }
+    suspend fun updateDubMode(mode: String) { context.dataStore.edit { it[DUB_MODE] = mode } }
+    suspend fun updateVoiceName(voice: String) { context.dataStore.edit { it[VOICE_NAME] = voice } }
+    suspend fun updateVoiceSource(source: String) {
+        context.dataStore.edit { it[VOICE_SOURCE] = source }
     }
-
-    suspend fun updateVoiceName(voice: String) {
-        context.dataStore.edit { it[VOICE_NAME] = voice }
+    suspend fun updateTtsRate(rate: Float) {
+        context.dataStore.edit { it[TTS_RATE] = rate.coerceIn(0.70f, 1.50f) }
     }
-
     suspend fun updateManualSyncMs(delayMs: Int) {
         context.dataStore.edit { it[MANUAL_SYNC_MS] = delayMs.coerceIn(-2000, 5000) }
     }
-
-    suspend fun updateAutoSync(enabled: Boolean) {
-        context.dataStore.edit { it[AUTO_SYNC] = enabled }
-    }
-
-    suspend fun updateCatchUp(enabled: Boolean) {
-        context.dataStore.edit { it[CATCH_UP] = enabled }
-    }
-
-    suspend fun updateLowLatency(enabled: Boolean) {
-        context.dataStore.edit { it[LOW_LATENCY] = enabled }
-    }
-
+    suspend fun updateAutoSync(enabled: Boolean) { context.dataStore.edit { it[AUTO_SYNC] = enabled } }
+    suspend fun updateCatchUp(enabled: Boolean) { context.dataStore.edit { it[CATCH_UP] = enabled } }
+    suspend fun updateLowLatency(enabled: Boolean) { context.dataStore.edit { it[LOW_LATENCY] = enabled } }
     suspend fun updateMaxCatchUpSpeed(speed: Float) {
         context.dataStore.edit { it[MAX_CATCH_UP_SPEED] = speed.coerceIn(1.0f, 1.30f) }
     }
