@@ -1,21 +1,23 @@
 package com.vinh.livedub;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.Gravity;
-import android.view.View;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 7001;
+    private static final int REQ_AUDIO = 7002;
+    private static final int REQ_NOTIF = 7003;
     private TextView status;
 
     @Override
@@ -36,7 +38,7 @@ public class MainActivity extends Activity {
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView desc = new TextView(this);
-        desc.setText("Lồng tiếng Việt trực tiếp từ âm thanh nội bộ của YouTube, X và ứng dụng media.\n\nBản V1: Anh → Việt • Live Sync • không dùng micro.");
+        desc.setText("Lồng tiếng Việt trực tiếp từ âm thanh nội bộ của YouTube, X và ứng dụng media.\n\nBản V0.2: Anh → Việt • Live Sync • sửa quyền AudioPlaybackCapture.");
         desc.setTextSize(17);
         desc.setTextColor(Color.DKGRAY);
         desc.setGravity(Gravity.CENTER);
@@ -67,7 +69,7 @@ public class MainActivity extends Activity {
         root.addView(status, stp);
 
         TextView note = new TextView(this);
-        note.setText("Lần đầu Android sẽ hỏi quyền chia sẻ màn hình/âm thanh. Ứng dụng chỉ lấy playback audio, không lưu video. Mô hình dịch Anh→Việt sẽ tải lần đầu qua Internet.");
+        note.setText("Android bắt buộc cấp quyền Ghi âm để API AudioPlaybackCapture lấy âm thanh nội bộ. App không chủ động lấy nguồn microphone; nguồn chính vẫn là playback audio từ app đang phát video. Sau đó Android sẽ hỏi quyền chia sẻ màn hình/âm thanh.");
         note.setTextSize(13);
         note.setTextColor(Color.GRAY);
         note.setGravity(Gravity.CENTER);
@@ -77,16 +79,42 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        start.setOnClickListener(v -> requestCapture());
+        start.setOnClickListener(v -> ensurePermissionsThenCapture());
         stop.setOnClickListener(v -> {
             stopService(new Intent(this, LiveDubService.class));
             status.setText("Trạng thái: đã dừng");
         });
     }
 
+    private void ensurePermissionsThenCapture() {
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            status.setText("Trạng thái: cần quyền Ghi âm để Android cho phép bắt âm thanh nội bộ");
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_AUDIO);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIF);
+        }
+        requestCapture();
+    }
+
     private void requestCapture() {
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        status.setText("Trạng thái: đang chờ quyền capture của Android…");
         startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQ_AUDIO) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                status.setText("Trạng thái: đã cấp quyền AudioPlaybackCapture");
+                ensurePermissionsThenCapture();
+            } else {
+                status.setText("Trạng thái: bị từ chối quyền Ghi âm — không thể bắt audio nội bộ");
+            }
+        }
     }
 
     @Override
@@ -97,7 +125,7 @@ public class MainActivity extends Activity {
             service.putExtra("resultCode", resultCode);
             service.putExtra("resultData", data);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-            status.setText("Trạng thái: đang khởi động… có thể chuyển sang YouTube/X");
+            status.setText("Trạng thái: đang khởi động… mở YouTube/X và phát video tiếng Anh");
         } else if (requestCode == REQ_CAPTURE) {
             status.setText("Trạng thái: chưa cấp quyền capture");
         }
