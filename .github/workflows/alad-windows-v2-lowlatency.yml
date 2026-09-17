@@ -1,0 +1,300 @@
+name: Build ALAD Windows v2 low latency
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v2-lowlatency.yml'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch ALAD Windows v2
+        shell: pwsh
+        run: |
+          $p = 'alad-windows/Program.cs'
+          $c = Get-Content $p -Raw
+
+          # Remember API key securely via existing SecureKeyStore (Windows Credential Manager)
+          $c = $c.Replace(
+            'private readonly TextBox apiKey = new() { UseSystemPasswordChar = true };',
+            'private readonly TextBox apiKey = new() { UseSystemPasswordChar = true };`r`n    private readonly CheckBox rememberKey = new() { Text = "Nhớ API key trên máy này", Checked = true, AutoSize = true };'
+          )
+
+          # Local low-latency VAD state
+          $c = $c.Replace(
+            'private bool isRunning;',
+            'private bool isRunning;`r`n    private int localSilenceMs;`r`n    private bool localHadAudio;`r`n    private DateTime lastFastFlushUtc = DateTime.MinValue;'
+          )
+
+          # Replace fragile two-column UI with high-DPI responsive stacked layout
+          $pattern = '(?s)        var panel = new TableLayoutPanel \{ Dock = DockStyle.Fill, Padding = new Padding\(18\), ColumnCount = 2, RowCount = 14, AutoScroll = true \};.*?        panel\.SetRowSpan\(transcript, 3\);'
+          $replacement = @'
+        AutoScaleMode = AutoScaleMode.Dpi;
+        Width = 980;
+        Height = 820;
+        MinimumSize = new Size(760, 650);
+        Padding = new Padding(0);
+
+        var root = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Padding(20, 16, 20, 18),
+            ColumnCount = 1,
+            RowCount = 0,
+            AutoScroll = true,
+            BackColor = Color.FromArgb(245, 246, 248)
+        };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        Controls.Add(root);
+
+        Control StackRow(string title, Control control)
+        {
+            var host = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 1,
+                RowCount = 2,
+                Margin = new Padding(0, 0, 0, 10),
+                Padding = new Padding(0)
+            };
+            host.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var label = new Label
+            {
+                Text = title,
+                AutoSize = true,
+                Font = new Font(Font, FontStyle.Bold),
+                Margin = new Padding(2, 0, 0, 5)
+            };
+            control.Dock = DockStyle.Top;
+            control.Margin = new Padding(0);
+            host.Controls.Add(label, 0, 0);
+            host.Controls.Add(control, 0, 1);
+            return host;
+        }
+
+        void AddStack(string title, Control control)
+        {
+            var row = StackRow(title, control);
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.Controls.Add(row, 0, root.RowCount++);
+        }
+
+        var keyPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1 };
+        keyPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        keyPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        apiKey.Dock = DockStyle.Fill;
+        rememberKey.Margin = new Padding(12, 5, 0, 0);
+        keyPanel.Controls.Add(apiKey, 0, 0);
+        keyPanel.Controls.Add(rememberKey, 1, 0);
+        try { apiKey.Text = SecureKeyStore.Load() ?? ""; } catch { }
+        AddStack("Gemini API key", keyPanel);
+
+        var srcPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1 };
+        srcPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        srcPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        source.Dock = DockStyle.Fill;
+        refresh.Text = "Làm mới";
+        refresh.AutoSize = true;
+        refresh.Margin = new Padding(10, 0, 0, 0);
+        srcPanel.Controls.Add(source, 0, 0);
+        srcPanel.Controls.Add(refresh, 1, 0);
+        AddStack("Nguồn âm thanh", srcPanel);
+
+        liveMode.Items.AddRange(new object[] { "Dịch nhanh (Gemini 3.5 Translate)", "Giọng tùy chọn (Gemini 3.8 Live)" });
+        liveMode.SelectedIndex = 0;
+        liveMode.SelectedIndexChanged += (_, _) => voice.Enabled = liveMode.SelectedIndex == 1;
+        AddStack("Engine", liveMode);
+
+        language.Items.AddRange(new object[] { "Tiếng Việt|vi", "English|en", "日本語|ja", "한국어|ko", "中文|zh" });
+        language.SelectedIndex = 0;
+        AddStack("Ngôn ngữ đích", language);
+
+        voice.Items.AddRange(new object[] { "Kore", "Puck", "Aoede", "Charon", "Fenrir", "Leda", "Orus", "Zephyr" });
+        voice.SelectedIndex = 0;
+        voice.Enabled = false;
+        AddStack("Giọng AI", voice);
+
+        mixMode.Items.AddRange(new object[] { "Auto Ducking", "Voice-over", "Song song", "Lồng hoàn toàn" });
+        mixMode.SelectedIndex = 0;
+        AddStack("Kiểu lồng tiếng", mixMode);
+
+        var volPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, RowCount = 1 };
+        volPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        volPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        aiVolume.Dock = DockStyle.Fill;
+        aiVolume.ValueChanged += (_, _) => { aiVolumeLabel.Text = $"{aiVolume.Value}%"; if (player != null) player.Volume = aiVolume.Value / 100f; };
+        aiVolumeLabel.Margin = new Padding(10, 7, 0, 0);
+        volPanel.Controls.Add(aiVolume, 0, 0);
+        volPanel.Controls.Add(aiVolumeLabel, 1, 0);
+        AddStack("Âm lượng AI", volPanel);
+
+        AddStack("Bù đồng bộ (ms)", syncMs);
+
+        var syncPanel = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true };
+        syncPanel.Controls.Add(autoSync);
+        syncPanel.Controls.Add(catchUp);
+        syncPanel.Controls.Add(lowLatency);
+        AddStack("Đồng bộ và độ trễ", syncPanel);
+
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true };
+        start.AutoSize = true;
+        start.MinimumSize = new Size(180, 42);
+        stop.AutoSize = true;
+        stop.MinimumSize = new Size(110, 42);
+        buttons.Controls.Add(start);
+        buttons.Controls.Add(stop);
+        AddStack("Điều khiển", buttons);
+
+        var st = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, WrapContents = true };
+        status.Font = new Font(Font, FontStyle.Bold);
+        st.Controls.Add(status);
+        st.Controls.Add(new Label { Text = "     " });
+        st.Controls.Add(latency);
+        AddStack("Trạng thái", st);
+
+        transcript.Height = 220;
+        transcript.Dock = DockStyle.Top;
+        AddStack("Bản chép lời", transcript);
+'@
+          $c = [regex]::Replace($c, $pattern, $replacement, 1)
+
+          # Save/delete remembered key when starting
+          $needle = 'if (string.IsNullOrWhiteSpace(apiKey.Text)) { MessageBox.Show("Nhập Gemini API key trước.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }'
+          $insert = @'
+if (string.IsNullOrWhiteSpace(apiKey.Text)) { MessageBox.Show("Nhập Gemini API key trước.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        try
+        {
+            if (rememberKey.Checked) SecureKeyStore.Save(apiKey.Text.Trim());
+            else SecureKeyStore.Delete();
+        }
+        catch (Exception ex) { LogStatus("Không lưu được API key: " + ex.Message); }
+'@
+          $c = $c.Replace($needle, $insert.Trim())
+
+          # NAudio 3 migration and much smaller playback target
+          $c = $c.Replace('BufferDuration = TimeSpan.FromSeconds(12), ', '')
+          $c = $c.Replace('outputBuffer.Read(temp, 0, temp.Length);', 'outputBuffer.Read(temp.AsSpan());')
+          $c = $c.Replace('int baseTarget = lowLatency.Checked ? 100 : 260;', 'int baseTarget = lowLatency.Checked ? 20 : 80;')
+          $c = $c.Replace('currentMs > target + 900', 'currentMs > target + 450')
+
+          # 40 ms realtime input chunks instead of 100 ms
+          $c = $c.Replace('private const int ChunkBytes = 16000 * 2 / 10;', 'private const int ChunkBytes = 16000 * 2 * 40 / 1000;')
+
+          # Feed local VAD and immediate server flush at silence boundaries
+          $oldData = 'var pcm = AudioConvert.ToPcm16Mono16k(buffer, format); if (pcm.Length == 0) return;`r`n                foreach (var chunk in chunker.Push(pcm)) gemini?.QueueAudio(chunk);'
+          $newData = 'var pcm = AudioConvert.ToPcm16Mono16k(buffer, format); if (pcm.Length == 0) return;`r`n                FeedLowLatencyVad(pcm);`r`n                foreach (var chunk in chunker.Push(pcm)) gemini?.QueueAudio(chunk);'
+          if (-not $c.Contains($oldData)) {
+            $oldData = "var pcm = AudioConvert.ToPcm16Mono16k(buffer, format); if (pcm.Length == 0) return;`n                foreach (var chunk in chunker.Push(pcm)) gemini?.QueueAudio(chunk);"
+            $newData = "var pcm = AudioConvert.ToPcm16Mono16k(buffer, format); if (pcm.Length == 0) return;`n                FeedLowLatencyVad(pcm);`n                foreach (var chunk in chunker.Push(pcm)) gemini?.QueueAudio(chunk);"
+          }
+          $c = $c.Replace($oldData, $newData)
+
+          $marker = '    private async Task StopAsync()'
+          $vadMethod = @'
+    private void FeedLowLatencyVad(byte[] pcm)
+    {
+        if (gemini == null || pcm.Length < 2) return;
+        double sum = 0;
+        int samples = pcm.Length / 2;
+        for (int i = 0; i + 1 < pcm.Length; i += 2)
+        {
+            short s = (short)(pcm[i] | (pcm[i + 1] << 8));
+            double v = s / 32768.0;
+            sum += v * v;
+        }
+        double rms = Math.Sqrt(sum / Math.Max(1, samples));
+        int chunkMs = Math.Max(1, samples * 1000 / 16000);
+
+        // Only use local silence as a fast finalizer; server VAD remains enabled as fallback.
+        if (rms > 0.008)
+        {
+            localHadAudio = true;
+            localSilenceMs = 0;
+            return;
+        }
+
+        if (!localHadAudio) return;
+        localSilenceMs += chunkMs;
+        if (localSilenceMs >= 140 && (DateTime.UtcNow - lastFastFlushUtc).TotalMilliseconds > 350)
+        {
+            lastFastFlushUtc = DateTime.UtcNow;
+            localHadAudio = false;
+            localSilenceMs = 0;
+            gemini.SignalAudioStreamEnd();
+        }
+    }
+
+'@
+          $c = $c.Replace($marker, $vadMethod + $marker)
+
+          # Correct setup shape, no-interruption live translation, aggressive server VAD.
+          $oldFastGen = 'generationConfig = new { responseModalities = new[] { "AUDIO" }, inputAudioTranscription = new { }, outputAudioTranscription = new { }, translationConfig = new { targetLanguageCode = targetLang, echoTargetLanguage = false } };'
+          $newFastGen = 'generationConfig = new { responseModalities = new[] { "AUDIO" }, translationConfig = new { targetLanguageCode = targetLang, echoTargetLanguage = false } };'
+          $c = $c.Replace($oldFastGen, $newFastGen)
+
+          $oldFastSetup = 'setup = new { model = "models/gemini-3.5-live-translate-preview", generationConfig, sessionResumption = new { handle = sessionHandle }, contextWindowCompression = new { slidingWindow = new { } } };'
+          $newFastSetup = 'setup = new { model = "models/gemini-3.5-live-translate-preview", generationConfig, inputAudioTranscription = new { }, outputAudioTranscription = new { }, realtimeInputConfig = new { automaticActivityDetection = new { disabled = false, startOfSpeechSensitivity = "START_SENSITIVITY_HIGH", endOfSpeechSensitivity = "END_SENSITIVITY_HIGH", prefixPaddingMs = 40, silenceDurationMs = 120 }, activityHandling = "NO_INTERRUPTION" }, sessionResumption = new { handle = sessionHandle }, contextWindowCompression = new { slidingWindow = new { } } };'
+          $c = $c.Replace($oldFastSetup, $newFastSetup)
+
+          $oldCustomSetup = 'setup = new { model = "models/gemini-3.8-live", generationConfig, systemInstruction = new { parts = new[] { new { text = $"Act only as a real-time interpreter. Translate every spoken utterance into {targetLang}. Speak only the translation. Do not answer, explain, summarize, or add commentary. Keep the translation concise and preserve the speaker''s tone." } } }, sessionResumption = new { handle = sessionHandle }, contextWindowCompression = new { slidingWindow = new { } } };'
+          $newCustomSetup = 'setup = new { model = "models/gemini-3.8-live", generationConfig, inputAudioTranscription = new { }, outputAudioTranscription = new { }, realtimeInputConfig = new { automaticActivityDetection = new { disabled = false, startOfSpeechSensitivity = "START_SENSITIVITY_HIGH", endOfSpeechSensitivity = "END_SENSITIVITY_HIGH", prefixPaddingMs = 40, silenceDurationMs = 120 }, activityHandling = "NO_INTERRUPTION" }, systemInstruction = new { parts = new[] { new { text = $"Act only as a real-time interpreter. Translate every spoken utterance into {targetLang}. Speak only the translation. Do not answer, explain, summarize, or add commentary. Keep the translation concise and preserve the speaker''s tone." } } }, sessionResumption = new { handle = sessionHandle }, contextWindowCompression = new { slidingWindow = new { } } };'
+          $c = $c.Replace($oldCustomSetup, $newCustomSetup)
+
+          # Hybrid VAD flush method
+          $queueMarker = '    public void QueueAudio(byte[] pcm16k) => sendQueue.Writer.TryWrite(pcm16k);'
+          $queueReplacement = @'
+    public void QueueAudio(byte[] pcm16k) => sendQueue.Writer.TryWrite(pcm16k);
+
+    public void SignalAudioStreamEnd()
+    {
+        var socket = ws;
+        var token = cts?.Token ?? CancellationToken.None;
+        if (socket?.State != WebSocketState.Open || setupReady?.Task.IsCompletedSuccessfully != true || token.IsCancellationRequested) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var payload = JsonSerializer.Serialize(new { realtimeInput = new { audioStreamEnd = true } });
+                await SendTextAsync(socket, payload, token);
+            }
+            catch { }
+        }, token);
+    }
+'@
+          $c = $c.Replace($queueMarker, $queueReplacement.TrimEnd())
+
+          # Give initial handshake a little more time; this is connection timeout, not dubbing latency.
+          $c = $c.Replace('timeout.CancelAfter(TimeSpan.FromSeconds(12));', 'timeout.CancelAfter(TimeSpan.FromSeconds(25));')
+
+          # Reset local VAD when stopped.
+          $c = $c.Replace('ducker?.Restore(); ducker?.Dispose(); ducker = null; runCts?.Dispose(); runCts = null; chunker.Reset();', 'ducker?.Restore(); ducker?.Dispose(); ducker = null; runCts?.Dispose(); runCts = null; chunker.Reset(); localSilenceMs = 0; localHadAudio = false;')
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Restore
+        run: dotnet restore alad-windows/AladWindows.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows/AladWindows.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Package executable
+        shell: pwsh
+        run: |
+          Copy-Item "out/${{ matrix.rid }}/ALAD-Windows.exe" "out/${{ matrix.rid }}/ALAD-Windows-v2-${{ matrix.rid }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v2-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v2-${{ matrix.rid }}.exe
