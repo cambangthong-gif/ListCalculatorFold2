@@ -35,7 +35,6 @@ jobs:
           $blue = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(0,103,192))
           $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
           $g.FillEllipse($blue,18,18,220,220)
-          $g.FillRoundedRectangle = $null
           $g.FillRectangle($white,64,91,18,74)
           $g.FillRectangle($white,96,68,18,120)
           $g.FillRectangle($white,128,84,18,88)
@@ -55,7 +54,8 @@ jobs:
         run: |
           $p = 'alad-windows-v2/AladWindowsV2.csproj'
           $x = Get-Content $p -Raw
-          $x = $x.Replace('<AssemblyName>ALAD-Windows-v2</AssemblyName>', '<AssemblyName>ALAD-Windows-v5-Compact</AssemblyName>`r`n    <ApplicationIcon>Assets\alad-compact.ico</ApplicationIcon>')
+          $replacement = "<AssemblyName>ALAD-Windows-v5-Compact</AssemblyName>`r`n    <ApplicationIcon>Assets\alad-compact.ico</ApplicationIcon>"
+          $x = $x.Replace('<AssemblyName>ALAD-Windows-v2</AssemblyName>', $replacement)
           Set-Content $p $x -Encoding UTF8
 
       - name: Restore
