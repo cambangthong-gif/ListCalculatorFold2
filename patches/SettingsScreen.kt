@@ -84,6 +84,11 @@ private val dubbingModes = listOf(
     Choice("full_dub", "Lồng hoàn toàn")
 )
 
+private val voiceSources = listOf(
+    Choice("gemini", "Gemini Voice"),
+    Choice("device_tts", "TTS thiết bị")
+)
+
 private val voices = listOf(
     Choice("Kore", "Kore · chắc, rõ"),
     Choice("Puck", "Puck · trẻ, sinh động"),
@@ -105,6 +110,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
     val aiVolume by viewModel.volumeRatio.collectAsState()
     val dubMode by viewModel.dubMode.collectAsState()
     val voiceName by viewModel.voiceName.collectAsState()
+    val voiceSource by viewModel.voiceSource.collectAsState()
+    val ttsRate by viewModel.ttsRate.collectAsState()
     val manualSyncMs by viewModel.manualSyncMs.collectAsState()
     val autoSync by viewModel.autoSync.collectAsState()
     val catchUp by viewModel.catchUp.collectAsState()
@@ -259,24 +266,49 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
-                    SettingLabel("Giọng Gemini")
+                    SettingLabel("Nguồn giọng")
                     ChoiceDropdown(
-                        selectedValue = voiceName,
-                        choices = voices,
-                        onSelected = viewModel::updateVoiceName
+                        selectedValue = voiceSource,
+                        choices = voiceSources,
+                        onSelected = viewModel::updateVoiceSource
                     )
 
+                    if (voiceSource == "gemini") {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        SettingLabel("Giọng Gemini")
+                        ChoiceDropdown(
+                            selectedValue = voiceName,
+                            choices = voices,
+                            onSelected = viewModel::updateVoiceName
+                        )
+                        Text(
+                            "Đổi giọng cần ngắt/kết nối lại phiên lồng tiếng để Gemini áp dụng.",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        SettingLabel("Tốc độ TTS ${String.format("%.2f", ttsRate)}×")
+                        Slider(
+                            value = ttsRate,
+                            onValueChange = viewModel::updateTtsRate,
+                            valueRange = 0.70f..1.50f,
+                            steps = 7
+                        )
+                        Text(
+                            "Dùng engine/giọng TTS mặc định đang chọn trong Android. Gemini chỉ dịch; ALAD lấy transcript tiếng Việt và cho TTS của máy đọc.",
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(14.dp))
-                    SettingLabel("Âm lượng tiếng AI ${(aiVolume * 100).roundToInt()}%")
+                    SettingLabel("Âm lượng lồng tiếng ${(aiVolume * 100).roundToInt()}%")
                     Slider(
                         value = aiVolume,
                         onValueChange = viewModel::updateVolumeRatio,
                         valueRange = 0.20f..1.0f
-                    )
-                    Text(
-                        "Đổi giọng cần ngắt/kết nối lại phiên lồng tiếng để Gemini áp dụng.",
-                        color = TextSecondary,
-                        fontSize = 12.sp
                     )
                 }
 
@@ -289,7 +321,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                         steps = 69
                     )
                     Text(
-                        "Số dương làm tiếng AI trễ thêm. Số âm yêu cầu app catch-up để kéo tiếng AI về gần video hơn.",
+                        "Số dương làm tiếng lồng trễ thêm. Số âm khiến Catch-up ưu tiên đuổi gần video hơn.",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 18.sp
@@ -297,13 +329,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
 
                     ToggleRow(
                         title = "Auto Sync",
-                        subtitle = "Theo dõi lượng audio tồn trong hàng đợi và tự giảm độ trễ tích lũy.",
+                        subtitle = "Theo dõi độ trễ và tự hạn chế backlog để tiếng không ngày càng tụt hình.",
                         checked = autoSync,
                         onCheckedChange = viewModel::updateAutoSync
                     )
                     ToggleRow(
                         title = "Catch-up",
-                        subtitle = "Tạm tăng tốc giọng AI khi bị tụt xa, sau đó tự trở về 1.0×.",
+                        subtitle = "Gemini audio tăng tốc; TTS thiết bị tăng tốc và bỏ câu quá cũ khi bị tụt xa.",
                         checked = catchUp,
                         onCheckedChange = viewModel::updateCatchUp
                     )
