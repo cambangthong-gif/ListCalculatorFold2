@@ -9,7 +9,6 @@ import android.os.*;
 import android.speech.*;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
-import androidx.annotation.Nullable;
 
 import com.google.mlkit.common.model.DownloadConditions;
 import com.google.mlkit.nl.translate.*;
@@ -352,5 +351,5 @@ public class LiveDubService extends Service {
         super.onDestroy();
     }
 
-    @Nullable @Override public IBinder onBind(Intent intent) { return null; }
+    @Override public IBinder onBind(Intent intent) { return null; }
 }
