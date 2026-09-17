@@ -43,9 +43,10 @@ public sealed class TtsService : IDisposable
             ProgressChanged?.Invoke(0.93, "Đang giải nén model...");
             await Task.Run(() =>
             {
-                using var archive = ArchiveFactory.Open(archivePath);
-                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-                    entry.WriteToDirectory(folder, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
+                ArchiveFactory.WriteToDirectory(
+                    archivePath,
+                    folder,
+                    new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
             }, cancellationToken);
             File.Delete(archivePath);
         }
