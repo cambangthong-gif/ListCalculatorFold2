@@ -1,0 +1,39 @@
+name: Build ALAD Windows v4.2
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v4_2.yml'
+      - 'tools/patch-alad-windows-v4_2.ps1'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Patch source
+        shell: pwsh
+        run: ./tools/patch-alad-windows-v4_2.ps1
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+      - name: Publish
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+      - name: Rename
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE found' }
+          Move-Item $exe.FullName "out/${{ matrix.rid }}/ALAD-Windows-v4.2-${{ matrix.rid }}.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v4.2-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v4.2-${{ matrix.rid }}.exe
+          if-no-files-found: error
