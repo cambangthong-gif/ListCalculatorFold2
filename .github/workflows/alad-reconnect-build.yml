@@ -1,4 +1,4 @@
-name: Build ALAD TTS Sync v3 APK
+name: Build ALAD TTS Select v3.1 APK
 
 on:
   push:
@@ -20,26 +20,20 @@ jobs:
       - name: Clone ALAD Mobile upstream
         run: git clone --depth 1 https://github.com/navidseyedain/ALAD-Mobile.git alad
 
-      - name: Apply ALAD v3 patches
+      - name: Apply ALAD TTS Select v3.1 patches
         run: |
           cp patches/build.gradle.kts alad/app/build.gradle.kts
+          cp patches/AndroidManifest.xml alad/app/src/main/AndroidManifest.xml
           cp patches/strings.xml alad/app/src/main/res/values/strings.xml
           cp patches/ALADWebSocketManager.kt alad/app/src/main/kotlin/com/alad/app/core/network/ALADWebSocketManager.kt
           cp patches/AudioDubbingForegroundService.kt alad/app/src/main/kotlin/com/alad/app/core/service/AudioDubbingForegroundService.kt
           cp patches/AudioPlayerManager.kt alad/app/src/main/kotlin/com/alad/app/core/audio/AudioPlayerManager.kt
           cp patches/DeviceTtsManager.kt alad/app/src/main/kotlin/com/alad/app/core/audio/DeviceTtsManager.kt
+          cp patches/TtsCatalog.kt alad/app/src/main/kotlin/com/alad/app/core/audio/TtsCatalog.kt
           cp patches/OverlayWidgetService.kt alad/app/src/main/kotlin/com/alad/app/core/service/OverlayWidgetService.kt
           cp patches/UserPreferencesRepository.kt alad/app/src/main/kotlin/com/alad/app/data/repository/UserPreferencesRepository.kt
           cp patches/SettingsViewModel.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsViewModel.kt
           cp patches/SettingsScreen.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt')
-          s = p.read_text()
-          s = s.replace('import androidx.compose.foundation.layout.Column\n', 'import androidx.compose.foundation.layout.Column\nimport androidx.compose.foundation.layout.ColumnScope\n')
-          s = s.replace('content: @Composable Column.() -> Unit', 'content: @Composable ColumnScope.() -> Unit')
-          p.write_text(s)
-          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -56,11 +50,11 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Sync-v3.apk
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v3.1.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALAD-TTS-Sync-v3
-          path: ALAD-TTS-Sync-v3.apk
+          name: ALAD-TTS-Select-v3.1
+          path: ALAD-TTS-Select-v3.1.apk
           if-no-files-found: error
