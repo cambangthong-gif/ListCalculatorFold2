@@ -1,0 +1,47 @@
+name: Build VietVoice Reader Windows
+
+on:
+  push:
+    branches:
+      - vietvoice-windows-v1
+    paths:
+      - 'windows/VietVoiceReader/**'
+      - '.github/workflows/vietvoice-windows.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore windows/VietVoiceReader/VietVoiceReader.csproj -r ${{ matrix.rid }}
+
+      - name: Publish self-contained
+        run: dotnet publish windows/VietVoiceReader/VietVoiceReader.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishReadyToRun=true -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Smoke check files
+        shell: pwsh
+        run: |
+          if (!(Test-Path "out/${{ matrix.rid }}/VietVoiceReader.exe")) { throw "VietVoiceReader.exe missing" }
+          Get-ChildItem "out/${{ matrix.rid }}" | Select-Object Name,Length | Format-Table
+
+      - name: Zip portable app
+        shell: pwsh
+        run: Compress-Archive -Path "out/${{ matrix.rid }}/*" -DestinationPath "VietVoice-Reader-Windows-${{ matrix.rid }}.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VietVoice-Reader-Windows-${{ matrix.rid }}
+          path: VietVoice-Reader-Windows-${{ matrix.rid }}.zip
+          retention-days: 14
