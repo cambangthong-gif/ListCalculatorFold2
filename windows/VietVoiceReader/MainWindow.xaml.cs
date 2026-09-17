@@ -20,6 +20,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? operationCts;
     private WaveOutEvent? waveOut;
     private AudioFileReader? waveReader;
+    private CancellationTokenSource? playbackCts;
+    private string? playbackTempWav;
+    private int playbackGeneration;
+    private bool userStopRequested;
 
     public MainWindow()
     {
@@ -123,7 +127,7 @@ public partial class MainWindow : Window
     {
         if (VoiceCombo.SelectedItem is not VoiceDefinition voice || !tts.IsInstalled(voice)) return;
         if (MessageBox.Show(this, $"Xóa model {voice.DisplayName}?", "Xóa giọng", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        StopAudio();
+        StopPlayback(true);
         tts.Remove(voice);
         UpdateVoiceStatus();
         StatusText.Text = "Đã xóa model";
@@ -143,53 +147,196 @@ public partial class MainWindow : Window
 
     private async void Play_Click(object sender, RoutedEventArgs e)
     {
-        if (!TryGetReadContext(out var chapter, out var voice)) return;
-        operationCts?.Cancel();
-        operationCts = new CancellationTokenSource();
-        var wav = Path.Combine(Path.GetTempPath(), $"vietvoice-preview-{Guid.NewGuid():N}.wav");
+        if (ChapterList.SelectedIndex < 0)
+        {
+            MessageBox.Show(this, "Hãy chọn một chương để bắt đầu đọc.");
+            return;
+        }
+
+        await StartChapterPlaybackAsync(ChapterList.SelectedIndex);
+    }
+
+    private async void PrevChapter_Click(object sender, RoutedEventArgs e)
+    {
+        if (book == null || book.Chapters.Count == 0) return;
+        int target = Math.Max(0, ChapterList.SelectedIndex - 1);
+        await StartChapterPlaybackAsync(target);
+    }
+
+    private async void NextChapter_Click(object sender, RoutedEventArgs e)
+    {
+        if (book == null || book.Chapters.Count == 0) return;
+        int current = Math.Max(0, ChapterList.SelectedIndex);
+        int target = Math.Min(book.Chapters.Count - 1, current + 1);
+        await StartChapterPlaybackAsync(target);
+    }
+
+    private async Task StartChapterPlaybackAsync(int chapterIndex)
+    {
+        if (book == null || chapterIndex < 0 || chapterIndex >= book.Chapters.Count)
+            return;
+
+        if (VoiceCombo.SelectedItem is not VoiceDefinition voice)
+        {
+            MessageBox.Show(this, "Hãy chọn giọng đọc.");
+            return;
+        }
+
+        if (!tts.IsInstalled(voice))
+        {
+            MessageBox.Show(this, "Giọng này chưa tải. Bấm “Tải giọng” trước.");
+            return;
+        }
+
+        StopPlayback(false);
+        userStopRequested = false;
+        playbackCts = new CancellationTokenSource();
+        int generation = playbackGeneration;
+        var token = playbackCts.Token;
+
+        ChapterList.SelectedIndex = chapterIndex;
+        ChapterList.ScrollIntoView(book.Chapters[chapterIndex]);
+        var chapter = book.Chapters[chapterIndex];
+
+        string wav = Path.Combine(Path.GetTempPath(), $"vietvoice-preview-{Guid.NewGuid():N}.wav");
+
         try
         {
-            StopAudio();
-            Busy("Đang tổng hợp giọng đọc...", true);
-            await tts.SynthesizeToWaveAsync(voice, chapter.Text, (float)SpeedSlider.Value, wav, operationCts.Token);
-            waveReader = new AudioFileReader(wav);
-            waveOut = new WaveOutEvent();
-            waveOut.Init(waveReader);
-            waveOut.PlaybackStopped += (_, _) => Dispatcher.Invoke(() =>
+            Busy($"Đang chuẩn bị {chapter.Title}...", true);
+            await tts.SynthesizeToWaveAsync(
+                voice,
+                chapter.Text,
+                (float)SpeedSlider.Value,
+                wav,
+                token);
+
+            if (token.IsCancellationRequested || generation != playbackGeneration)
             {
-                var path = waveReader?.FileName;
-                StopAudio();
-                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                TryDelete(wav);
+                return;
+            }
+
+            var localReader = new AudioFileReader(wav);
+            var localOutput = new WaveOutEvent();
+            localOutput.Init(localReader);
+
+            waveReader = localReader;
+            waveOut = localOutput;
+            playbackTempWav = wav;
+
+            localOutput.PlaybackStopped += (_, args) =>
+            {
+                Dispatcher.InvokeAsync(async () =>
                 {
-                    try { File.Delete(path); } catch { }
-                }
-            });
-            waveOut.Play();
-            StatusText.Text = "Đang đọc: " + chapter.Title;
+                    if (generation != playbackGeneration)
+                    {
+                        try { localOutput.Dispose(); } catch { }
+                        try { localReader.Dispose(); } catch { }
+                        TryDelete(wav);
+                        return;
+                    }
+
+                    try { localOutput.Dispose(); } catch { }
+                    try { localReader.Dispose(); } catch { }
+
+                    if (ReferenceEquals(waveOut, localOutput)) waveOut = null;
+                    if (ReferenceEquals(waveReader, localReader)) waveReader = null;
+                    if (string.Equals(playbackTempWav, wav, StringComparison.OrdinalIgnoreCase))
+                        playbackTempWav = null;
+
+                    TryDelete(wav);
+
+                    if (args.Exception != null)
+                    {
+                        StatusText.Text = "Lỗi phát âm thanh: " + args.Exception.Message;
+                        return;
+                    }
+
+                    if (userStopRequested)
+                    {
+                        StatusText.Text = "Đã dừng";
+                        return;
+                    }
+
+                    bool autoNext = AutoNextCheckBox.IsChecked == true;
+                    int next = chapterIndex + 1;
+
+                    if (autoNext && book != null && next < book.Chapters.Count)
+                    {
+                        StatusText.Text = $"Hết {chapter.Title} — đang chuyển sang chương kế...";
+                        await StartChapterPlaybackAsync(next);
+                    }
+                    else if (book != null && next >= book.Chapters.Count)
+                    {
+                        StatusText.Text = "Đã đọc hết sách";
+                    }
+                    else
+                    {
+                        StatusText.Text = "Đã đọc xong " + chapter.Title;
+                    }
+                });
+            };
+
+            localOutput.Play();
+            StatusText.Text = $"Đang đọc {chapterIndex + 1}/{book.Chapters.Count}: {chapter.Title}";
         }
-        catch (OperationCanceledException) { if (File.Exists(wav)) File.Delete(wav); }
+        catch (OperationCanceledException)
+        {
+            TryDelete(wav);
+        }
         catch (Exception ex)
         {
-            if (File.Exists(wav)) File.Delete(wav);
-            MessageBox.Show(this, ex.Message, "Lỗi TTS", MessageBoxButton.OK, MessageBoxImage.Error);
+            TryDelete(wav);
+            if (generation == playbackGeneration)
+                MessageBox.Show(this, ex.Message, "Lỗi TTS", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-        finally { Busy(null, false); }
+        finally
+        {
+            if (generation == playbackGeneration)
+                Busy(null, false);
+        }
     }
 
     private void Stop_Click(object sender, RoutedEventArgs e)
     {
-        operationCts?.Cancel();
-        StopAudio();
+        StopPlayback(true);
         StatusText.Text = "Đã dừng";
     }
 
-    private void StopAudio()
+    private void StopPlayback(bool userInitiated)
     {
-        try { waveOut?.Stop(); } catch { }
-        waveOut?.Dispose();
-        waveReader?.Dispose();
+        userStopRequested = userInitiated;
+        playbackGeneration++;
+
+        try { playbackCts?.Cancel(); } catch { }
+        playbackCts?.Dispose();
+        playbackCts = null;
+
+        var output = waveOut;
+        var reader = waveReader;
+        var temp = playbackTempWav;
+
         waveOut = null;
         waveReader = null;
+        playbackTempWav = null;
+
+        try { output?.Stop(); } catch { }
+        try { output?.Dispose(); } catch { }
+        try { reader?.Dispose(); } catch { }
+
+        if (!string.IsNullOrWhiteSpace(temp))
+            TryDelete(temp);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch
+        {
+        }
     }
 
     private async void Export_Click(object sender, RoutedEventArgs e)
@@ -395,7 +542,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         operationCts?.Cancel();
-        StopAudio();
+        StopPlayback(true);
         tts.Dispose();
         base.OnClosed(e);
     }
