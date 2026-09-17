@@ -17,6 +17,9 @@ import kotlin.math.min
 class ALADWebSocketManager(private val client: OkHttpClient) {
     private var webSocket: WebSocket? = null
     var onBinaryMessageReceived: ((ByteArray) -> Unit)? = null
+    var onOutputTranscription: ((String) -> Unit)? = null
+    var onTurnComplete: (() -> Unit)? = null
+    var onInterrupted: (() -> Unit)? = null
     var onStatusChanged: ((String) -> Unit)? = null
 
     companion object {
@@ -82,7 +85,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(ws: WebSocket, response: Response) {
                 if (!isCurrent(generation)) return
-                Log.d(TAG, "Connected to Gemini Live API")
                 onStatusChanged?.invoke(
                     if (sessionHandle.isNullOrBlank()) "Connected"
                     else "Connected - resuming session"
@@ -104,68 +106,63 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     val resumeUpdate =
                         json.optJSONObject("sessionResumptionUpdate")
                             ?: json.optJSONObject("session_resumption_update")
-
                     if (resumeUpdate != null) {
                         val resumable = resumeUpdate.optBoolean("resumable", false)
-                        val newHandle =
-                            resumeUpdate.optString("newHandle")
-                                .ifBlank { resumeUpdate.optString("new_handle") }
-
+                        val newHandle = resumeUpdate.optString("newHandle")
+                            .ifBlank { resumeUpdate.optString("new_handle") }
                         if (resumable && newHandle.isNotBlank()) {
                             sessionHandle = newHandle
-                            Log.d(TAG, "Stored resumable session handle")
+                        } else if (!resumable) {
+                            sessionHandle = null
                         }
                         return
                     }
 
-                    val goAway =
-                        json.optJSONObject("goAway")
-                            ?: json.optJSONObject("go_away")
-
+                    val goAway = json.optJSONObject("goAway") ?: json.optJSONObject("go_away")
                     if (goAway != null) {
-                        val timeLeft =
-                            goAway.optString("timeLeft")
-                                .ifBlank { goAway.optString("time_left") }
-                        Log.w(TAG, "Server GoAway received, timeLeft=$timeLeft")
                         onStatusChanged?.invoke("Server reconnect pending")
                         return
                     }
 
-                    if (json.has("serverContent") || json.has("server_content")) {
-                        val serverContent =
-                            json.optJSONObject("serverContent")
-                                ?: json.optJSONObject("server_content")
+                    val serverContent =
+                        json.optJSONObject("serverContent")
+                            ?: json.optJSONObject("server_content")
 
-                        if (serverContent != null &&
-                            (serverContent.has("modelTurn") || serverContent.has("model_turn"))
-                        ) {
-                            val modelTurn =
-                                serverContent.optJSONObject("modelTurn")
-                                    ?: serverContent.optJSONObject("model_turn")
+                    if (serverContent != null) {
+                        val outputTranscription =
+                            serverContent.optJSONObject("outputTranscription")
+                                ?: serverContent.optJSONObject("output_transcription")
+                        val transcriptText = outputTranscription?.optString("text").orEmpty()
+                        if (transcriptText.isNotBlank()) {
+                            onOutputTranscription?.invoke(transcriptText)
+                        }
 
-                            val parts = modelTurn?.optJSONArray("parts")
-                            if (parts != null) {
-                                for (i in 0 until parts.length()) {
-                                    val part = parts.getJSONObject(i)
-                                    val inlineData =
-                                        part.optJSONObject("inlineData")
-                                            ?: part.optJSONObject("inline_data")
-
-                                    if (inlineData != null) {
-                                        val base64Data = inlineData.optString("data")
-                                        if (base64Data.isNotBlank()) {
-                                            val audioBytes = Base64.decode(base64Data, Base64.DEFAULT)
-                                            onBinaryMessageReceived?.invoke(audioBytes)
-                                        }
-                                    }
+                        val modelTurn =
+                            serverContent.optJSONObject("modelTurn")
+                                ?: serverContent.optJSONObject("model_turn")
+                        val parts = modelTurn?.optJSONArray("parts")
+                        if (parts != null) {
+                            for (i in 0 until parts.length()) {
+                                val part = parts.getJSONObject(i)
+                                val inlineData =
+                                    part.optJSONObject("inlineData")
+                                        ?: part.optJSONObject("inline_data")
+                                val base64Data = inlineData?.optString("data").orEmpty()
+                                if (base64Data.isNotBlank()) {
+                                    val audioBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                                    onBinaryMessageReceived?.invoke(audioBytes)
                                 }
                             }
                         }
 
-                        // If Gemini reports that its turn was interrupted, stale generated
-                        // audio should not continue to accumulate client-side.
-                        if (serverContent?.optBoolean("interrupted", false) == true) {
-                            onStatusChanged?.invoke("Gemini interrupted")
+                        if (serverContent.optBoolean("interrupted", false)) {
+                            onInterrupted?.invoke()
+                        }
+                        if (
+                            serverContent.optBoolean("turnComplete", false) ||
+                            serverContent.optBoolean("turn_complete", false)
+                        ) {
+                            onTurnComplete?.invoke()
                         }
                         return
                     }
@@ -179,15 +176,12 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     }
 
                     if (json.has("error")) {
-                        val errMessage =
-                            json.optJSONObject("error")
-                                ?.optString("message", "Unknown error")
-                                ?: "Unknown error"
-                        Log.e(TAG, "API Error: $errMessage")
+                        val errMessage = json.optJSONObject("error")
+                            ?.optString("message", "Unknown error") ?: "Unknown error"
                         onStatusChanged?.invoke("Error: $errMessage")
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error parsing message", e)
+                    Log.e(TAG, "Error parsing Gemini message", e)
                 }
             }
 
@@ -198,27 +192,19 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             override fun onClosing(ws: WebSocket, code: Int, reason: String) {
                 if (!isCurrent(generation)) return
                 isSetupComplete = false
-                Log.w(TAG, "WebSocket closing: $code $reason")
-                onStatusChanged?.invoke("Connection closing")
                 ws.close(code, reason)
             }
 
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 if (!isCurrent(generation)) return
                 isSetupComplete = false
-                Log.w(TAG, "WebSocket closed: $code $reason")
-                if (!manualDisconnect) {
-                    scheduleReconnect("closed $code ${reason.take(80)}")
-                }
+                if (!manualDisconnect) scheduleReconnect("closed $code ${reason.take(80)}")
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 if (!isCurrent(generation)) return
                 isSetupComplete = false
-                Log.e(TAG, "WebSocket failure", t)
-                if (!manualDisconnect) {
-                    scheduleReconnect(t.message ?: "network failure")
-                }
+                if (!manualDisconnect) scheduleReconnect(t.message ?: "network failure")
             }
         })
     }
@@ -237,7 +223,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         val setupPayload = JSONObject().apply {
             put("setup", JSONObject().apply {
                 put("model", "models/gemini-3.5-live-translate-preview")
-
                 put("generationConfig", JSONObject().apply {
                     put("responseModalities", JSONArray().put("AUDIO"))
                     put("translationConfig", JSONObject().apply {
@@ -252,24 +237,16 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         })
                     })
                 })
-
-                put(
-                    "contextWindowCompression",
-                    JSONObject().apply {
-                        put("slidingWindow", JSONObject())
-                    }
-                )
-
-                put(
-                    "sessionResumption",
-                    JSONObject().apply {
-                        if (resumeHandle.isNullOrBlank()) {
-                            put("handle", JSONObject.NULL)
-                        } else {
-                            put("handle", resumeHandle)
-                        }
-                    }
-                )
+                // Native-audio Live models output AUDIO. This provides the translated
+                // text alongside that audio so Android TTS can be used instead.
+                put("outputAudioTranscription", JSONObject())
+                put("contextWindowCompression", JSONObject().apply {
+                    put("slidingWindow", JSONObject())
+                })
+                put("sessionResumption", JSONObject().apply {
+                    if (resumeHandle.isNullOrBlank()) put("handle", JSONObject.NULL)
+                    else put("handle", resumeHandle)
+                })
             })
         }
 
@@ -280,12 +257,10 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
     fun sendAudioData(pcmData: ByteArray) {
         val base64Audio = Base64.encodeToString(pcmData, Base64.NO_WRAP)
-
         if (!isSetupComplete) {
             enqueuePending(base64Audio)
             return
         }
-
         if (!sendAudioNow(base64Audio)) {
             isSetupComplete = false
             enqueuePending(base64Audio)
@@ -308,9 +283,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     @Synchronized
     private fun enqueuePending(base64Audio: String) {
         pendingAudio.addLast(base64Audio)
-        while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) {
-            pendingAudio.removeFirst()
-        }
+        while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) pendingAudio.removeFirst()
     }
 
     private fun flushPendingAudio() {
@@ -319,17 +292,12 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             pendingAudio.clear()
             copy
         }
-
         for (i in snapshot.indices) {
             if (!sendAudioNow(snapshot[i])) {
                 isSetupComplete = false
                 synchronized(this) {
-                    for (j in i until snapshot.size) {
-                        pendingAudio.addLast(snapshot[j])
-                    }
-                    while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) {
-                        pendingAudio.removeFirst()
-                    }
+                    for (j in i until snapshot.size) pendingAudio.addLast(snapshot[j])
+                    while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) pendingAudio.removeFirst()
                 }
                 scheduleReconnect("pending audio flush failed")
                 return
@@ -340,15 +308,11 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     @Synchronized
     private fun scheduleReconnect(reason: String) {
         if (manualDisconnect || reconnectScheduled || currentApiKey.isBlank()) return
-
         reconnectScheduled = true
         reconnectAttempt++
         val exponent = min(reconnectAttempt - 1, 4)
         val delayMs = min(1_000L shl exponent, MAX_RECONNECT_DELAY_MS)
-
-        Log.w(TAG, "Reconnect scheduled in ${delayMs}ms: $reason")
         onStatusChanged?.invoke("Reconnecting in ${delayMs / 1000.0}s")
-
         reconnectHandler.postDelayed({
             synchronized(this) {
                 reconnectScheduled = false
@@ -370,7 +334,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         reconnectAttempt = 0
         sessionHandle = null
         pendingAudio.clear()
-
         reconnectHandler.removeCallbacksAndMessages(null)
         socketGeneration++
         webSocket?.close(1000, "User requested stop")
