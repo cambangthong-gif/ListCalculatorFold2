@@ -29,6 +29,14 @@ jobs:
           cp patches/UserPreferencesRepository.kt alad/app/src/main/kotlin/com/alad/app/data/repository/UserPreferencesRepository.kt
           cp patches/SettingsViewModel.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsViewModel.kt
           cp patches/SettingsScreen.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt')
+          s = p.read_text()
+          s = s.replace('import androidx.compose.foundation.layout.Column\n', 'import androidx.compose.foundation.layout.Column\nimport androidx.compose.foundation.layout.ColumnScope\n')
+          s = s.replace('content: @Composable Column.() -> Unit', 'content: @Composable ColumnScope.() -> Unit')
+          p.write_text(s)
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
