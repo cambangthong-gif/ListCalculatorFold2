@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +66,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.alad.app.R
+import com.alad.app.core.audio.TtsCatalog
 import com.alad.app.ui.theme.AmbientBackground
 import com.alad.app.ui.theme.GlassCard
 import com.alad.app.ui.theme.GlassIconButton
@@ -111,12 +114,49 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
     val dubMode by viewModel.dubMode.collectAsState()
     val voiceName by viewModel.voiceName.collectAsState()
     val voiceSource by viewModel.voiceSource.collectAsState()
+    val ttsEnginePackage by viewModel.ttsEnginePackage.collectAsState()
+    val ttsVoiceName by viewModel.ttsVoiceName.collectAsState()
     val ttsRate by viewModel.ttsRate.collectAsState()
     val manualSyncMs by viewModel.manualSyncMs.collectAsState()
     val autoSync by viewModel.autoSync.collectAsState()
     val catchUp by viewModel.catchUp.collectAsState()
     val lowLatency by viewModel.lowLatency.collectAsState()
     val maxCatchUpSpeed by viewModel.maxCatchUpSpeed.collectAsState()
+
+    var ttsEngines by remember { mutableStateOf<List<TtsCatalog.EngineItem>>(emptyList()) }
+    var ttsVoices by remember { mutableStateOf<List<TtsCatalog.VoiceItem>>(emptyList()) }
+    var loadingVoices by remember { mutableStateOf(false) }
+
+    LaunchedEffect(voiceSource) {
+        if (voiceSource == "device_tts") {
+            TtsCatalog.loadEngines(context) { items ->
+                ttsEngines = items
+                if (ttsEnginePackage.isBlank() && items.isNotEmpty()) {
+                    viewModel.updateTtsEnginePackage(items.first().packageName)
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(voiceSource, ttsEnginePackage) {
+        if (voiceSource == "device_tts" && ttsEnginePackage.isNotBlank()) {
+            loadingVoices = true
+            TtsCatalog.loadVoices(
+                context = context,
+                enginePackage = ttsEnginePackage,
+                preferredLanguageTag = "vi-VN"
+            ) { items ->
+                ttsVoices = items
+                loadingVoices = false
+                if (items.isNotEmpty() && items.none { it.name == ttsVoiceName }) {
+                    viewModel.updateTtsVoiceName(items.first().name)
+                }
+            }
+        } else {
+            ttsVoices = emptyList()
+            loadingVoices = false
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -189,11 +229,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                                     color = Color.White,
                                     fontSize = 16.sp
                                 )
-                                Text(
-                                    text = "Google AI Studio Live API",
-                                    color = TextSecondary,
-                                    fontSize = 12.sp
-                                )
+                                Text("Google AI Studio Live API", color = TextSecondary, fontSize = 12.sp)
                             }
                         }
 
@@ -247,30 +283,19 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                 }
 
                 SettingsGlassSection("Lồng tiếng") {
-                    SettingLabel("Kiểu lồng tiếng")
-                    ChoiceDropdown(
-                        selectedValue = dubMode,
-                        choices = dubbingModes,
-                        onSelected = viewModel::updateDubMode
-                    )
-                    Text(
-                        text = when (dubMode) {
-                            "parallel" -> "Giữ tiếng gốc, phát tiếng Việt song song. Không yêu cầu app nguồn giảm âm lượng."
-                            "voice_over" -> "Giữ tiếng gốc nhỏ hơn bằng cơ chế Android audio ducking trong suốt lúc lồng tiếng."
-                            "full_dub" -> "Ưu tiên tiếng Việt mạnh nhất; khi AI nói sẽ xin audio focus mạnh để tiếng gốc giảm/tạm nhường."
-                            else -> "Chỉ hạ tiếng gốc khi AI đang nói, AI dừng thì tiếng gốc tự trở lại."
-                        },
-                        color = TextSecondary,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp
-                    )
-
-                    Spacer(modifier = Modifier.height(14.dp))
                     SettingLabel("Nguồn giọng")
                     ChoiceDropdown(
                         selectedValue = voiceSource,
                         choices = voiceSources,
                         onSelected = viewModel::updateVoiceSource
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    SettingLabel("Kiểu lồng tiếng")
+                    ChoiceDropdown(
+                        selectedValue = dubMode,
+                        choices = dubbingModes,
+                        onSelected = viewModel::updateDubMode
                     )
 
                     if (voiceSource == "gemini") {
@@ -282,21 +307,55 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                             onSelected = viewModel::updateVoiceName
                         )
                         Text(
-                            "Đổi giọng cần ngắt/kết nối lại phiên lồng tiếng để Gemini áp dụng.",
+                            "Gemini tự tạo audio dịch. Đổi giọng cần Start lại phiên.",
                             color = TextSecondary,
                             fontSize = 12.sp
                         )
                     } else {
+                        Spacer(modifier = Modifier.height(14.dp))
+                        SettingLabel("TTS Engine trên thiết bị")
+                        if (ttsEngines.isEmpty()) {
+                            Text(
+                                "Đang tìm TTS engine… Nếu danh sách vẫn trống, máy chưa có engine TTS khả dụng.",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp
+                            )
+                        } else {
+                            ChoiceDropdown(
+                                selectedValue = ttsEnginePackage,
+                                choices = ttsEngines.map { Choice(it.packageName, "${it.label} · ${it.packageName}") },
+                                onSelected = viewModel::updateTtsEnginePackage
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+                        SettingLabel("Voice của TTS Engine")
+                        when {
+                            loadingVoices -> Text("Đang đọc danh sách voice…", color = TextSecondary, fontSize = 12.sp)
+                            ttsVoices.isEmpty() -> Text(
+                                "Engine này chưa trả về danh sách voice. ALAD sẽ dùng giọng mặc định của engine.",
+                                color = TextSecondary,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp
+                            )
+                            else -> ChoiceDropdown(
+                                selectedValue = ttsVoiceName,
+                                choices = ttsVoices.map { Choice(it.name, it.label) },
+                                onSelected = viewModel::updateTtsVoiceName
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(14.dp))
                         SettingLabel("Tốc độ TTS ${String.format("%.2f", ttsRate)}×")
                         Slider(
                             value = ttsRate,
                             onValueChange = viewModel::updateTtsRate,
                             valueRange = 0.70f..1.50f,
-                            steps = 7
+                            steps = 15
                         )
                         Text(
-                            "Dùng engine/giọng TTS mặc định đang chọn trong Android. Gemini chỉ dịch; ALAD lấy transcript tiếng Việt và cho TTS của máy đọc.",
+                            "Voice tiếng Việt được ưu tiên lên đầu. offline = chạy trong máy; online = engine có thể cần mạng.",
                             color = TextSecondary,
                             fontSize = 12.sp,
                             lineHeight = 18.sp
@@ -304,7 +363,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
-                    SettingLabel("Âm lượng lồng tiếng ${(aiVolume * 100).roundToInt()}%")
+                    SettingLabel("Âm lượng tiếng lồng ${(aiVolume * 100).roundToInt()}%")
                     Slider(
                         value = aiVolume,
                         onValueChange = viewModel::updateVolumeRatio,
@@ -321,7 +380,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                         steps = 69
                     )
                     Text(
-                        "Số dương làm tiếng lồng trễ thêm. Số âm khiến Catch-up ưu tiên đuổi gần video hơn.",
+                        "Số dương làm tiếng lồng trễ thêm. Catch-up ưu tiên giữ lời đọc gần video.",
                         color = TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 18.sp
@@ -329,19 +388,19 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
 
                     ToggleRow(
                         title = "Auto Sync",
-                        subtitle = "Theo dõi độ trễ và tự hạn chế backlog để tiếng không ngày càng tụt hình.",
+                        subtitle = "Tự điều chỉnh khi hàng đợi audio/TTS bắt đầu tích trễ.",
                         checked = autoSync,
                         onCheckedChange = viewModel::updateAutoSync
                     )
                     ToggleRow(
                         title = "Catch-up",
-                        subtitle = "Gemini audio tăng tốc; TTS thiết bị tăng tốc và bỏ câu quá cũ khi bị tụt xa.",
+                        subtitle = "Tăng tốc hoặc bỏ câu TTS quá cũ khi bị tụt xa video.",
                         checked = catchUp,
                         onCheckedChange = viewModel::updateCatchUp
                     )
                     ToggleRow(
                         title = "Low Latency",
-                        subtitle = "Buffer ngắn hơn; ưu tiên khớp hình hơn độ mượt khi mạng chập chờn.",
+                        subtitle = "Giữ buffer ngắn, ưu tiên khớp hình hơn độ mượt.",
                         checked = lowLatency,
                         onCheckedChange = viewModel::updateLowLatency
                     )
@@ -359,7 +418,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                 }
 
                 Text(
-                    text = "Mẹo: khi đang xem video, overlay có nút − / AUTO / + để chỉnh SYNC ngay mà không cần quay lại Settings.",
+                    text = "Sau khi đổi Engine/Voice TTS, bấm Lưu rồi Dừng/Start lồng tiếng để áp dụng.",
                     color = TextSecondary,
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
@@ -379,7 +438,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                         .clickable {
                             viewModel.saveSettings()
                             scope.launch {
-                                snackbarHostState.showSnackbar("Đã lưu. Khởi động lại lồng tiếng để áp dụng đầy đủ.")
+                                snackbarHostState.showSnackbar("Đã lưu TTS engine/voice. Start lại lồng tiếng để áp dụng.")
                             }
                         },
                     contentAlignment = Alignment.Center
@@ -405,7 +464,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
 @Composable
 private fun SettingsGlassSection(
     title: String,
-    content: @Composable Column.() -> Unit
+    content: @Composable ColumnScope.() -> Unit
 ) {
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
@@ -436,11 +495,11 @@ private fun ChoiceDropdown(
     onSelected: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
-    val selected = choices.firstOrNull { it.value == selectedValue } ?: choices.first()
+    val selected = choices.firstOrNull { it.value == selectedValue } ?: choices.firstOrNull()
 
     Box(modifier = Modifier.fillMaxWidth()) {
         OutlinedButton(
-            onClick = { expanded = true },
+            onClick = { if (choices.isNotEmpty()) expanded = true },
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(14.dp),
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
@@ -451,7 +510,8 @@ private fun ChoiceDropdown(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(selected.label)
+                Text(selected?.label ?: "Không có lựa chọn", modifier = Modifier.weight(1f))
+                Spacer(modifier = Modifier.width(8.dp))
                 Text("▾", color = NeonCyan)
             }
         }
