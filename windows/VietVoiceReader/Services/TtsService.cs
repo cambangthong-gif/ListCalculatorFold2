@@ -1,4 +1,5 @@
 using System.Net.Http;
+using SharpCompress.Archives;
 using SharpCompress.Archives.Tar;
 using SharpCompress.Common;
 using SharpCompress.Compressors;
@@ -130,17 +131,14 @@ public sealed class TtsService : IDisposable
                 cancellationToken.ThrowIfCancellationRequested();
 
                 using var archive = TarArchive.OpenArchive(tarPath);
-                foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    entry.WriteToDirectory(
-                        destination,
-                        new ExtractionOptions
-                        {
-                            ExtractFullPath = true,
-                            Overwrite = true
-                        });
-                }
+                cancellationToken.ThrowIfCancellationRequested();
+                archive.WriteToDirectory(
+                    destination,
+                    new ExtractionOptions
+                    {
+                        ExtractFullPath = true,
+                        Overwrite = true
+                    });
             }
             catch (InvalidFormatException ex)
             {
