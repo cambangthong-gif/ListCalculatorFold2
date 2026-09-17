@@ -1,0 +1,107 @@
+name: Build ALAD Windows v4 strict 3.5 translate
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v4-translate35-minimal.yml'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch v2 to Android-like pipeline and strict 3.5 setup
+        shell: pwsh
+        run: |
+          $p = 'alad-windows-v2/Program.cs'
+          $c = Get-Content $p -Raw
+
+          # Android-like streaming: no local VAD, no forced audioStreamEnd.
+          $c = $c.Replace('    private readonly LocalSilenceDetector localVad = new();`r`n', '')
+          $c = $c.Replace('    private readonly LocalSilenceDetector localVad = new();`n', '')
+          $c = $c.Replace('            localVad.Reset();`r`n', '')
+          $c = $c.Replace('            localVad.Reset();`n', '')
+          $c = $c.Replace('        localVad.Reset();`r`n', '')
+          $c = $c.Replace('        localVad.Reset();`n', '')
+          $c = $c.Replace('                    if (lowLatency.Checked && localVad.Push(chunk)) gemini.SignalAudioStreamEnd();`r`n', '')
+          $c = $c.Replace('                    if (lowLatency.Checked && localVad.Push(chunk)) gemini.SignalAudioStreamEnd();`n', '')
+
+          # Remove the LocalSilenceDetector class entirely.
+          $c = [regex]::Replace($c, '(?s)internal sealed class LocalSilenceDetector\s*\{.*?\n\}\n\ninternal static class AudioConvert', 'internal static class AudioConvert', 1)
+
+          # Remove SignalAudioStreamEnd helper entirely.
+          $c = [regex]::Replace($c, '(?s)\n    public void SignalAudioStreamEnd\(\)\s*\{.*?\n    \}\n\n    private async Task OpenSocketAsync', "`n    private async Task OpenSocketAsync", 1)
+
+          # Remove forced NO_INTERRUPTION realtime input config.
+          $c = [regex]::Replace($c, '(?s)\n        var realtimeInputConfig = new\s*\{.*?\n        \};\n\n        object setup;', "`n        object setup;", 1)
+          $c = $c.Replace('                realtimeInputConfig,`r`n', '')
+          $c = $c.Replace('                realtimeInputConfig,`n', '')
+
+          # Gemini 3.5 Translate: use the official minimal translation-only setup.
+          $pattern = '(?s)        if \(mode == LiveMode\.FastTranslate\)\s*\{\s*setup = new\s*\{.*?\n            \};\n        \}\n        else'
+          $replacement = @'
+        if (mode == LiveMode.FastTranslate)
+        {
+            setup = new
+            {
+                model = "models/gemini-3.5-live-translate-preview",
+                generationConfig = new
+                {
+                    responseModalities = new[] { "AUDIO" },
+                    inputAudioTranscription = new { },
+                    outputAudioTranscription = new { },
+                    translationConfig = new
+                    {
+                        targetLanguageCode = targetLang,
+                        echoTargetLanguage = true
+                    }
+                }
+            };
+        }
+        else
+'@
+          $c = [regex]::Replace($c, $pattern, $replacement, 1)
+
+          # UI/version labels.
+          $c = $c.Replace('ALAD Windows v2', 'ALAD Windows v4')
+          $c = $c.Replace('Gemini sẵn sàng · Low latency', 'Gemini sẵn sàng · Android-like stream')
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Verify patch
+        shell: pwsh
+        run: |
+          $c = Get-Content 'alad-windows-v2/Program.cs' -Raw
+          if ($c -match 'SignalAudioStreamEnd') { throw 'SignalAudioStreamEnd still present' }
+          if ($c -match 'LocalSilenceDetector') { throw 'LocalSilenceDetector still present' }
+          if ($c -match 'NO_INTERRUPTION') { throw 'NO_INTERRUPTION still present' }
+          if ($c -notmatch 'gemini-3.5-live-translate-preview') { throw '3.5 model missing' }
+          if ($c -notmatch 'generationConfig = new[\s\S]*inputAudioTranscription = new') { throw '3.5 transcription not inside generationConfig' }
+          if ($c -notmatch 'echoTargetLanguage = true') { throw 'echoTargetLanguage true missing' }
+
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Rename
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No exe found' }
+          Rename-Item $exe.FullName "ALAD-Windows-v4-${{ matrix.rid }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v4-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v4-${{ matrix.rid }}.exe
