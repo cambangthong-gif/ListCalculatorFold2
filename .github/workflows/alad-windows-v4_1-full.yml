@@ -1,0 +1,125 @@
+name: Build ALAD Windows v4.1 full
+
+on:
+  push:
+    branches: [ alad-windows-v1-build ]
+    paths:
+      - '.github/workflows/alad-windows-v4_1-full.yml'
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+    env:
+      KEY_UI_B64: "ICAgICAgICB2YXIga2V5SG9zdCA9IG5ldyBUYWJsZUxheW91dFBhbmVsCiAgICAgICAgewogICAgICAgICAgICBEb2NrID0gRG9ja1N0eWxlLlRvcCwKICAgICAgICAgICAgQXV0b1NpemUgPSB0cnVlLAogICAgICAgICAgICBDb2x1bW5Db3VudCA9IDEsCiAgICAgICAgICAgIFJvd0NvdW50ID0gMiwKICAgICAgICAgICAgTWFyZ2luID0gbmV3IFBhZGRpbmcoMCkKICAgICAgICB9OwogICAgICAgIGtleUhvc3QuQ29sdW1uU3R5bGVzLkFkZChuZXcgQ29sdW1uU3R5bGUoU2l6ZVR5cGUuUGVyY2VudCwgMTAwKSk7CiAgICAgICAgYXBpS2V5LkRvY2sgPSBEb2NrU3R5bGUuVG9wOwogICAgICAgIGtleUhvc3QuQ29udHJvbHMuQWRkKGFwaUtleSwgMCwgMCk7CgogICAgICAgIHZhciBrZXlBY3Rpb25zID0gbmV3IEZsb3dMYXlvdXRQYW5lbAogICAgICAgIHsKICAgICAgICAgICAgRG9jayA9IERvY2tTdHlsZS5Ub3AsCiAgICAgICAgICAgIEF1dG9TaXplID0gdHJ1ZSwKICAgICAgICAgICAgV3JhcENvbnRlbnRzID0gdHJ1ZSwKICAgICAgICAgICAgTWFyZ2luID0gbmV3IFBhZGRpbmcoMCwgOCwgMCwgMCkKICAgICAgICB9OwogICAgICAgIHJlbWVtYmVyS2V5Lk1hcmdpbiA9IG5ldyBQYWRkaW5nKDAsIDgsIDE0LCAwKTsKICAgICAgICB2YXIgZ2V0QXBpS2V5ID0gbmV3IEJ1dHRvbgogICAgICAgIHsKICAgICAgICAgICAgVGV4dCA9ICJU4bqhby9M4bqleSBBUEkga2V5IiwKICAgICAgICAgICAgQXV0b1NpemUgPSB0cnVlLAogICAgICAgICAgICBNaW5pbXVtU2l6ZSA9IG5ldyBTaXplKDEzNSwgMzQpLAogICAgICAgICAgICBNYXJnaW4gPSBuZXcgUGFkZGluZygwLCAwLCA4LCAwKQogICAgICAgIH07CiAgICAgICAgdmFyIHBhc3RlQXBpS2V5ID0gbmV3IEJ1dHRvbgogICAgICAgIHsKICAgICAgICAgICAgVGV4dCA9ICJEw6FuIGtleSIsCiAgICAgICAgICAgIEF1dG9TaXplID0gdHJ1ZSwKICAgICAgICAgICAgTWluaW11bVNpemUgPSBuZXcgU2l6ZSg5MCwgMzQpLAogICAgICAgICAgICBNYXJnaW4gPSBuZXcgUGFkZGluZygwKQogICAgICAgIH07CiAgICAgICAgZ2V0QXBpS2V5LkNsaWNrICs9IChfLCBfKSA9PgogICAgICAgIHsKICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIFByb2Nlc3MuU3RhcnQobmV3IFByb2Nlc3NTdGFydEluZm8KICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBGaWxlTmFtZSA9ICJodHRwczovL2Fpc3R1ZGlvLmdvb2dsZS5jb20vYXBwL2FwaWtleSIsCiAgICAgICAgICAgICAgICAgICAgVXNlU2hlbGxFeGVjdXRlID0gdHJ1ZQogICAgICAgICAgICAgICAgfSk7CiAgICAgICAgICAgICAgICBzdGF0dXMuVGV4dCA9ICLEkMOjIG3hu58gR29vZ2xlIEFJIFN0dWRpbyDEkeG7gyB04bqhby9s4bqleSBBUEkga2V5IjsKICAgICAgICAgICAgfQogICAgICAgICAgICBjYXRjaCAoRXhjZXB0aW9uIGV4KQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBNZXNzYWdlQm94LlNob3coZXguTWVzc2FnZSwgIktow7RuZyBt4bufIMSRxrDhu6NjIEdvb2dsZSBBSSBTdHVkaW8iLCBNZXNzYWdlQm94QnV0dG9ucy5PSywgTWVzc2FnZUJveEljb24uRXJyb3IpOwogICAgICAgICAgICB9CiAgICAgICAgfTsKICAgICAgICBwYXN0ZUFwaUtleS5DbGljayArPSAoXywgXykgPT4KICAgICAgICB7CiAgICAgICAgICAgIHRyeQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBpZiAoIUNsaXBib2FyZC5Db250YWluc1RleHQoKSkKICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBNZXNzYWdlQm94LlNob3coIkNsaXBib2FyZCBjaMawYSBjw7MgQVBJIGtleS4iLCAiQUxBRCBXaW5kb3dzIiwgTWVzc2FnZUJveEJ1dHRvbnMuT0ssIE1lc3NhZ2VCb3hJY29uLkluZm9ybWF0aW9uKTsKICAgICAgICAgICAgICAgICAgICByZXR1cm47CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICB2YXIgdmFsdWUgPSBDbGlwYm9hcmQuR2V0VGV4dCgpLlRyaW0oKTsKICAgICAgICAgICAgICAgIGlmIChzdHJpbmcuSXNOdWxsT3JXaGl0ZVNwYWNlKHZhbHVlKSkgcmV0dXJuOwogICAgICAgICAgICAgICAgYXBpS2V5LlRleHQgPSB2YWx1ZTsKICAgICAgICAgICAgICAgIGlmIChyZW1lbWJlcktleS5DaGVja2VkKSBTZWN1cmVLZXlTdG9yZS5TYXZlKHZhbHVlKTsKICAgICAgICAgICAgICAgIHN0YXR1cy5UZXh0ID0gIsSQw6MgZMOhbiBBUEkga2V5IiArIChyZW1lbWJlcktleS5DaGVja2VkID8gIiB2w6AgbMawdSBhbiB0b8OgbiIgOiAiIik7CiAgICAgICAgICAgIH0KICAgICAgICAgICAgY2F0Y2ggKEV4Y2VwdGlvbiBleCkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgTWVzc2FnZUJveC5TaG93KGV4Lk1lc3NhZ2UsICJLaMO0bmcgZMOhbiDEkcaw4bujYyBBUEkga2V5IiwgTWVzc2FnZUJveEJ1dHRvbnMuT0ssIE1lc3NhZ2VCb3hJY29uLkVycm9yKTsKICAgICAgICAgICAgfQogICAgICAgIH07CiAgICAgICAga2V5QWN0aW9ucy5Db250cm9scy5BZGQocmVtZW1iZXJLZXkpOwogICAgICAgIGtleUFjdGlvbnMuQWRkKGdldEFwaUtleSk7CiAgICAgICAga2V5QWN0aW9ucy5Db250cm9scy5BZGQocGFzdGVBcGlLZXkpOwogICAgICAgIGtleUhvc3QuQ29udHJvbHMuQWRkKGtleUFjdGlvbnMsIDAsIDEpOwogICAgICAgIEFkZFNldHRpbmcocm9vdCwgIkdlbWluaSBBUEkga2V5Iiwga2V5SG9zdCk7"
+      VOL_UI_B64: "ICAgICAgICB2YXIgb3JpZ2luYWxWb2xHcmlkID0gVHdvQ29sdW1uR3JpZCgpOwogICAgICAgIG9yaWdpbmFsVm9sdW1lLkRvY2sgPSBEb2NrU3R5bGUuRmlsbDsKICAgICAgICBvcmlnaW5hbFZvbHVtZUxhYmVsLk1hcmdpbiA9IG5ldyBQYWRkaW5nKDEwLCA4LCAwLCAwKTsKICAgICAgICBvcmlnaW5hbFZvbEdyaWQuQ29udHJvbHMuQWRkKG9yaWdpbmFsVm9sdW1lLCAwLCAwKTsKICAgICAgICBvcmlnaW5hbFZvbEdyaWQuQ29udHJvbHMuQWRkKG9yaWdpbmFsVm9sdW1lTGFiZWwsIDEsIDApOwogICAgICAgIEFkZFNldHRpbmcocm9vdCwgIsOCbSBsxrDhu6NuZyBn4buRYyIsIG9yaWdpbmFsVm9sR3JpZCk7"
+      FAST_B64: "ICAgICAgICBpZiAobW9kZSA9PSBMaXZlTW9kZS5GYXN0VHJhbnNsYXRlKQogICAgICAgIHsKICAgICAgICAgICAgc2V0dXAgPSBuZXcKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgbW9kZWwgPSAibW9kZWxzL2dlbWluaS0zLjUtbGl2ZS10cmFuc2xhdGUtcHJldmlldyIsCiAgICAgICAgICAgICAgICBnZW5lcmF0aW9uQ29uZmlnID0gbmV3CiAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgcmVzcG9uc2VNb2RhbGl0aWVzID0gbmV3W10geyAiQVVESU8iIH0sCiAgICAgICAgICAgICAgICAgICAgaW5wdXRBdWRpb1RyYW5zY3JpcHRpb24gPSBuZXcgeyB9LAogICAgICAgICAgICAgICAgICAgIG91dHB1dEF1ZGlvVHJhbnNjcmlwdGlvbiA9IG5ldyB7IH0sCiAgICAgICAgICAgICAgICAgICAgdHJhbnNsYXRpb25Db25maWcgPSBuZXcKICAgICAgICAgICAgICAgICAgICB7CiAgICAgICAgICAgICAgICAgICAgICAgIHRhcmdldExhbmd1YWdlQ29kZSA9IHRhcmdldExhbmcsCiAgICAgICAgICAgICAgICAgICAgICAgIGVjaG9UYXJnZXRMYW5ndWFnZSA9IHRydWUKICAgICAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH07CiAgICAgICAgfQogICAgICAgIGVsc2U="
+      EVENT_B64: "ICAgICAgICBvcmlnaW5hbFZvbHVtZS5WYWx1ZUNoYW5nZWQgKz0gKF8sIF8pID0+CiAgICAgICAgewogICAgICAgICAgICBvcmlnaW5hbFZvbHVtZUxhYmVsLlRleHQgPSAkIntvcmlnaW5hbFZvbHVtZS5WYWx1ZX0lIjsKICAgICAgICAgICAgaWYgKGR1Y2tlciAhPSBudWxsKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICBkdWNrZXIuU2V0QmFzZUZhY3RvcihvcmlnaW5hbFZvbHVtZS5WYWx1ZSAvIDEwMGYpOwogICAgICAgICAgICAgICAgaWYgKChEYXRlVGltZS5VdGNOb3cgLSBsYXN0QWlBdWRpb1V0YykuVG90YWxNaWxsaXNlY29uZHMgPD0gMzIwKQogICAgICAgICAgICAgICAgICAgIEFwcGx5RHVja2luZyh0cnVlKTsKICAgICAgICAgICAgICAgIGVsc2UKICAgICAgICAgICAgICAgICAgICBkdWNrZXIuQXBwbHlCYXNlKHNvdXJjZS5TZWxlY3RlZEl0ZW0gYXMgUHJvY2Vzc0l0ZW0pOwogICAgICAgICAgICB9CiAgICAgICAgfTs="
+      APPLY_B64: "ICAgIHByaXZhdGUgdm9pZCBBcHBseUR1Y2tpbmcoYm9vbCBhaVNwZWFraW5nKQogICAgewogICAgICAgIGlmIChkdWNrZXIgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgIGR1Y2tlci5TZXRCYXNlRmFjdG9yKG9yaWdpbmFsVm9sdW1lLlZhbHVlIC8gMTAwZik7CgogICAgICAgIGlmICghYWlTcGVha2luZykKICAgICAgICB7CiAgICAgICAgICAgIGR1Y2tlci5BcHBseUJhc2Uoc291cmNlLlNlbGVjdGVkSXRlbSBhcyBQcm9jZXNzSXRlbSk7CiAgICAgICAgICAgIGRlbGF5ZWRCdXJzdEFjdGl2ZSA9IGZhbHNlOwogICAgICAgICAgICByZXR1cm47CiAgICAgICAgfQoKICAgICAgICBzd2l0Y2ggKFNlbGVjdGVkTWl4TW9kZSgpKQogICAgICAgIHsKICAgICAgICAgICAgY2FzZSBNaXhNb2RlLkF1dG9EdWNraW5nOgogICAgICAgICAgICAgICAgZHVja2VyLkR1Y2soMC4yMmYsIHNvdXJjZS5TZWxlY3RlZEl0ZW0gYXMgUHJvY2Vzc0l0ZW0pOwogICAgICAgICAgICAgICAgYnJlYWs7CiAgICAgICAgICAgIGNhc2UgTWl4TW9kZS5Wb2ljZU92ZXI6CiAgICAgICAgICAgICAgICBkdWNrZXIuRHVjaygwLjQ1Ziwgc291cmNlLlNlbGVjdGVkSXRlbSBhcyBQcm9jZXNzSXRlbSk7CiAgICAgICAgICAgICAgICBicmVhazsKICAgICAgICAgICAgY2FzZSBNaXhNb2RlLkZ1bGxEdWI6CiAgICAgICAgICAgICAgICBkdWNrZXIuRHVjaygwLjA1Ziwgc291cmNlLlNlbGVjdGVkSXRlbSBhcyBQcm9jZXNzSXRlbSk7CiAgICAgICAgICAgICAgICBicmVhazsKICAgICAgICAgICAgY2FzZSBNaXhNb2RlLlBhcmFsbGVsOgogICAgICAgICAgICAgICAgZHVja2VyLkFwcGx5QmFzZShzb3VyY2UuU2VsZWN0ZWRJdGVtIGFzIFByb2Nlc3NJdGVtKTsKICAgICAgICAgICAgICAgIGJyZWFrOwogICAgICAgIH0KICAgIH0="
+      DUCKER_B64: "aW50ZXJuYWwgc2VhbGVkIGNsYXNzIEF1ZGlvRHVja2VyIDogSURpc3Bvc2FibGUKewogICAgcHJpdmF0ZSByZWFkb25seSBpbnQgc2VsZlBpZDsKICAgIHByaXZhdGUgcmVhZG9ubHkgQWN0aW9uPHN0cmluZz4gbG9nOwogICAgcHJpdmF0ZSByZWFkb25seSBEaWN0aW9uYXJ5PHVpbnQsIGZsb2F0PiBvcmlnaW5hbCA9IG5ldygpOwogICAgcHJpdmF0ZSBNTURldmljZUVudW1lcmF0b3I/IGVudW1lcmF0b3I7CiAgICBwcml2YXRlIE1NRGV2aWNlPyBkZXZpY2U7CiAgICBwcml2YXRlIGZsb2F0IGJhc2VGYWN0b3IgPSAxZjsKCiAgICBwdWJsaWMgQXVkaW9EdWNrZXIoaW50IHNlbGZQaWQsIEFjdGlvbjxzdHJpbmc+IGxvZykKICAgIHsKICAgICAgICB0aGlzLnNlbGZQaWQgPSBzZWxmUGlkOwogICAgICAgIHRoaXMubG9nID0gbG9nOwogICAgICAgIHRyeQogICAgICAgIHsKICAgICAgICAgICAgZW51bWVyYXRvciA9IG5ldyBNTURldmljZUVudW1lcmF0b3IoKTsKICAgICAgICAgICAgZGV2aWNlID0gZW51bWVyYXRvci5HZXREZWZhdWx0QXVkaW9FbmRwb2ludChEYXRhRmxvdy5SZW5kZXIsIFJvbGUuTXVsdGltZWRpYSk7CiAgICAgICAgfQogICAgICAgIGNhdGNoIChFeGNlcHRpb24gZXgpIHsgbG9nKCLEkGnhu4F1IGtoaeG7g24gw6JtIGfhu5FjIGtow7RuZyBraOG6oyBk4bulbmc6ICIgKyBleC5NZXNzYWdlKTsgfQogICAgfQoKICAgIHB1YmxpYyB2b2lkIFNldEJhc2VGYWN0b3IoZmxvYXQgZmFjdG9yKQogICAgewogICAgICAgIGJhc2VGYWN0b3IgPSBNYXRoLkNsYW1wKGZhY3RvciwgMGYsIDFmKTsKICAgIH0KCiAgICBwdWJsaWMgdm9pZCBBcHBseUJhc2UoUHJvY2Vzc0l0ZW0/IHByZWZlcnJlZCkKICAgIHsKICAgICAgICBBcHBseUxldmVsKGJhc2VGYWN0b3IsIHByZWZlcnJlZCk7CiAgICB9CgogICAgcHVibGljIHZvaWQgRHVjayhmbG9hdCBmYWN0b3IsIFByb2Nlc3NJdGVtPyBwcmVmZXJyZWQpCiAgICB7CiAgICAgICAgQXBwbHlMZXZlbChiYXNlRmFjdG9yICogTWF0aC5DbGFtcChmYWN0b3IsIDBmLCAxZiksIHByZWZlcnJlZCk7CiAgICB9CgogICAgcHJpdmF0ZSB2b2lkIEFwcGx5TGV2ZWwoZmxvYXQgZmFjdG9yLCBQcm9jZXNzSXRlbT8gcHJlZmVycmVkKQogICAgewogICAgICAgIGlmIChkZXZpY2UgPT0gbnVsbCkgcmV0dXJuOwogICAgICAgIHRyeQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNlc3Npb25zID0gZGV2aWNlLkF1ZGlvU2Vzc2lvbk1hbmFnZXIuU2Vzc2lvbnM7CiAgICAgICAgICAgIGJvb2wgbWF0Y2hlZCA9IGZhbHNlOwoKICAgICAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBzZXNzaW9ucy5Db3VudDsgaSsrKQogICAgICAgICAgICB7CiAgICAgICAgICAgICAgICB2YXIgcyA9IHNlc3Npb25zW2ldOwogICAgICAgICAgICAgICAgdWludCBwaWQ7CiAgICAgICAgICAgICAgICB0cnkgeyBwaWQgPSBzLkdldFByb2Nlc3NJRDsgfSBjYXRjaCB7IGNvbnRpbnVlOyB9CiAgICAgICAgICAgICAgICBpZiAocGlkID09IHNlbGZQaWQgfHwgcy5TaW1wbGVBdWRpb1ZvbHVtZSA9PSBudWxsKSBjb250aW51ZTsKICAgICAgICAgICAgICAgIGlmIChwcmVmZXJyZWQgIT0gbnVsbCAmJiBwaWQgIT0gcHJlZmVycmVkLlBpZCkgY29udGludWU7CgogICAgICAgICAgICAgICAgbWF0Y2hlZCA9IHRydWU7CiAgICAgICAgICAgICAgICBpZiAoIW9yaWdpbmFsLkNvbnRhaW5zS2V5KHBpZCkpCiAgICAgICAgICAgICAgICAgICAgb3JpZ2luYWxbcGlkXSA9IHMuU2ltcGxlQXVkaW9Wb2x1bWUuVm9sdW1lOwoKICAgICAgICAgICAgICAgIHMuU2ltcGxlQXVkaW9Wb2x1bWUuVm9sdW1lID0KICAgICAgICAgICAgICAgICAgICBNYXRoLkNsYW1wKG9yaWdpbmFsW3BpZF0gKiBmYWN0b3IsIDBmLCAxZik7CiAgICAgICAgICAgIH0KCiAgICAgICAgICAgIC8vIFNvbWUgYnJvd3NlcnMgcHV0IHBsYXliYWNrIGluIGEgY2hpbGQvdXRpbGl0eSBwcm9jZXNzLgogICAgICAgICAgICAvLyBJZiB0aGUgc2VsZWN0ZWQgUElEIGhhcyBubyBhdWRpbyBzZXNzaW9uLCBmYWxsIGJhY2sgdG8gb3RoZXIKICAgICAgICAgICAgLy8gbm9uLUFMQUQgc2Vzc2lvbnMganVzdCBsaWtlIHRoZSBwcmV2aW91cyBBdXRvIER1Y2tpbmcgYmVoYXZpb3IuCiAgICAgICAgICAgIGlmIChwcmVmZXJyZWQgIT0gbnVsbCAmJiAhbWF0Y2hlZCkKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgZm9yIChpbnQgaSA9IDA7IGkgPCBzZXNzaW9ucy5Db3VudDsgaSsrKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIHZhciBzID0gc2Vzc3Npb25zW2ldOwogICAgICAgICAgICAgICAgICAgIHVpbnQgcGlkOwogICAgICAgICAgICAgICAgICAgIHRyeSB7IHBpZCA9IHMuR2V0UHJvY2Vzc0lEOyB9IGNhdGNoIHsgY29udGludWU7IH0KICAgICAgICAgICAgICAgICAgICBpZiAocGlkID09IHNlbGZQaWQgfHwgc y5TaW1wbGVBdWRpb1ZvbHVtZSA9PSBudWxsKSBjb250aW51ZTsKICAgICAgICAgICAgICAgICAgICBpZiAoIW9yaWdpbmFsLkNvbnRhaW5zS2V5KHBpZCkpIG9yaWdpbmFsW3BpZF0gPSBzLlNpbXBsZUF1ZGlvVm9sdW1lLlZvbHVtZTsKICAgICAgICAgICAgICAgICAgICBzLlNpbXBsZUF1ZGlvVm9sdW1lLlZvbHVtZSA9IE1hdGguQ2xhbXAob3JpZ2luYWxbcGlkXSAqIGZhY3RvciwgMGYsIDFmKTsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBjYXRjaCAoRXhjZXB0aW9uIGV4KSB7IGxvZygixJDhu4F1IGtoaeG7g24gw6JtIGfhu5FjIGzhu5dpOiAiICsgZXguTWVzc2FnZSk7IH0KICAgIH0KCiAgICBwdWJsaWMgdm9pZCBSZXN0b3JlKCkKICAgIHsKICAgICAgICBpZiAoZGV2aWNlID09IG51bGwgfHwgb3JpZ2luYWwuQ291bnQgPT0gMCkgcmV0dXJuOwogICAgICAgIHRyeQogICAgICAgIHsKICAgICAgICAgICAgdmFyIHNlc3Npb25zID0gZGV2aWNlLkF1ZGlvU2Vzc2lvbk1hbmFnZXIuU2Vzc2lvbnM7CiAgICAgICAgICAgIGZvciAoaW50IGkgPSAwOyBpIDwgc2Vzc2lvbnMuQ291bnQ7IGkrKykKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgdmFyIHMgPSBzZXNzaW9uc1tpXTsKICAgICAgICAgICAgICAgIHVpbnQgcGlkOwogICAgICAgICAgICAgICAgdHJ5IHsgcGlkID0gcy5HZXRQcm9jZXNzSUQ7IH0gY2F0Y2ggeyBjb250aW51ZTsgfQogICAgICAgICAgICAgICAgaWYgKG9yaWdpbmFsLlRyeUdldFZhbHVlKHBpZCwgb3V0IHZhciB2b2x1bWUpICYmIHMuU2ltcGxlQXVkaW9Wb2x1bWUgIT0gbnVsbCkKICAgICAgICAgICAgICAgICAgICBzLlNpbXBsZUF1ZGlvVm9sdW1lLlZvbHVtZSA9IHZvbHVtZTsKICAgICAgICAgICAgfQogICAgICAgIH0KICAgICAgICBjYXRjaCB7IH0KICAgICAgICBmaW5hbGx5IHsgb3JpZ2luYWwuQ2xlYXIoKTsgfQogICAgfQoKICAgIHB1YmxpYyB2b2lkIERpc3Bvc2UoKQogICAgewogICAgICAgIFJlc3RvcmUoKTsKICAgICAgICBkZXZpY2U/LkRpc3Bvc2UoKTsKICAgICAgICBlbnVtZXJhdG9yPy5EaXNwb3NlKCk7CiAgICB9Cn0="
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Patch ALAD v4.1
+        shell: pwsh
+        run: |
+          $p = 'alad-windows-v2/Program.cs'
+          $c = Get-Content $p -Raw
+          $nl = [Environment]::NewLine
+
+          $c = $c.Replace('ALAD Windows v2 — Live Dubbing', 'ALAD Windows v4.1 — Live Dubbing')
+          $c = $c.Replace('ALAD Windows v2', 'ALAD Windows v4.1')
+          $c = $c.Replace('Gemini sẵn sàng · Low latency', 'Gemini sẵn sàng · continuous stream')
+
+          # Android-like continuous input.
+          $c = $c.Replace('            localVad.Reset();' + $nl, '')
+          $c = $c.Replace('        localVad.Reset();' + $nl, '')
+          $c = $c.Replace('                    if (lowLatency.Checked && localVad.Push(chunk)) gemini.SignalAudioStreamEnd();' + $nl, '')
+          $rt = '(?s)        var realtimeInputConfig = new\s*\{.*?\r?\n        \};\r?\n\r?\n        object setup;'
+          $c = [regex]::Replace($c, $rt, '        object setup;', 1)
+          $c = [regex]::Replace($c, '(?m)^\s*realtimeInputConfig,\s*\r?\n', '')
+
+          # Exact Gemini 3.5 Live Translate setup documented by Google.
+          $fast = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:FAST_B64))
+          $fastPattern = '(?s)        if \(mode == LiveMode\.FastTranslate\)\s*\{\s*setup = new\s*\{.*?\r?\n            \};\r?\n        \}\r?\n        else'
+          $c2 = [regex]::Replace($c, $fastPattern, $fast, 1)
+          if ($c2 -eq $c) { throw '3.5 setup was not replaced' }
+          $c = $c2
+
+          # API key helper buttons.
+          $key = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KEY_UI_B64))
+          $keyPattern = '(?s)        var keyGrid = TwoColumnGrid\(\);\r?\n        apiKey\.Dock = DockStyle\.Fill;\r?\n        rememberKey\.Margin = new Padding\(12, 6, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(apiKey, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(rememberKey, 1, 0\);\r?\n        AddSetting\(root, "Gemini API key", keyGrid\);'
+          $c2 = [regex]::Replace($c, $keyPattern, $key, 1)
+          if ($c2 -eq $c) { throw 'API key UI was not replaced' }
+          $c = $c2
+
+          # Original-audio controls.
+          $fieldNeedle = '    private readonly Label aiVolumeLabel = new() { Text = "100%", AutoSize = true };'
+          $fieldReplacement = $fieldNeedle + $nl + '    private readonly TrackBar originalVolume = new() { Minimum = 0, Maximum = 100, TickFrequency = 10, Value = 100 };' + $nl + '    private readonly Label originalVolumeLabel = new() { Text = "100%", AutoSize = true };'
+          if (-not $c.Contains($fieldNeedle)) { throw 'AI volume field marker missing' }
+          $c = $c.Replace($fieldNeedle, $fieldReplacement)
+
+          $volUi = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:VOL_UI_B64))
+          $volMarker = '        AddSetting(root, "Âm lượng AI", volGrid);'
+          if (-not $c.Contains($volMarker)) { throw 'AI volume UI marker missing' }
+          $c = $c.Replace($volMarker, $volMarker + $nl + $nl + $volUi)
+
+          $evt = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:EVENT_B64))
+          $evtMarker = '        uiTimer.Tick += (_, _) => UpdateUiTelemetry();'
+          if (-not $c.Contains($evtMarker)) { throw 'event marker missing' }
+          $c = $c.Replace($evtMarker, $evt + $nl + $evtMarker)
+
+          $duckerStart = '            ducker = new AudioDucker(Environment.ProcessId, LogStatus);'
+          $c = $c.Replace($duckerStart, $duckerStart + $nl + '            ducker.SetBaseFactor(originalVolume.Value / 100f);' + $nl + '            ducker.ApplyBase(source.SelectedItem as ProcessItem);')
+
+          $apply = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:APPLY_B64))
+          $applyPattern = '(?s)    private void ApplyDucking\(bool aiSpeaking\)\s*\{.*?\r?\n    \}\r?\n\r?\n    private void UpdateUiTelemetry'
+          $c2 = [regex]::Replace($c, $applyPattern, $apply + $nl + $nl + '    private void UpdateUiTelemetry', 1)
+          if ($c2 -eq $c) { throw 'ApplyDucking replacement failed' }
+          $c = $c2
+
+          $ducker = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:DUCKER_B64))
+          $duckerPattern = '(?s)internal sealed class AudioDucker : IDisposable\s*\{.*?\r?\n\}\r?\n\r?\ninternal sealed class LiveGeminiClient'
+          $c2 = [regex]::Replace($c, $duckerPattern, $ducker + $nl + $nl + 'internal sealed class LiveGeminiClient', 1)
+          if ($c2 -eq $c) { throw 'AudioDucker replacement failed' }
+          $c = $c2
+
+          Set-Content $p $c -Encoding UTF8
+
+      - name: Verify patch
+        shell: pwsh
+        run: |
+          $c = Get-Content 'alad-windows-v2/Program.cs' -Raw
+          if ($c -match 'localVad\.Push\(') { throw 'local VAD still active' }
+          if ($c -match 'activityHandling\s*=\s*"NO_INTERRUPTION"') { throw 'NO_INTERRUPTION still active' }
+          if ($c -notmatch 'Tạo/Lấy API key') { throw 'Get API key button missing' }
+          if ($c -notmatch 'Dán key') { throw 'Paste key button missing' }
+          if ($c -notmatch 'Âm lượng gốc') { throw 'Original volume UI missing' }
+          if ($c -notmatch 'SetBaseFactor') { throw 'Base volume implementation missing' }
+          if ($c -notmatch 'generationConfig = new[\s\S]*inputAudioTranscription = new[\s\S]*translationConfig = new') { throw 'Strict 3.5 config missing' }
+          Write-Host 'ALAD v4.1 patch verified.'
+
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+
+      - name: Publish
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Rename
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw 'No EXE found' }
+          Move-Item $exe.FullName "out/${{ matrix.rid }}/ALAD-Windows-v4.1-${{ matrix.rid }}.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v4.1-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v4.1-${{ matrix.rid }}.exe
+          if-no-files-found: error
