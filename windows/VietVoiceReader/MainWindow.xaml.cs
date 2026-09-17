@@ -15,6 +15,7 @@ public partial class MainWindow : Window
     private readonly TtsService tts = new();
     private readonly Mp3Exporter exporter;
     private readonly SettingsStore settingsStore = new();
+    private readonly LibraryStore libraryStore = new();
     private BookDocument? book;
     private BookDisplaySettings currentSettings = new();
     private CancellationTokenSource? operationCts;
@@ -45,34 +46,181 @@ public partial class MainWindow : Window
         ThemeCombo.SelectedIndex = 0;
         ViewModeCombo.SelectedIndex = 0;
         UpdateVoiceStatus();
+        RefreshLibrary();
+        Loaded += Window_Loaded;
+    }
+
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
+    {
+        Loaded -= Window_Loaded;
+
+        var recent = libraryStore.GetRecent()
+            .FirstOrDefault(x => File.Exists(x.SourcePath));
+
+        if (recent != null)
+            await OpenBookPathAsync(recent.SourcePath, resumeProgress: true, switchToContents: false);
     }
 
     private async void OpenBook_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "EPUB (*.epub)|*.epub", Multiselect = false };
+        var dlg = new OpenFileDialog
+        {
+            Filter = "EPUB (*.epub)|*.epub",
+            Multiselect = false
+        };
+
         if (dlg.ShowDialog() != true) return;
+        await OpenBookPathAsync(dlg.FileName, resumeProgress: true, switchToContents: true);
+    }
+
+    private async Task OpenBookPathAsync(
+        string filePath,
+        bool resumeProgress,
+        bool switchToContents)
+    {
+        if (!File.Exists(filePath))
+        {
+            MessageBox.Show(
+                this,
+                "Không tìm thấy file EPUB ở vị trí cũ:\n" + filePath,
+                "VietVoice Reader",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        var previous = libraryStore.Find(filePath);
+
         try
         {
+            operationCts?.Cancel();
+            StopPlayback(true);
             Busy("Đang mở EPUB...", true);
-            book = await EpubService.LoadAsync(dlg.FileName);
+
+            var loadedBook = await EpubService.LoadAsync(filePath);
+            book = loadedBook;
+
             ChapterList.ItemsSource = book.Chapters;
-            ChapterList.SelectedIndex = 0;
-            BookTitleText.Text = string.IsNullOrWhiteSpace(book.Author) ? book.Title : $"{book.Title} — {book.Author}";
+            BookTitleText.Text = string.IsNullOrWhiteSpace(book.Author)
+                ? book.Title
+                : $"{book.Title} — {book.Author}";
+
             LoadBookSettings();
-            StatusText.Text = $"Đã mở {book.Title} • {book.Chapters.Count} chương";
+
+            int resumeIndex = 0;
+            if (resumeProgress && previous != null)
+                resumeIndex = Math.Clamp(previous.LastChapterIndex, 0, Math.Max(0, book.Chapters.Count - 1));
+
+            ChapterList.SelectedIndex = resumeIndex;
+            if (resumeIndex >= 0 && resumeIndex < book.Chapters.Count)
+                ChapterList.ScrollIntoView(book.Chapters[resumeIndex]);
+
+            libraryStore.UpsertBook(book, resumeIndex);
+            RefreshLibrary(book.SourcePath);
+
+            if (switchToContents)
+                LeftTabs.SelectedIndex = 1;
+
+            StatusText.Text = previous != null && resumeProgress
+                ? $"Đọc tiếp: {book.Title} • chương {resumeIndex + 1}/{book.Chapters.Count}"
+                : $"Đã mở {book.Title} • {book.Chapters.Count} chương";
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Không mở được EPUB", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                ex.Message,
+                "Không mở được EPUB",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
             StatusText.Text = "Mở EPUB thất bại";
         }
-        finally { Busy(null, false); }
+        finally
+        {
+            Busy(null, false);
+        }
     }
 
     private void ChapterList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ChapterList.SelectedItem is BookChapter chapter)
-            ShowChapter(chapter);
+        if (ChapterList.SelectedItem is not BookChapter chapter)
+            return;
+
+        ShowChapter(chapter);
+
+        if (book != null && ChapterList.SelectedIndex >= 0)
+        {
+            libraryStore.UpdateProgress(book, ChapterList.SelectedIndex);
+            RefreshLibrary(book.SourcePath);
+        }
+    }
+
+    private void RefreshLibrary(string? selectPath = null)
+    {
+        if (LibraryList == null) return;
+
+        var recent = libraryStore.GetRecent();
+        LibraryList.ItemsSource = recent;
+
+        if (!string.IsNullOrWhiteSpace(selectPath))
+        {
+            var selected = recent.FirstOrDefault(
+                x => string.Equals(
+                    x.SourcePath,
+                    selectPath,
+                    StringComparison.OrdinalIgnoreCase));
+            if (selected != null)
+                LibraryList.SelectedItem = selected;
+        }
+    }
+
+    private async void ContinueBook_Click(object sender, RoutedEventArgs e)
+    {
+        if (LibraryList.SelectedItem is not BookLibraryItem item)
+        {
+            MessageBox.Show(this, "Hãy chọn một sách trong thư viện.");
+            return;
+        }
+
+        await OpenBookPathAsync(
+            item.SourcePath,
+            resumeProgress: true,
+            switchToContents: true);
+    }
+
+    private async void LibraryList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (LibraryList.SelectedItem is not BookLibraryItem item)
+            return;
+
+        await OpenBookPathAsync(
+            item.SourcePath,
+            resumeProgress: true,
+            switchToContents: true);
+    }
+
+    private void RemoveFromLibrary_Click(object sender, RoutedEventArgs e)
+    {
+        if (LibraryList.SelectedItem is not BookLibraryItem item)
+        {
+            MessageBox.Show(this, "Hãy chọn một sách trong thư viện.");
+            return;
+        }
+
+        var result = MessageBox.Show(
+            this,
+            $"Bỏ “{item.Title}” khỏi thư viện?\n\nFile EPUB gốc sẽ không bị xóa.",
+            "VietVoice Reader",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes)
+            return;
+
+        libraryStore.Remove(item.SourcePath);
+        RefreshLibrary();
+
+        StatusText.Text = "Đã bỏ sách khỏi thư viện";
     }
 
     private void ShowChapter(BookChapter chapter)
