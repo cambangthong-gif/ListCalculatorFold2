@@ -1,8 +1,11 @@
 using Microsoft.Win32;
 using NAudio.Wave;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
+using System.Windows.Input;
 using System.Windows.Media;
 using Forms = System.Windows.Forms;
 using VietVoiceReader.Models;
@@ -12,24 +15,54 @@ namespace VietVoiceReader;
 
 public partial class MainWindow : Window
 {
+    private sealed class OpenBookTab
+    {
+        public required BookDocument Book { get; init; }
+        public required FlowDocumentReader Reader { get; init; }
+        public required TabItem Tab { get; init; }
+        public required BookDisplaySettings Settings { get; set; }
+        public int ChapterIndex { get; set; }
+    }
+
+    private sealed record PlaybackUnit(
+        int ChapterIndex,
+        int SegmentIndex,
+        int SegmentCount,
+        string Text);
+
     private readonly TtsService tts = new();
     private readonly Mp3Exporter exporter;
     private readonly SettingsStore settingsStore = new();
     private readonly LibraryStore libraryStore = new();
+
+    private readonly Dictionary<string, OpenBookTab> openBooks =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private OpenBookTab? activeTab;
     private BookDocument? book;
     private BookDisplaySettings currentSettings = new();
+
     private CancellationTokenSource? operationCts;
+    private CancellationTokenSource? playbackCts;
     private WaveOutEvent? waveOut;
     private AudioFileReader? waveReader;
-    private CancellationTokenSource? playbackCts;
     private string? playbackTempWav;
-    private int playbackGeneration;
+
+    private int playbackSessionId;
+    private int playCommandGate;
     private bool userStopRequested;
+    private bool isPlaybackActive;
+    private string? activePlaybackBookPath;
+
+    private bool suppressChapterSelection;
+    private bool suppressSettingsEvents;
 
     public MainWindow()
     {
         InitializeComponent();
+
         exporter = new Mp3Exporter(tts);
+
         tts.ProgressChanged += (p, s) => Dispatcher.Invoke(() =>
         {
             Progress.Value = Math.Clamp(p, 0, 1);
@@ -39,12 +72,20 @@ public partial class MainWindow : Window
         VoiceCombo.ItemsSource = VoiceCatalog.Voices;
         VoiceCombo.SelectedIndex = 0;
 
-        var fonts = Fonts.SystemFontFamilies.OrderBy(f => f.Source, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var fonts = Fonts.SystemFontFamilies
+            .OrderBy(f => f.Source, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
         FontCombo.ItemsSource = fonts;
         FontCombo.DisplayMemberPath = "Source";
-        FontCombo.SelectedItem = fonts.FirstOrDefault(f => f.Source.Equals("Segoe UI", StringComparison.OrdinalIgnoreCase)) ?? fonts.FirstOrDefault();
+        FontCombo.SelectedItem =
+            fonts.FirstOrDefault(
+                f => f.Source.Equals("Segoe UI", StringComparison.OrdinalIgnoreCase))
+            ?? fonts.FirstOrDefault();
+
         ThemeCombo.SelectedIndex = 0;
         ViewModeCombo.SelectedIndex = 0;
+
         UpdateVoiceStatus();
         RefreshLibrary();
         Loaded += Window_Loaded;
@@ -58,26 +99,91 @@ public partial class MainWindow : Window
             .FirstOrDefault(x => File.Exists(x.SourcePath));
 
         if (recent != null)
-            await OpenBookPathAsync(recent.SourcePath, resumeProgress: true, switchToContents: false);
+            await OpenBookPathAsync(
+                recent.SourcePath,
+                resumeProgress: true,
+                switchToContents: false,
+                selectTab: true);
     }
+
+    // ---------------------------------------------------------------------
+    // Open / drag-drop / tabs
+    // ---------------------------------------------------------------------
 
     private async void OpenBook_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog
         {
             Filter = "EPUB (*.epub)|*.epub",
-            Multiselect = false
+            Multiselect = true
         };
 
         if (dlg.ShowDialog() != true) return;
-        await OpenBookPathAsync(dlg.FileName, resumeProgress: true, switchToContents: true);
+
+        foreach (var file in dlg.FileNames)
+        {
+            await OpenBookPathAsync(
+                file,
+                resumeProgress: true,
+                switchToContents: true,
+                selectTab: true);
+        }
     }
+
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop)
+            && e.Data.GetData(DataFormats.FileDrop) is string[] files
+            && files.Any(IsEpub))
+        {
+            e.Effects = DragDropEffects.Copy;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+
+        e.Handled = true;
+    }
+
+    private async void Window_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)
+            || e.Data.GetData(DataFormats.FileDrop) is not string[] files)
+            return;
+
+        var epubs = files
+            .Where(IsEpub)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (epubs.Count == 0) return;
+
+        foreach (var file in epubs)
+        {
+            await OpenBookPathAsync(
+                file,
+                resumeProgress: true,
+                switchToContents: true,
+                selectTab: true);
+        }
+    }
+
+    private static bool IsEpub(string path) =>
+        File.Exists(path)
+        && string.Equals(
+            Path.GetExtension(path),
+            ".epub",
+            StringComparison.OrdinalIgnoreCase);
 
     private async Task OpenBookPathAsync(
         string filePath,
         bool resumeProgress,
-        bool switchToContents)
+        bool switchToContents,
+        bool selectTab)
     {
+        filePath = SafeFullPath(filePath);
+
         if (!File.Exists(filePath))
         {
             MessageBox.Show(
@@ -89,41 +195,76 @@ public partial class MainWindow : Window
             return;
         }
 
-        var previous = libraryStore.Find(filePath);
-
-        try
+        if (openBooks.TryGetValue(filePath, out var alreadyOpen))
         {
-            operationCts?.Cancel();
-            StopPlayback(true);
-            Busy("Đang mở EPUB...", true);
-
-            var loadedBook = await EpubService.LoadAsync(filePath);
-            book = loadedBook;
-
-            ChapterList.ItemsSource = book.Chapters;
-            BookTitleText.Text = string.IsNullOrWhiteSpace(book.Author)
-                ? book.Title
-                : $"{book.Title} — {book.Author}";
-
-            LoadBookSettings();
-
-            int resumeIndex = 0;
-            if (resumeProgress && previous != null)
-                resumeIndex = Math.Clamp(previous.LastChapterIndex, 0, Math.Max(0, book.Chapters.Count - 1));
-
-            ChapterList.SelectedIndex = resumeIndex;
-            if (resumeIndex >= 0 && resumeIndex < book.Chapters.Count)
-                ChapterList.ScrollIntoView(book.Chapters[resumeIndex]);
-
-            libraryStore.UpsertBook(book, resumeIndex);
-            RefreshLibrary(book.SourcePath);
+            if (selectTab)
+                BookTabs.SelectedItem = alreadyOpen.Tab;
 
             if (switchToContents)
                 LeftTabs.SelectedIndex = 1;
 
+            return;
+        }
+
+        var previous = libraryStore.Find(filePath);
+
+        try
+        {
+            Busy("Đang mở EPUB...", true);
+
+            var loadedBook = await EpubService.LoadAsync(filePath);
+            var settings = settingsStore.Get(filePath);
+
+            int resumeIndex = 0;
+            if (resumeProgress && previous != null)
+            {
+                resumeIndex = Math.Clamp(
+                    previous.LastChapterIndex,
+                    0,
+                    Math.Max(0, loadedBook.Chapters.Count - 1));
+            }
+
+            var reader = new FlowDocumentReader
+            {
+                ViewingMode = ToViewingMode(settings.ViewMode),
+                IsPrintEnabled = false,
+                IsFindEnabled = true,
+                Margin = new Thickness(8),
+                Background = Brushes.Transparent
+            };
+
+            var tabItem = new TabItem();
+
+            var state = new OpenBookTab
+            {
+                Book = loadedBook,
+                Reader = reader,
+                Tab = tabItem,
+                Settings = settings,
+                ChapterIndex = resumeIndex
+            };
+
+            tabItem.Tag = state;
+            tabItem.Content = reader;
+            tabItem.Header = CreateTabHeader(state);
+
+            openBooks[filePath] = state;
+            BookTabs.Items.Add(tabItem);
+
+            libraryStore.UpsertBook(loadedBook, resumeIndex);
+            RefreshLibrary(filePath);
+
+            if (selectTab)
+                BookTabs.SelectedItem = tabItem;
+
+            if (switchToContents)
+                LeftTabs.SelectedIndex = 1;
+
+            EmptyHint.Visibility = Visibility.Collapsed;
+
             StatusText.Text = previous != null && resumeProgress
-                ? $"Đọc tiếp: {book.Title} • chương {resumeIndex + 1}/{book.Chapters.Count}"
-                : $"Đã mở {book.Title} • {book.Chapters.Count} chương";
+                ? $"Đọc tiếp: {loadedBook.Title} • chương {resumeIndex + 1}/{loadedBook.Chapters.Count}"
+                : $"Đã mở {loadedBook.Title} • {loadedBook.Chapters.Count} chương";
         }
         catch (Exception ex)
         {
@@ -133,6 +274,7 @@ public partial class MainWindow : Window
                 "Không mở được EPUB",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
+
             StatusText.Text = "Mở EPUB thất bại";
         }
         finally
@@ -141,19 +283,117 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ChapterList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private FrameworkElement CreateTabHeader(OpenBookTab state)
     {
-        if (ChapterList.SelectedItem is not BookChapter chapter)
-            return;
-
-        ShowChapter(chapter);
-
-        if (book != null && ChapterList.SelectedIndex >= 0)
+        var panel = new StackPanel
         {
-            libraryStore.UpdateProgress(book, ChapterList.SelectedIndex);
-            RefreshLibrary(book.SourcePath);
+            Orientation = Orientation.Horizontal,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+
+        var title = new TextBlock
+        {
+            Text = ShortTitle(state.Book.Title, 30),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(4, 0, 5, 0)
+        };
+
+        var close = new Button
+        {
+            Content = "×",
+            MinWidth = 24,
+            Width = 24,
+            Height = 24,
+            Padding = new Thickness(0),
+            Margin = new Thickness(2, 0, 0, 0),
+            ToolTip = "Đóng tab"
+        };
+
+        close.Click += (_, e) =>
+        {
+            e.Handled = true;
+            CloseBookTab(state);
+        };
+
+        panel.Children.Add(title);
+        panel.Children.Add(close);
+        return panel;
+    }
+
+    private void CloseBookTab(OpenBookTab state)
+    {
+        if (isPlaybackActive
+            && string.Equals(
+                activePlaybackBookPath,
+                state.Book.SourcePath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            StopPlayback(true);
+        }
+
+        openBooks.Remove(SafeFullPath(state.Book.SourcePath));
+        BookTabs.Items.Remove(state.Tab);
+
+        if (BookTabs.Items.Count == 0)
+        {
+            activeTab = null;
+            book = null;
+            ChapterList.ItemsSource = null;
+            BookTitleText.Text = "Kéo EPUB vào đây để mở";
+            EmptyHint.Visibility = Visibility.Visible;
+            StatusText.Text = "Sẵn sàng";
         }
     }
+
+    private void BookTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BookTabs.SelectedItem is not TabItem tab
+            || tab.Tag is not OpenBookTab state)
+            return;
+
+        if (isPlaybackActive
+            && !string.Equals(
+                activePlaybackBookPath,
+                state.Book.SourcePath,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            StopPlayback(true);
+        }
+
+        activeTab = state;
+        book = state.Book;
+        currentSettings = state.Settings;
+
+        BookTitleText.Text = string.IsNullOrWhiteSpace(book.Author)
+            ? book.Title
+            : $"{book.Title} — {book.Author}";
+
+        suppressChapterSelection = true;
+        try
+        {
+            ChapterList.ItemsSource = book.Chapters;
+            ChapterList.SelectedIndex = Math.Clamp(
+                state.ChapterIndex,
+                0,
+                Math.Max(0, book.Chapters.Count - 1));
+
+            if (ChapterList.SelectedItem != null)
+                ChapterList.ScrollIntoView(ChapterList.SelectedItem);
+        }
+        finally
+        {
+            suppressChapterSelection = false;
+        }
+
+        LoadSettingsIntoControls(state);
+        ShowCurrentChapter(state);
+        libraryStore.UpdateProgress(book, state.ChapterIndex);
+        RefreshLibrary(book.SourcePath);
+    }
+
+    // ---------------------------------------------------------------------
+    // Library
+    // ---------------------------------------------------------------------
 
     private void RefreshLibrary(string? selectPath = null)
     {
@@ -166,9 +406,10 @@ public partial class MainWindow : Window
         {
             var selected = recent.FirstOrDefault(
                 x => string.Equals(
-                    x.SourcePath,
-                    selectPath,
+                    SafeFullPath(x.SourcePath),
+                    SafeFullPath(selectPath),
                     StringComparison.OrdinalIgnoreCase));
+
             if (selected != null)
                 LibraryList.SelectedItem = selected;
         }
@@ -185,10 +426,13 @@ public partial class MainWindow : Window
         await OpenBookPathAsync(
             item.SourcePath,
             resumeProgress: true,
-            switchToContents: true);
+            switchToContents: true,
+            selectTab: true);
     }
 
-    private async void LibraryList_MouseDoubleClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    private async void LibraryList_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
     {
         if (LibraryList.SelectedItem is not BookLibraryItem item)
             return;
@@ -196,7 +440,8 @@ public partial class MainWindow : Window
         await OpenBookPathAsync(
             item.SourcePath,
             resumeProgress: true,
-            switchToContents: true);
+            switchToContents: true,
+            selectTab: true);
     }
 
     private void RemoveFromLibrary_Click(object sender, RoutedEventArgs e)
@@ -219,233 +464,693 @@ public partial class MainWindow : Window
 
         libraryStore.Remove(item.SourcePath);
         RefreshLibrary();
-
         StatusText.Text = "Đã bỏ sách khỏi thư viện";
     }
 
-    private void ShowChapter(BookChapter chapter)
+    // ---------------------------------------------------------------------
+    // Chapters / display
+    // ---------------------------------------------------------------------
+
+    private void ChapterList_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
+        if (suppressChapterSelection || activeTab == null)
+            return;
+
+        if (ChapterList.SelectedIndex < 0
+            || ChapterList.SelectedIndex >= activeTab.Book.Chapters.Count)
+            return;
+
+        activeTab.ChapterIndex = ChapterList.SelectedIndex;
+        ShowCurrentChapter(activeTab);
+
+        libraryStore.UpdateProgress(
+            activeTab.Book,
+            activeTab.ChapterIndex);
+
+        RefreshLibrary(activeTab.Book.SourcePath);
+    }
+
+    private void ShowCurrentChapter(OpenBookTab state)
+    {
+        if (state.Book.Chapters.Count == 0)
+            return;
+
+        state.ChapterIndex = Math.Clamp(
+            state.ChapterIndex,
+            0,
+            state.Book.Chapters.Count - 1);
+
+        ShowChapter(
+            state,
+            state.Book.Chapters[state.ChapterIndex]);
+    }
+
+    private static void ShowChapter(
+        OpenBookTab state,
+        BookChapter chapter)
+    {
+        var settings = state.Settings;
+
         var doc = new FlowDocument
         {
             PagePadding = new Thickness(28, 24, 28, 40),
-            FontFamily = new FontFamily(currentSettings.FontFamily),
-            FontSize = currentSettings.FontSize,
-            LineHeight = currentSettings.LineHeight,
+            FontFamily = new FontFamily(settings.FontFamily),
+            FontSize = settings.FontSize,
+            LineHeight = settings.LineHeight,
             TextAlignment = TextAlignment.Justify
         };
-        var blocks = chapter.Text.Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var blocks = chapter.Text.Split(
+            "\n\n",
+            StringSplitOptions.RemoveEmptyEntries
+            | StringSplitOptions.TrimEntries);
+
         foreach (var text in blocks)
         {
-            doc.Blocks.Add(new Paragraph(new Run(text))
-            {
-                Margin = new Thickness(0, 0, 0, currentSettings.FontSize * 0.65),
-                TextAlignment = TextAlignment.Justify
-            });
+            doc.Blocks.Add(
+                new Paragraph(new Run(text))
+                {
+                    Margin = new Thickness(
+                        0,
+                        0,
+                        0,
+                        settings.FontSize * 0.65),
+                    TextAlignment = TextAlignment.Justify
+                });
         }
-        Reader.Document = doc;
-        ApplyTheme();
+
+        state.Reader.Document = doc;
+        ApplyThemeToReader(state);
     }
+
+    // ---------------------------------------------------------------------
+    // Voice download
+    // ---------------------------------------------------------------------
 
     private async void DownloadVoice_Click(object sender, RoutedEventArgs e)
     {
-        if (VoiceCombo.SelectedItem is not VoiceDefinition voice) return;
+        if (VoiceCombo.SelectedItem is not VoiceDefinition voice)
+            return;
+
         if (tts.IsInstalled(voice))
         {
-            MessageBox.Show(this, "Giọng này đã được tải.", "VietVoice Reader");
+            MessageBox.Show(
+                this,
+                "Giọng này đã được tải.",
+                "VietVoice Reader");
             return;
         }
+
         operationCts?.Cancel();
         operationCts = new CancellationTokenSource();
+
         try
         {
             Busy("Đang tải giọng...", true);
-            await tts.InstallAsync(voice, operationCts.Token);
+            await tts.InstallAsync(
+                voice,
+                operationCts.Token);
+
             UpdateVoiceStatus();
         }
-        catch (OperationCanceledException) { StatusText.Text = "Đã hủy tải"; }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text = "Đã hủy tải";
+        }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Lỗi tải giọng", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                ex.Message,
+                "Lỗi tải giọng",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+
             StatusText.Text = "Tải giọng thất bại";
         }
-        finally { Busy(null, false); }
+        finally
+        {
+            Busy(null, false);
+        }
     }
 
     private void RemoveVoice_Click(object sender, RoutedEventArgs e)
     {
-        if (VoiceCombo.SelectedItem is not VoiceDefinition voice || !tts.IsInstalled(voice)) return;
-        if (MessageBox.Show(this, $"Xóa model {voice.DisplayName}?", "Xóa giọng", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (VoiceCombo.SelectedItem is not VoiceDefinition voice
+            || !tts.IsInstalled(voice))
+            return;
+
+        if (MessageBox.Show(
+                this,
+                $"Xóa model {voice.DisplayName}?",
+                "Xóa giọng",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question)
+            != MessageBoxResult.Yes)
+            return;
+
         StopPlayback(true);
         tts.Remove(voice);
         UpdateVoiceStatus();
         StatusText.Text = "Đã xóa model";
     }
 
-    private void VoiceCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateVoiceStatus();
+    private void VoiceCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e) =>
+        UpdateVoiceStatus();
 
     private void UpdateVoiceStatus()
     {
-        if (VoiceCombo.SelectedItem is not VoiceDefinition voice) return;
+        if (VoiceCombo.SelectedItem is not VoiceDefinition voice)
+            return;
+
         bool installed = tts.IsInstalled(voice);
-        VoiceSourceText.Text = $"Nguồn: {voice.Source}\nTrạng thái: {(installed ? "Đã tải • dùng offline" : "Chưa tải")}";
-        DownloadVoiceButton.Content = installed ? "Đã tải" : "Tải giọng";
-        DownloadVoiceButton.IsEnabled = !installed;
-        RemoveVoiceButton.IsEnabled = installed;
+
+        VoiceSourceText.Text =
+            $"Nguồn: {voice.Source}\n"
+            + $"Trạng thái: {(installed ? "Đã tải • dùng offline" : "Chưa tải")}";
+
+        DownloadVoiceButton.Content =
+            installed ? "Đã tải" : "Tải giọng";
+
+        DownloadVoiceButton.IsEnabled =
+            !installed;
+
+        RemoveVoiceButton.IsEnabled =
+            installed;
     }
+
+    // ---------------------------------------------------------------------
+    // Playback: ONE session, ONE output, small chunks, prefetch next chunk
+    // ---------------------------------------------------------------------
 
     private async void Play_Click(object sender, RoutedEventArgs e)
     {
-        if (ChapterList.SelectedIndex < 0)
-        {
-            MessageBox.Show(this, "Hãy chọn một chương để bắt đầu đọc.");
+        // Hard guard: even if WPF raises the command twice, only one can enter.
+        if (Interlocked.CompareExchange(
+                ref playCommandGate,
+                1,
+                0) != 0)
             return;
+
+        try
+        {
+            if (isPlaybackActive)
+                return;
+
+            if (activeTab == null)
+            {
+                MessageBox.Show(
+                    this,
+                    "Hãy mở sách và chọn một chương.");
+                return;
+            }
+
+            await StartReadingSessionAsync(
+                activeTab,
+                activeTab.ChapterIndex,
+                forceRestart: false);
         }
-
-        await StartChapterPlaybackAsync(ChapterList.SelectedIndex);
+        finally
+        {
+            Interlocked.Exchange(
+                ref playCommandGate,
+                0);
+        }
     }
 
-    private async void PrevChapter_Click(object sender, RoutedEventArgs e)
+    private async void PrevChapter_Click(
+        object sender,
+        RoutedEventArgs e)
     {
-        if (book == null || book.Chapters.Count == 0) return;
-        int target = Math.Max(0, ChapterList.SelectedIndex - 1);
-        await StartChapterPlaybackAsync(target);
+        if (activeTab == null)
+            return;
+
+        int target = Math.Max(
+            0,
+            activeTab.ChapterIndex - 1);
+
+        await StartReadingSessionAsync(
+            activeTab,
+            target,
+            forceRestart: true);
     }
 
-    private async void NextChapter_Click(object sender, RoutedEventArgs e)
+    private async void NextChapter_Click(
+        object sender,
+        RoutedEventArgs e)
     {
-        if (book == null || book.Chapters.Count == 0) return;
-        int current = Math.Max(0, ChapterList.SelectedIndex);
-        int target = Math.Min(book.Chapters.Count - 1, current + 1);
-        await StartChapterPlaybackAsync(target);
+        if (activeTab == null)
+            return;
+
+        int target = Math.Min(
+            activeTab.Book.Chapters.Count - 1,
+            activeTab.ChapterIndex + 1);
+
+        await StartReadingSessionAsync(
+            activeTab,
+            target,
+            forceRestart: true);
     }
 
-    private async Task StartChapterPlaybackAsync(int chapterIndex)
+    private async Task StartReadingSessionAsync(
+        OpenBookTab state,
+        int startChapterIndex,
+        bool forceRestart)
     {
-        if (book == null || chapterIndex < 0 || chapterIndex >= book.Chapters.Count)
+        if (state.Book.Chapters.Count == 0)
             return;
 
         if (VoiceCombo.SelectedItem is not VoiceDefinition voice)
         {
-            MessageBox.Show(this, "Hãy chọn giọng đọc.");
+            MessageBox.Show(
+                this,
+                "Hãy chọn giọng đọc.");
             return;
         }
 
         if (!tts.IsInstalled(voice))
         {
-            MessageBox.Show(this, "Giọng này chưa tải. Bấm “Tải giọng” trước.");
+            MessageBox.Show(
+                this,
+                "Giọng này chưa tải. Bấm “Tải giọng” trước.");
             return;
         }
 
+        if (isPlaybackActive && !forceRestart)
+            return;
+
         StopPlayback(false);
+
         userStopRequested = false;
+        isPlaybackActive = true;
+        activePlaybackBookPath = state.Book.SourcePath;
+
         playbackCts = new CancellationTokenSource();
-        int generation = playbackGeneration;
         var token = playbackCts.Token;
 
-        ChapterList.SelectedIndex = chapterIndex;
-        ChapterList.ScrollIntoView(book.Chapters[chapterIndex]);
-        var chapter = book.Chapters[chapterIndex];
+        int session = ++playbackSessionId;
 
-        string wav = Path.Combine(Path.GetTempPath(), $"vietvoice-preview-{Guid.NewGuid():N}.wav");
+        PlayButton.IsEnabled = false;
+        PrevChapterButton.IsEnabled = true;
+        NextChapterButton.IsEnabled = true;
 
         try
         {
-            Busy($"Đang chuẩn bị {chapter.Title}...", true);
+            bool autoNext = AutoNextCheckBox.IsChecked == true;
+
+            var units = BuildPlaybackUnits(
+                state.Book,
+                startChapterIndex,
+                autoNext);
+
+            if (units.Count == 0)
+                return;
+
+            int currentUnitIndex = 0;
+
+            string? currentWav =
+                await SynthesizeUnitAsync(
+                    units[0],
+                    voice,
+                    session,
+                    token);
+
+            while (currentWav != null
+                   && currentUnitIndex < units.Count
+                   && session == playbackSessionId
+                   && !token.IsCancellationRequested)
+            {
+                var currentUnit = units[currentUnitIndex];
+
+                await Dispatcher.InvokeAsync(() =>
+                {
+                    if (BookTabs.SelectedItem != state.Tab)
+                        BookTabs.SelectedItem = state.Tab;
+
+                    SetActiveChapterFromPlayback(
+                        state,
+                        currentUnit.ChapterIndex);
+
+                    StatusText.Text =
+                        $"Đang đọc {currentUnit.ChapterIndex + 1}/{state.Book.Chapters.Count}"
+                        + $" • đoạn {currentUnit.SegmentIndex + 1}/{currentUnit.SegmentCount}"
+                        + $" • {state.Book.Chapters[currentUnit.ChapterIndex].Title}";
+                });
+
+                Task<string?>? prefetchTask = null;
+
+                if (currentUnitIndex + 1 < units.Count)
+                {
+                    var nextUnit = units[currentUnitIndex + 1];
+                    prefetchTask =
+                        SynthesizeUnitAsync(
+                            nextUnit,
+                            voice,
+                            session,
+                            token);
+                }
+
+                await PlayWaveAsync(
+                    currentWav,
+                    session,
+                    token);
+
+                if (session != playbackSessionId
+                    || token.IsCancellationRequested)
+                    break;
+
+                currentUnitIndex++;
+
+                if (currentUnitIndex >= units.Count)
+                    break;
+
+                currentWav = prefetchTask == null
+                    ? null
+                    : await prefetchTask;
+            }
+
+            if (session == playbackSessionId
+                && !token.IsCancellationRequested
+                && !userStopRequested)
+            {
+                StatusText.Text =
+                    autoNext
+                        ? "Đã đọc hết phần đã chọn / hết sách"
+                        : "Đã đọc xong chương";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (session == playbackSessionId)
+            {
+                MessageBox.Show(
+                    this,
+                    ex.Message,
+                    "Lỗi TTS",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+        finally
+        {
+            if (session == playbackSessionId)
+            {
+                isPlaybackActive = false;
+                activePlaybackBookPath = null;
+                PlayButton.IsEnabled = true;
+            }
+        }
+    }
+
+    private async Task<string?> SynthesizeUnitAsync(
+        PlaybackUnit unit,
+        VoiceDefinition voice,
+        int session,
+        CancellationToken token)
+    {
+        if (session != playbackSessionId
+            || token.IsCancellationRequested)
+            return null;
+
+        string wav = Path.Combine(
+            Path.GetTempPath(),
+            $"vietvoice-segment-{session}-{unit.ChapterIndex}-{unit.SegmentIndex}-{Guid.NewGuid():N}.wav");
+
+        try
+        {
+            if (unit.SegmentIndex == 0)
+            {
+                StatusText.Text =
+                    $"Đang chuẩn bị chương {unit.ChapterIndex + 1}...";
+            }
+
             await tts.SynthesizeToWaveAsync(
                 voice,
-                chapter.Text,
+                unit.Text,
                 (float)SpeedSlider.Value,
                 wav,
                 token);
 
-            if (token.IsCancellationRequested || generation != playbackGeneration)
+            if (session != playbackSessionId
+                || token.IsCancellationRequested)
             {
                 TryDelete(wav);
-                return;
+                return null;
             }
 
-            var localReader = new AudioFileReader(wav);
-            var localOutput = new WaveOutEvent();
-            localOutput.Init(localReader);
-
-            waveReader = localReader;
-            waveOut = localOutput;
-            playbackTempWav = wav;
-
-            localOutput.PlaybackStopped += (_, args) =>
-            {
-                Dispatcher.InvokeAsync(async () =>
-                {
-                    if (generation != playbackGeneration)
-                    {
-                        try { localOutput.Dispose(); } catch { }
-                        try { localReader.Dispose(); } catch { }
-                        TryDelete(wav);
-                        return;
-                    }
-
-                    try { localOutput.Dispose(); } catch { }
-                    try { localReader.Dispose(); } catch { }
-
-                    if (ReferenceEquals(waveOut, localOutput)) waveOut = null;
-                    if (ReferenceEquals(waveReader, localReader)) waveReader = null;
-                    if (string.Equals(playbackTempWav, wav, StringComparison.OrdinalIgnoreCase))
-                        playbackTempWav = null;
-
-                    TryDelete(wav);
-
-                    if (args.Exception != null)
-                    {
-                        StatusText.Text = "Lỗi phát âm thanh: " + args.Exception.Message;
-                        return;
-                    }
-
-                    if (userStopRequested)
-                    {
-                        StatusText.Text = "Đã dừng";
-                        return;
-                    }
-
-                    bool autoNext = AutoNextCheckBox.IsChecked == true;
-                    int next = chapterIndex + 1;
-
-                    if (autoNext && book != null && next < book.Chapters.Count)
-                    {
-                        StatusText.Text = $"Hết {chapter.Title} — đang chuyển sang chương kế...";
-                        await StartChapterPlaybackAsync(next);
-                    }
-                    else if (book != null && next >= book.Chapters.Count)
-                    {
-                        StatusText.Text = "Đã đọc hết sách";
-                    }
-                    else
-                    {
-                        StatusText.Text = "Đã đọc xong " + chapter.Title;
-                    }
-                });
-            };
-
-            localOutput.Play();
-            StatusText.Text = $"Đang đọc {chapterIndex + 1}/{book.Chapters.Count}: {chapter.Title}";
+            return wav;
         }
-        catch (OperationCanceledException)
+        catch
         {
             TryDelete(wav);
-        }
-        catch (Exception ex)
-        {
-            TryDelete(wav);
-            if (generation == playbackGeneration)
-                MessageBox.Show(this, ex.Message, "Lỗi TTS", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            if (generation == playbackGeneration)
-                Busy(null, false);
+            throw;
         }
     }
 
-    private void Stop_Click(object sender, RoutedEventArgs e)
+    private async Task PlayWaveAsync(
+        string wav,
+        int session,
+        CancellationToken token)
+    {
+        if (session != playbackSessionId)
+        {
+            TryDelete(wav);
+            return;
+        }
+
+        // Absolute singleton: dispose any stale output before creating a new one.
+        DisposeCurrentOutput();
+
+        var localReader = new AudioFileReader(wav);
+        var localOutput = new WaveOutEvent();
+
+        localOutput.Init(localReader);
+
+        waveReader = localReader;
+        waveOut = localOutput;
+        playbackTempWav = wav;
+
+        var completion =
+            new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+        int signaled = 0;
+
+        localOutput.PlaybackStopped += (_, args) =>
+        {
+            if (Interlocked.Exchange(
+                    ref signaled,
+                    1) != 0)
+                return;
+
+            if (args.Exception != null)
+                completion.TrySetException(args.Exception);
+            else
+                completion.TrySetResult();
+        };
+
+        using var registration =
+            token.Register(() =>
+            {
+                completion.TrySetCanceled(token);
+                try { localOutput.Stop(); } catch { }
+            });
+
+        try
+        {
+            if (session != playbackSessionId
+                || token.IsCancellationRequested)
+                return;
+
+            localOutput.Play();
+            await completion.Task;
+        }
+        finally
+        {
+            try { localOutput.Stop(); } catch { }
+            try { localOutput.Dispose(); } catch { }
+            try { localReader.Dispose(); } catch { }
+
+            if (ReferenceEquals(waveOut, localOutput))
+                waveOut = null;
+
+            if (ReferenceEquals(waveReader, localReader))
+                waveReader = null;
+
+            if (string.Equals(
+                    playbackTempWav,
+                    wav,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                playbackTempWav = null;
+            }
+
+            TryDelete(wav);
+        }
+    }
+
+    private static List<PlaybackUnit> BuildPlaybackUnits(
+        BookDocument sourceBook,
+        int startChapterIndex,
+        bool autoNext)
+    {
+        var result = new List<PlaybackUnit>();
+
+        int firstChapter = Math.Clamp(
+            startChapterIndex,
+            0,
+            Math.Max(0, sourceBook.Chapters.Count - 1));
+
+        int lastChapter =
+            autoNext
+                ? sourceBook.Chapters.Count - 1
+                : firstChapter;
+
+        for (int chapterIndex = firstChapter;
+             chapterIndex <= lastChapter;
+             chapterIndex++)
+        {
+            var segments = SplitForFastTts(
+                sourceBook.Chapters[chapterIndex].Text);
+
+            for (int i = 0; i < segments.Count; i++)
+            {
+                result.Add(
+                    new PlaybackUnit(
+                        chapterIndex,
+                        i,
+                        segments.Count,
+                        segments[i]));
+            }
+        }
+
+        return result;
+    }
+
+    private static List<string> SplitForFastTts(
+        string text,
+        int maxChars = 320)
+    {
+        text = Regex.Replace(
+            text ?? string.Empty,
+            @"\s+",
+            " ")
+            .Trim();
+
+        if (text.Length == 0)
+            return new List<string>();
+
+        var sentences = Regex.Split(
+            text,
+            @"(?<=[\.!\?…;:])\s+");
+
+        var chunks = new List<string>();
+        var buffer = new StringBuilder();
+
+        void Flush()
+        {
+            var value = buffer.ToString().Trim();
+            if (value.Length > 0)
+                chunks.Add(value);
+            buffer.Clear();
+        }
+
+        foreach (var sentence in sentences)
+        {
+            var s = sentence.Trim();
+            if (s.Length == 0)
+                continue;
+
+            if (s.Length > maxChars)
+            {
+                Flush();
+
+                var words = s.Split(
+                    ' ',
+                    StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var word in words)
+                {
+                    if (buffer.Length > 0
+                        && buffer.Length + 1 + word.Length > maxChars)
+                    {
+                        Flush();
+                    }
+
+                    if (buffer.Length > 0)
+                        buffer.Append(' ');
+
+                    buffer.Append(word);
+                }
+
+                Flush();
+                continue;
+            }
+
+            if (buffer.Length > 0
+                && buffer.Length + 1 + s.Length > maxChars)
+            {
+                Flush();
+            }
+
+            if (buffer.Length > 0)
+                buffer.Append(' ');
+
+            buffer.Append(s);
+        }
+
+        Flush();
+
+        return chunks;
+    }
+
+    private void SetActiveChapterFromPlayback(
+        OpenBookTab state,
+        int chapterIndex)
+    {
+        state.ChapterIndex = Math.Clamp(
+            chapterIndex,
+            0,
+            state.Book.Chapters.Count - 1);
+
+        if (ReferenceEquals(activeTab, state))
+        {
+            suppressChapterSelection = true;
+            try
+            {
+                ChapterList.SelectedIndex =
+                    state.ChapterIndex;
+
+                if (ChapterList.SelectedItem != null)
+                    ChapterList.ScrollIntoView(
+                        ChapterList.SelectedItem);
+            }
+            finally
+            {
+                suppressChapterSelection = false;
+            }
+
+            ShowCurrentChapter(state);
+        }
+
+        libraryStore.UpdateProgress(
+            state.Book,
+            state.ChapterIndex);
+
+        RefreshLibrary(
+            state.Book.SourcePath);
+    }
+
+    private void Stop_Click(
+        object sender,
+        RoutedEventArgs e)
     {
         StopPlayback(true);
         StatusText.Text = "Đã dừng";
@@ -454,12 +1159,23 @@ public partial class MainWindow : Window
     private void StopPlayback(bool userInitiated)
     {
         userStopRequested = userInitiated;
-        playbackGeneration++;
+        isPlaybackActive = false;
+        activePlaybackBookPath = null;
+
+        // Invalidate EVERY old callback/task immediately.
+        playbackSessionId++;
 
         try { playbackCts?.Cancel(); } catch { }
         playbackCts?.Dispose();
         playbackCts = null;
 
+        DisposeCurrentOutput();
+
+        PlayButton.IsEnabled = true;
+    }
+
+    private void DisposeCurrentOutput()
+    {
         var output = waveOut;
         var reader = waveReader;
         var temp = playbackTempWav;
@@ -480,214 +1196,547 @@ public partial class MainWindow : Window
     {
         try
         {
-            if (File.Exists(path)) File.Delete(path);
+            if (File.Exists(path))
+                File.Delete(path);
         }
         catch
         {
         }
     }
 
-    private async void Export_Click(object sender, RoutedEventArgs e)
+    // ---------------------------------------------------------------------
+    // MP3
+    // ---------------------------------------------------------------------
+
+    private async void Export_Click(
+        object sender,
+        RoutedEventArgs e)
     {
-        if (book == null || VoiceCombo.SelectedItem is not VoiceDefinition voice)
+        if (activeTab == null
+            || VoiceCombo.SelectedItem is not VoiceDefinition voice)
         {
-            MessageBox.Show(this, "Hãy mở EPUB và chọn giọng trước.");
+            MessageBox.Show(
+                this,
+                "Hãy mở EPUB và chọn giọng trước.");
             return;
         }
+
+        var exportBook = activeTab.Book;
+
         if (!tts.IsInstalled(voice))
         {
-            MessageBox.Show(this, "Hãy tải giọng trước khi xuất MP3.");
+            MessageBox.Show(
+                this,
+                "Hãy tải giọng trước khi xuất MP3.");
             return;
         }
 
-        var scope = MessageBox.Show(this, "Xuất toàn bộ sách?\n\nYes = toàn bộ sách\nNo = chương đang chọn\nCancel = hủy", "Xuất MP3", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-        if (scope == MessageBoxResult.Cancel) return;
-        bool all = scope == MessageBoxResult.Yes;
+        var scope = MessageBox.Show(
+            this,
+            "Xuất toàn bộ sách?\n\n"
+            + "Yes = toàn bộ sách\n"
+            + "No = chương đang chọn\n"
+            + "Cancel = hủy",
+            "Xuất MP3",
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Question);
+
+        if (scope == MessageBoxResult.Cancel)
+            return;
+
+        bool all =
+            scope == MessageBoxResult.Yes;
+
         bool merge = false;
+
         if (all)
         {
-            var mode = MessageBox.Show(this, "Gộp toàn bộ sách thành 1 file MP3?\n\nYes = 1 file\nNo = mỗi chương 1 file", "Kiểu xuất", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
-            if (mode == MessageBoxResult.Cancel) return;
-            merge = mode == MessageBoxResult.Yes;
+            var mode = MessageBox.Show(
+                this,
+                "Gộp toàn bộ sách thành 1 file MP3?\n\n"
+                + "Yes = 1 file\n"
+                + "No = mỗi chương 1 file",
+                "Kiểu xuất",
+                MessageBoxButton.YesNoCancel,
+                MessageBoxImage.Question);
+
+            if (mode == MessageBoxResult.Cancel)
+                return;
+
+            merge =
+                mode == MessageBoxResult.Yes;
         }
 
-        using var folderDlg = new Forms.FolderBrowserDialog { Description = "Chọn thư mục lưu MP3", UseDescriptionForTitle = true };
-        if (folderDlg.ShowDialog() != Forms.DialogResult.OK) return;
+        using var folderDlg =
+            new Forms.FolderBrowserDialog
+            {
+                Description = "Chọn thư mục lưu MP3",
+                UseDescriptionForTitle = true
+            };
+
+        if (folderDlg.ShowDialog()
+            != Forms.DialogResult.OK)
+            return;
 
         operationCts?.Cancel();
-        operationCts = new CancellationTokenSource();
-        var report = new Progress<(double, string)>(x => { Progress.Value = x.Item1; StatusText.Text = x.Item2; });
+        operationCts =
+            new CancellationTokenSource();
+
+        var report =
+            new Progress<(double, string)>(
+                x =>
+                {
+                    Progress.Value = x.Item1;
+                    StatusText.Text = x.Item2;
+                });
+
         try
         {
+            StopPlayback(true);
             Busy("Đang xuất MP3...", true);
+
             if (all && merge)
-                await exporter.ExportWholeBookAsync(book, voice, (float)SpeedSlider.Value, folderDlg.SelectedPath, report, operationCts.Token);
+            {
+                await exporter.ExportWholeBookAsync(
+                    exportBook,
+                    voice,
+                    (float)SpeedSlider.Value,
+                    folderDlg.SelectedPath,
+                    report,
+                    operationCts.Token);
+            }
             else
             {
-                IEnumerable<BookChapter> chapters = all ? book.Chapters : new[] { (BookChapter)ChapterList.SelectedItem! };
-                await exporter.ExportChaptersAsync(book, chapters, voice, (float)SpeedSlider.Value, folderDlg.SelectedPath, report, operationCts.Token);
+                IEnumerable<BookChapter> chapters =
+                    all
+                        ? exportBook.Chapters
+                        : new[]
+                        {
+                            exportBook.Chapters[
+                                Math.Clamp(
+                                    activeTab.ChapterIndex,
+                                    0,
+                                    exportBook.Chapters.Count - 1)]
+                        };
+
+                await exporter.ExportChaptersAsync(
+                    exportBook,
+                    chapters,
+                    voice,
+                    (float)SpeedSlider.Value,
+                    folderDlg.SelectedPath,
+                    report,
+                    operationCts.Token);
             }
-            MessageBox.Show(this, "Xuất MP3 hoàn tất.", "VietVoice Reader", MessageBoxButton.OK, MessageBoxImage.Information);
+
+            MessageBox.Show(
+                this,
+                "Xuất MP3 hoàn tất.",
+                "VietVoice Reader",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
         }
-        catch (OperationCanceledException) { StatusText.Text = "Đã hủy xuất MP3"; }
+        catch (OperationCanceledException)
+        {
+            StatusText.Text =
+                "Đã hủy xuất MP3";
+        }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Lỗi xuất MP3", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                ex.Message,
+                "Lỗi xuất MP3",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
-        finally { Busy(null, false); }
+        finally
+        {
+            Busy(null, false);
+        }
     }
 
-    private bool TryGetReadContext(out BookChapter chapter, out VoiceDefinition voice)
+    // ---------------------------------------------------------------------
+    // Display settings
+    // ---------------------------------------------------------------------
+
+    private void SpeedSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
     {
-        chapter = null!;
-        voice = null!;
-        if (ChapterList.SelectedItem is not BookChapter c || VoiceCombo.SelectedItem is not VoiceDefinition v)
-        {
-            MessageBox.Show(this, "Hãy mở sách và chọn một chương/giọng đọc.");
-            return false;
-        }
-        if (!tts.IsInstalled(v))
-        {
-            MessageBox.Show(this, "Giọng này chưa tải. Bấm “Tải giọng” trước.");
-            return false;
-        }
-        chapter = c;
-        voice = v;
-        return true;
+        if (SpeedText != null)
+            SpeedText.Text =
+                $"{e.NewValue:0.00}x";
     }
 
-    private void SpeedSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void FontCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
-        if (SpeedText != null) SpeedText.Text = $"{e.NewValue:0.00}x";
-    }
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
 
-    private void FontCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (FontCombo.SelectedItem is FontFamily family)
+        if (FontCombo.SelectedItem
+            is FontFamily family)
         {
-            currentSettings.FontFamily = family.Source;
+            activeTab.Settings.FontFamily =
+                family.Source;
+
+            currentSettings =
+                activeTab.Settings;
+
             RefreshCurrentChapterAndSave();
         }
     }
 
-    private void FontSizeSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void FontSizeSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
     {
-        if (FontSizeText != null) FontSizeText.Text = $"{e.NewValue:0}";
-        currentSettings.FontSize = e.NewValue;
+        if (FontSizeText != null)
+            FontSizeText.Text =
+                $"{e.NewValue:0}";
+
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
+
+        activeTab.Settings.FontSize =
+            e.NewValue;
+
+        currentSettings =
+            activeTab.Settings;
+
         RefreshCurrentChapterAndSave();
     }
 
-    private void LineHeightSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void LineHeightSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
     {
-        if (LineHeightText != null) LineHeightText.Text = $"{e.NewValue:0}";
-        currentSettings.LineHeight = e.NewValue;
+        if (LineHeightText != null)
+            LineHeightText.Text =
+                $"{e.NewValue:0}";
+
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
+
+        activeTab.Settings.LineHeight =
+            e.NewValue;
+
+        currentSettings =
+            activeTab.Settings;
+
         RefreshCurrentChapterAndSave();
     }
 
-    private void ThemeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ThemeCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
-        if (ThemeCombo.SelectedItem is ComboBoxItem item)
-            currentSettings.Theme = item.Content?.ToString() ?? "Sáng";
-        ApplyTheme();
-        SaveCurrentSettings();
-    }
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
 
-    private void ViewModeCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ViewModeCombo.SelectedItem is not ComboBoxItem item) return;
-        currentSettings.ViewMode = item.Content?.ToString() ?? "Cuộn";
-        Reader.ViewingMode = currentSettings.ViewMode switch
+        if (ThemeCombo.SelectedItem
+            is ComboBoxItem item)
         {
-            "1 trang" => FlowDocumentReaderViewingMode.Page,
-            "2 trang" => FlowDocumentReaderViewingMode.TwoPage,
-            _ => FlowDocumentReaderViewingMode.Scroll
-        };
+            activeTab.Settings.Theme =
+                item.Content?.ToString()
+                ?? "Sáng";
+        }
+
+        currentSettings =
+            activeTab.Settings;
+
+        ApplyThemeToReader(activeTab);
         SaveCurrentSettings();
     }
 
-    private void ImportFont_Click(object sender, RoutedEventArgs e)
+    private void ViewModeCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "Font (*.ttf;*.otf)|*.ttf;*.otf" };
-        if (dlg.ShowDialog() != true) return;
+        if (suppressSettingsEvents
+            || activeTab == null
+            || ViewModeCombo.SelectedItem
+                is not ComboBoxItem item)
+            return;
+
+        activeTab.Settings.ViewMode =
+            item.Content?.ToString()
+            ?? "Cuộn";
+
+        activeTab.Reader.ViewingMode =
+            ToViewingMode(
+                activeTab.Settings.ViewMode);
+
+        currentSettings =
+            activeTab.Settings;
+
+        SaveCurrentSettings();
+    }
+
+    private void ImportFont_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        var dlg =
+            new OpenFileDialog
+            {
+                Filter =
+                    "Font (*.ttf;*.otf)|*.ttf;*.otf"
+            };
+
+        if (dlg.ShowDialog() != true)
+            return;
+
         try
         {
-            var families = Fonts.GetFontFamilies(new Uri(dlg.FileName, UriKind.Absolute)).ToList();
-            if (families.Count == 0) throw new InvalidDataException("Không đọc được font này.");
-            var existing = (FontCombo.ItemsSource as IEnumerable<FontFamily>)?.ToList() ?? new List<FontFamily>();
-            existing.AddRange(families.Where(x => existing.All(e => e.Source != x.Source)));
-            FontCombo.ItemsSource = existing.OrderBy(x => x.Source).ToList();
-            FontCombo.SelectedItem = families[0];
-            StatusText.Text = "Đã nạp font: " + families[0].Source;
+            var families =
+                Fonts.GetFontFamilies(
+                    new Uri(
+                        dlg.FileName,
+                        UriKind.Absolute))
+                .ToList();
+
+            if (families.Count == 0)
+                throw new InvalidDataException(
+                    "Không đọc được font này.");
+
+            var existing =
+                (FontCombo.ItemsSource
+                    as IEnumerable<FontFamily>)
+                ?.ToList()
+                ?? new List<FontFamily>();
+
+            existing.AddRange(
+                families.Where(
+                    x => existing.All(
+                        e => e.Source != x.Source)));
+
+            FontCombo.ItemsSource =
+                existing
+                    .OrderBy(x => x.Source)
+                    .ToList();
+
+            FontCombo.SelectedItem =
+                families[0];
+
+            StatusText.Text =
+                "Đã nạp font: "
+                + families[0].Source;
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, ex.Message, "Không nạp được font", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show(
+                this,
+                ex.Message,
+                "Không nạp được font",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
-    private void LoadBookSettings()
+    private void LoadSettingsIntoControls(
+        OpenBookTab state)
     {
-        if (book == null) return;
-        currentSettings = settingsStore.Get(book.SourcePath);
-        FontSizeSlider.Value = currentSettings.FontSize;
-        LineHeightSlider.Value = currentSettings.LineHeight;
-        var fonts = (FontCombo.ItemsSource as IEnumerable<FontFamily>)?.ToList() ?? new();
-        var selected = fonts.FirstOrDefault(f => f.Source.Equals(currentSettings.FontFamily, StringComparison.OrdinalIgnoreCase));
-        if (selected != null) FontCombo.SelectedItem = selected;
-        SelectComboByText(ThemeCombo, currentSettings.Theme);
-        SelectComboByText(ViewModeCombo, currentSettings.ViewMode);
-        if (ChapterList.SelectedItem is BookChapter chapter) ShowChapter(chapter);
+        suppressSettingsEvents = true;
+
+        try
+        {
+            currentSettings =
+                state.Settings;
+
+            FontSizeSlider.Value =
+                state.Settings.FontSize;
+
+            LineHeightSlider.Value =
+                state.Settings.LineHeight;
+
+            var fonts =
+                (FontCombo.ItemsSource
+                    as IEnumerable<FontFamily>)
+                ?.ToList()
+                ?? new();
+
+            var selected =
+                fonts.FirstOrDefault(
+                    f => f.Source.Equals(
+                        state.Settings.FontFamily,
+                        StringComparison.OrdinalIgnoreCase));
+
+            if (selected != null)
+                FontCombo.SelectedItem =
+                    selected;
+
+            SelectComboByText(
+                ThemeCombo,
+                state.Settings.Theme);
+
+            SelectComboByText(
+                ViewModeCombo,
+                state.Settings.ViewMode);
+
+            state.Reader.ViewingMode =
+                ToViewingMode(
+                    state.Settings.ViewMode);
+        }
+        finally
+        {
+            suppressSettingsEvents = false;
+        }
     }
 
-    private static void SelectComboByText(ComboBox combo, string text)
+    private static void SelectComboByText(
+        ComboBox combo,
+        string text)
     {
-        foreach (var item in combo.Items.OfType<ComboBoxItem>())
-            if (string.Equals(item.Content?.ToString(), text, StringComparison.OrdinalIgnoreCase))
+        foreach (var item
+                 in combo.Items
+                     .OfType<ComboBoxItem>())
+        {
+            if (string.Equals(
+                    item.Content?.ToString(),
+                    text,
+                    StringComparison.OrdinalIgnoreCase))
             {
                 combo.SelectedItem = item;
                 return;
             }
+        }
     }
 
     private void RefreshCurrentChapterAndSave()
     {
-        if (ChapterList?.SelectedItem is BookChapter chapter) ShowChapter(chapter);
+        if (activeTab == null)
+            return;
+
+        ShowCurrentChapter(activeTab);
         SaveCurrentSettings();
     }
 
     private void SaveCurrentSettings()
     {
-        if (book != null) settingsStore.Save(book.SourcePath, currentSettings);
-    }
-
-    private void ApplyTheme()
-    {
-        if (Reader == null) return;
-        var (bg, fg) = currentSettings.Theme switch
+        if (activeTab != null)
         {
-            "Tối" => (Color.FromRgb(30, 30, 32), Color.FromRgb(232, 232, 235)),
-            "Sepia" => (Color.FromRgb(244, 236, 216), Color.FromRgb(69, 55, 38)),
-            _ => (Colors.White, Color.FromRgb(32, 32, 34))
-        };
-        Reader.Background = new SolidColorBrush(bg);
-        if (Reader.Document != null)
-        {
-            Reader.Document.Foreground = new SolidColorBrush(fg);
-            Reader.Document.Background = new SolidColorBrush(bg);
+            settingsStore.Save(
+                activeTab.Book.SourcePath,
+                activeTab.Settings);
         }
     }
 
-    private void Busy(string? message, bool busy)
+    private static void ApplyThemeToReader(
+        OpenBookTab state)
     {
-        OpenBookButton.IsEnabled = !busy;
-        PlayButton.IsEnabled = !busy;
-        ExportButton.IsEnabled = !busy;
-        DownloadVoiceButton.IsEnabled = !busy && VoiceCombo.SelectedItem is VoiceDefinition v && !tts.IsInstalled(v);
-        if (!string.IsNullOrWhiteSpace(message)) StatusText.Text = message;
-        if (!busy) Progress.Value = 0;
+        var (bg, fg) =
+            state.Settings.Theme switch
+            {
+                "Tối" =>
+                    (
+                        Color.FromRgb(30, 30, 32),
+                        Color.FromRgb(232, 232, 235)
+                    ),
+                "Sepia" =>
+                    (
+                        Color.FromRgb(244, 236, 216),
+                        Color.FromRgb(69, 55, 38)
+                    ),
+                _ =>
+                    (
+                        Colors.White,
+                        Color.FromRgb(32, 32, 34)
+                    )
+            };
+
+        state.Reader.Background =
+            new SolidColorBrush(bg);
+
+        if (state.Reader.Document != null)
+        {
+            state.Reader.Document.Foreground =
+                new SolidColorBrush(fg);
+
+            state.Reader.Document.Background =
+                new SolidColorBrush(bg);
+        }
     }
 
-    protected override void OnClosed(EventArgs e)
+    private static FlowDocumentReaderViewingMode ToViewingMode(
+        string mode) =>
+        mode switch
+        {
+            "1 trang" =>
+                FlowDocumentReaderViewingMode.Page,
+            "2 trang" =>
+                FlowDocumentReaderViewingMode.TwoPage,
+            _ =>
+                FlowDocumentReaderViewingMode.Scroll
+        };
+
+    // ---------------------------------------------------------------------
+    // UI helpers
+    // ---------------------------------------------------------------------
+
+    private void Busy(
+        string? message,
+        bool busy)
+    {
+        OpenBookButton.IsEnabled =
+            !busy;
+
+        ExportButton.IsEnabled =
+            !busy;
+
+        DownloadVoiceButton.IsEnabled =
+            !busy
+            && VoiceCombo.SelectedItem
+                is VoiceDefinition v
+            && !tts.IsInstalled(v);
+
+        if (!isPlaybackActive)
+            PlayButton.IsEnabled =
+                !busy;
+
+        if (!string.IsNullOrWhiteSpace(message))
+            StatusText.Text = message;
+
+        if (!busy)
+            Progress.Value = 0;
+    }
+
+    private static string SafeFullPath(
+        string path)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch
+        {
+            return path;
+        }
+    }
+
+    private static string ShortTitle(
+        string title,
+        int max)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return "EPUB";
+
+        title = title.Trim();
+
+        return title.Length <= max
+            ? title
+            : title[..Math.Max(1, max - 1)]
+              + "…";
+    }
+
+    protected override void OnClosed(
+        EventArgs e)
     {
         operationCts?.Cancel();
         StopPlayback(true);
