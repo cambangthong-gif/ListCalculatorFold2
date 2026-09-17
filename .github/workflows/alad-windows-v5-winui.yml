@@ -1,0 +1,107 @@
+name: Build ALAD Windows v5 WinUI
+
+on:
+  push:
+    branches: [ alad-windows-v5-fluent ]
+    paths:
+      - 'alad-windows-v5/**'
+      - '.github/workflows/alad-windows-v5-winui.yml'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - rid: win-arm64
+            platform: ARM64
+          - rid: win-x64
+            platform: x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Generate ALAD icon assets
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $dir = Join-Path $PWD 'alad-windows-v5/Assets'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+          $bmp = New-Object System.Drawing.Bitmap 256,256
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.Clear([System.Drawing.Color]::Transparent)
+
+          function RoundedPath([float]$x,[float]$y,[float]$w,[float]$h,[float]$r) {
+            $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+            $d = $r * 2
+            $p.AddArc($x,$y,$d,$d,180,90)
+            $p.AddArc($x+$w-$d,$y,$d,$d,270,90)
+            $p.AddArc($x+$w-$d,$y+$h-$d,$d,$d,0,90)
+            $p.AddArc($x,$y+$h-$d,$d,$d,90,90)
+            $p.CloseFigure()
+            return $p
+          }
+
+          $back = RoundedPath 78 66 160 142 34
+          $backBrush = New-Object System.Drawing.Drawing2D.LinearGradientBrush ([System.Drawing.RectangleF]::new(78,66,160,142)), ([System.Drawing.Color]::FromArgb(244,248,255)), ([System.Drawing.Color]::FromArgb(185,210,255)), 45
+          $g.FillPath($backBrush,$back)
+          $g.FillPolygon((New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(190,211,250))), [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(185,194),[System.Drawing.PointF]::new(218,232),[System.Drawing.PointF]::new(214,190)))
+          $lineBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(106,148,216))
+          $g.FillRoundedRectangle = $null
+          foreach($row in @(@(111,111,88),@(111,143,70),@(111,175,48))) {
+            $rp = RoundedPath $row[0] $row[1] $row[2] 12 6
+            $g.FillPath($lineBrush,$rp)
+            $rp.Dispose()
+          }
+
+          $front = RoundedPath 18 26 180 170 42
+          $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush ([System.Drawing.RectangleF]::new(18,26,180,170)), ([System.Drawing.Color]::FromArgb(28,80,255)), ([System.Drawing.Color]::FromArgb(55,216,255)), 35
+          $g.FillPath($grad,$front)
+          $tailBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(31,119,255))
+          $g.FillPolygon($tailBrush, [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(48,181),[System.Drawing.PointF]::new(40,229),[System.Drawing.PointF]::new(82,189)))
+
+          $waveBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+          $bars = @(@(48,103,12,34),@(72,88,12,64),@(96,67,12,106),@(120,83,12,74),@(144,96,12,48),@(168,106,12,28))
+          foreach($b in $bars){
+            $rp = RoundedPath $b[0] $b[1] $b[2] $b[3] 6
+            $g.FillPath($waveBrush,$rp)
+            $rp.Dispose()
+          }
+
+          $png = Join-Path $dir 'alad.png'
+          $bmp.Save($png,[System.Drawing.Imaging.ImageFormat]::Png)
+
+          $hIcon = $bmp.GetHicon()
+          $ico = [System.Drawing.Icon]::FromHandle($hIcon)
+          $fs = [System.IO.File]::Create((Join-Path $dir 'alad.ico'))
+          $ico.Save($fs)
+          $fs.Close()
+
+          $ico.Dispose(); $g.Dispose(); $bmp.Dispose(); $front.Dispose(); $back.Dispose(); $grad.Dispose(); $backBrush.Dispose(); $lineBrush.Dispose(); $tailBrush.Dispose(); $waveBrush.Dispose()
+
+      - name: Restore
+        run: dotnet restore alad-windows-v5/AladWindowsV5.csproj -r ${{ matrix.rid }} -p:Platform=${{ matrix.platform }}
+
+      - name: Publish WinUI 3 app
+        run: dotnet publish alad-windows-v5/AladWindowsV5.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:Platform=${{ matrix.platform }} -p:WindowsAppSDKSelfContained=true -o out/${{ matrix.rid }}
+
+      - name: Verify output
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter 'ALAD-Windows-v5.exe' -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'ALAD-Windows-v5.exe not found' }
+          Write-Host "Built: $($exe.FullName)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v5-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/**
+          if-no-files-found: error
