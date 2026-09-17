@@ -26,6 +26,12 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     private val _voiceSource = MutableStateFlow("gemini")
     val voiceSource: StateFlow<String> = _voiceSource.asStateFlow()
 
+    private val _ttsEnginePackage = MutableStateFlow("")
+    val ttsEnginePackage: StateFlow<String> = _ttsEnginePackage.asStateFlow()
+
+    private val _ttsVoiceName = MutableStateFlow("")
+    val ttsVoiceName: StateFlow<String> = _ttsVoiceName.asStateFlow()
+
     private val _ttsRate = MutableStateFlow(1.0f)
     val ttsRate: StateFlow<Float> = _ttsRate.asStateFlow()
 
@@ -51,6 +57,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             _dubMode.value = repository.dubModeFlow.first()
             _voiceName.value = repository.voiceNameFlow.first()
             _voiceSource.value = repository.voiceSourceFlow.first()
+            _ttsEnginePackage.value = repository.ttsEnginePackageFlow.first()
+            _ttsVoiceName.value = repository.ttsVoiceNameFlow.first()
             _ttsRate.value = repository.ttsRateFlow.first()
             _manualSyncMs.value = repository.manualSyncMsFlow.first()
             _autoSync.value = repository.autoSyncFlow.first()
@@ -65,6 +73,13 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     fun updateDubMode(value: String) { _dubMode.value = value }
     fun updateVoiceName(value: String) { _voiceName.value = value }
     fun updateVoiceSource(value: String) { _voiceSource.value = value }
+    fun updateTtsEnginePackage(value: String) {
+        if (_ttsEnginePackage.value != value) {
+            _ttsEnginePackage.value = value
+            _ttsVoiceName.value = ""
+        }
+    }
+    fun updateTtsVoiceName(value: String) { _ttsVoiceName.value = value }
     fun updateTtsRate(value: Float) { _ttsRate.value = value.coerceIn(0.70f, 1.50f) }
     fun updateManualSyncMs(value: Int) { _manualSyncMs.value = value.coerceIn(-2000, 5000) }
     fun updateAutoSync(value: Boolean) { _autoSync.value = value }
@@ -79,6 +94,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             repository.updateDubMode(_dubMode.value)
             repository.updateVoiceName(_voiceName.value)
             repository.updateVoiceSource(_voiceSource.value)
+            repository.updateTtsEnginePackage(_ttsEnginePackage.value)
+            repository.updateTtsVoiceName(_ttsVoiceName.value)
             repository.updateTtsRate(_ttsRate.value)
             repository.updateManualSyncMs(_manualSyncMs.value)
             repository.updateAutoSync(_autoSync.value)
