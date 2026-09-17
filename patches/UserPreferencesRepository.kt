@@ -26,6 +26,8 @@ class UserPreferencesRepository(private val context: Context) {
         val DUB_MODE = stringPreferencesKey("dub_mode")
         val VOICE_NAME = stringPreferencesKey("voice_name")
         val VOICE_SOURCE = stringPreferencesKey("voice_source")
+        val TTS_ENGINE_PACKAGE = stringPreferencesKey("tts_engine_package")
+        val TTS_VOICE_NAME = stringPreferencesKey("tts_voice_name")
         val TTS_RATE = floatPreferencesKey("tts_rate")
         val MANUAL_SYNC_MS = intPreferencesKey("manual_sync_ms")
         val AUTO_SYNC = booleanPreferencesKey("auto_sync")
@@ -45,6 +47,8 @@ class UserPreferencesRepository(private val context: Context) {
     val dubModeFlow: Flow<String> = context.dataStore.data.map { it[DUB_MODE] ?: "auto_duck" }
     val voiceNameFlow: Flow<String> = context.dataStore.data.map { it[VOICE_NAME] ?: "Kore" }
     val voiceSourceFlow: Flow<String> = context.dataStore.data.map { it[VOICE_SOURCE] ?: "gemini" }
+    val ttsEnginePackageFlow: Flow<String> = context.dataStore.data.map { it[TTS_ENGINE_PACKAGE] ?: "" }
+    val ttsVoiceNameFlow: Flow<String> = context.dataStore.data.map { it[TTS_VOICE_NAME] ?: "" }
     val ttsRateFlow: Flow<Float> = context.dataStore.data.map {
         (it[TTS_RATE] ?: 1.0f).coerceIn(0.70f, 1.50f)
     }
@@ -67,6 +71,12 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun updateVoiceName(voice: String) { context.dataStore.edit { it[VOICE_NAME] = voice } }
     suspend fun updateVoiceSource(source: String) {
         context.dataStore.edit { it[VOICE_SOURCE] = source }
+    }
+    suspend fun updateTtsEnginePackage(packageName: String) {
+        context.dataStore.edit { it[TTS_ENGINE_PACKAGE] = packageName }
+    }
+    suspend fun updateTtsVoiceName(voiceName: String) {
+        context.dataStore.edit { it[TTS_VOICE_NAME] = voiceName }
     }
     suspend fun updateTtsRate(rate: Float) {
         context.dataStore.edit { it[TTS_RATE] = rate.coerceIn(0.70f, 1.50f) }
