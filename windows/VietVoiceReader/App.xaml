@@ -1,0 +1,17 @@
+<Application x:Class="VietVoiceReader.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+  <Application.Resources>
+    <SolidColorBrush x:Key="AccentBrush" Color="#4F6BED"/>
+    <Style TargetType="Button">
+      <Setter Property="Padding" Value="14,8"/>
+      <Setter Property="Margin" Value="4"/>
+      <Setter Property="MinHeight" Value="36"/>
+    </Style>
+    <Style TargetType="ComboBox">
+      <Setter Property="MinHeight" Value="34"/>
+      <Setter Property="Margin" Value="0,4,0,8"/>
+    </Style>
+  </Application.Resources>
+</Application>
