@@ -19,6 +19,8 @@ class DeviceTtsManager(
     private val queue = ArrayDeque<String>()
 
     private var targetLanguageTag: String = "vi-VN"
+    private var selectedEnginePackage: String = ""
+    private var selectedVoiceName: String = ""
     private var baseRate: Float = 1.0f
     private var volume: Float = 1.0f
     private var catchUpEnabled: Boolean = true
@@ -28,31 +30,59 @@ class DeviceTtsManager(
 
     fun start() {
         stopped = false
-        tts = TextToSpeech(context.applicationContext) { status ->
+        createEngine()
+    }
+
+    @Synchronized
+    private fun createEngine() {
+        ready = false
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
+
+        val listener = TextToSpeech.OnInitListener { status ->
             if (status == TextToSpeech.SUCCESS && !stopped) {
                 ready = true
                 configureEngine()
                 speakNextIfNeeded()
             }
         }
+
+        tts = if (selectedEnginePackage.isBlank()) {
+            TextToSpeech(context.applicationContext, listener)
+        } else {
+            TextToSpeech(context.applicationContext, listener, selectedEnginePackage)
+        }
     }
 
     @Synchronized
     fun configure(
         languageTag: String,
+        enginePackage: String,
+        voiceName: String,
         speechRate: Float,
         outputVolume: Float,
         catchUp: Boolean,
         lowLatency: Boolean,
         maxSpeed: Float
     ) {
+        val newEnginePackage = enginePackage.trim()
+        val engineChanged = selectedEnginePackage != newEnginePackage
+
         targetLanguageTag = normalizeLanguageTag(languageTag)
+        selectedEnginePackage = newEnginePackage
+        selectedVoiceName = voiceName.trim()
         baseRate = speechRate.coerceIn(0.70f, 1.50f)
         volume = outputVolume.coerceIn(0f, 1f)
         catchUpEnabled = catchUp
         lowLatencyEnabled = lowLatency
         maxCatchUpSpeed = maxSpeed.coerceIn(1.0f, 1.35f)
-        if (ready) configureEngine()
+
+        if (ready && engineChanged && !stopped) {
+            createEngine()
+        } else if (ready) {
+            configureEngine()
+        }
     }
 
     private fun normalizeLanguageTag(tag: String): String {
@@ -70,6 +100,14 @@ class DeviceTtsManager(
     private fun configureEngine() {
         val engine = tts ?: return
         engine.language = Locale.forLanguageTag(targetLanguageTag)
+
+        if (selectedVoiceName.isNotBlank()) {
+            val selected = engine.voices?.firstOrNull { it.name == selectedVoiceName }
+            if (selected != null) {
+                engine.voice = selected
+            }
+        }
+
         engine.setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -115,13 +153,10 @@ class DeviceTtsManager(
         val cleaned = text.replace(Regex("\\s+"), " ").trim()
         if (cleaned.isBlank()) return
 
-        val chunks = splitForSpeech(cleaned)
-        chunks.forEach { chunk ->
+        splitForSpeech(cleaned).forEach { chunk ->
             if (chunk.isNotBlank()) queue.addLast(chunk)
         }
 
-        // Live dubbing must stay near the video. If TTS falls far behind, keep the
-        // newest phrases instead of reading a long stale backlog.
         val maxQueued = if (lowLatencyEnabled) 3 else 6
         if (catchUpEnabled) {
             while (queue.size > maxQueued) queue.removeFirst()
@@ -160,7 +195,7 @@ class DeviceTtsManager(
         val backlogFactor = if (catchUpEnabled) {
             when {
                 queue.size >= 3 -> maxCatchUpSpeed
-                queue.size >= 1 -> (1.08f).coerceAtMost(maxCatchUpSpeed)
+                queue.size >= 1 -> 1.08f.coerceAtMost(maxCatchUpSpeed)
                 else -> 1.0f
             }
         } else 1.0f
