@@ -109,6 +109,8 @@ class AudioDubbingForegroundService : Service() {
             val targetLang = prefs.targetLangFlow.first()
             val voiceName = prefs.voiceNameFlow.first()
             val voiceSource = prefs.voiceSourceFlow.first()
+            val ttsEnginePackage = prefs.ttsEnginePackageFlow.first()
+            val ttsVoiceName = prefs.ttsVoiceNameFlow.first()
             val ttsRate = prefs.ttsRateFlow.first()
             val volumeRatio = prefs.volumeRatioFlow.first()
             val dubMode = prefs.dubModeFlow.first()
@@ -132,6 +134,8 @@ class AudioDubbingForegroundService : Service() {
                 deviceTtsManager = DeviceTtsManager(applicationContext).also { manager ->
                     manager.configure(
                         languageTag = targetLang,
+                        enginePackage = ttsEnginePackage,
+                        voiceName = ttsVoiceName,
                         speechRate = ttsRate,
                         outputVolume = volumeRatio,
                         catchUp = catchUp,
@@ -160,7 +164,7 @@ class AudioDubbingForegroundService : Service() {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         android.widget.Toast.makeText(
                             applicationContext,
-                            "ALAD v3: $status",
+                            "ALAD TTS: $status",
                             android.widget.Toast.LENGTH_SHORT
                         ).show()
                     }
@@ -203,8 +207,6 @@ class AudioDubbingForegroundService : Service() {
                         if (firstEmit) {
                             firstEmit = false
                         } else if (newSource != activeVoiceSource) {
-                            // Audio pipeline type changed; restarting capture from UI is safer
-                            // because MediaProjection permission belongs to this foreground session.
                             android.os.Handler(android.os.Looper.getMainLooper()).post {
                                 android.widget.Toast.makeText(
                                     applicationContext,
@@ -337,9 +339,9 @@ class AudioDubbingForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "ALAD TTS Sync v3",
+                "ALAD TTS Select",
                 NotificationManager.IMPORTANCE_LOW
-            ).apply { description = "Real-time dubbing with Gemini or device TTS" }
+            ).apply { description = "Real-time dubbing with selectable Android TTS engine" }
             val notificationManager =
                 getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
@@ -362,8 +364,8 @@ class AudioDubbingForegroundService : Service() {
             android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ALAD TTS Sync v3")
-            .setContentText("Live translate · Gemini / Device TTS")
+            .setContentTitle("ALAD TTS Select")
+            .setContentText("Live translate · selectable device TTS")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
