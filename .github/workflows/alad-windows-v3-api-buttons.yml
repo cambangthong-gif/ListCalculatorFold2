@@ -21,11 +21,11 @@ jobs:
 
       - name: Patch Android-like stream and API key actions
         shell: pwsh
+        env:
+          KEY_UI_B64: "ICAgICAgICB2YXIga2V5SG9zdCA9IG5ldyBUYWJsZUxheW91dFBhbmVsCiAgICAgICAgewogICAgICAgICAgICBEb2NrID0gRG9ja1N0eWxlLlRvcCwKICAgICAgICAgICAgQXV0b1NpemUgPSB0cnVlLAogICAgICAgICAgICBDb2x1bW5Db3VudCA9IDEsCiAgICAgICAgICAgIFJvd0NvdW50ID0gMiwKICAgICAgICAgICAgTWFyZ2luID0gbmV3IFBhZGRpbmcoMCkKICAgICAgICB9OwogICAgICAgIGtleUhvc3QuQ29sdW1uU3R5bGVzLkFkZChuZXcgQ29sdW1uU3R5bGUoU2l6ZVR5cGUuUGVyY2VudCwgMTAwKSk7CiAgICAgICAgYXBpS2V5LkRvY2sgPSBEb2NrU3R5bGUuVG9wOwogICAgICAgIGtleUhvc3QuQ29udHJvbHMuQWRkKGFwaUtleSwgMCwgMCk7CgogICAgICAgIHZhciBrZXlBY3Rpb25zID0gbmV3IEZsb3dMYXlvdXRQYW5lbAogICAgICAgIHsKICAgICAgICAgICAgRG9jayA9IERvY2tTdHlsZS5Ub3AsCiAgICAgICAgICAgIEF1dG9TaXplID0gdHJ1ZSwKICAgICAgICAgICAgV3JhcENvbnRlbnRzID0gdHJ1ZSwKICAgICAgICAgICAgTWFyZ2luID0gbmV3IFBhZGRpbmcoMCwgOCwgMCwgMCkKICAgICAgICB9OwogICAgICAgIHJlbWVtYmVyS2V5Lk1hcmdpbiA9IG5ldyBQYWRkaW5nKDAsIDgsIDE0LCAwKTsKICAgICAgICB2YXIgZ2V0QXBpS2V5ID0gbmV3IEJ1dHRvbgogICAgICAgIHsKICAgICAgICAgICAgVGV4dCA9ICJU4bqhby9M4bqleSBBUEkga2V5IiwKICAgICAgICAgICAgQXV0b1NpemUgPSB0cnVlLAogICAgICAgICAgICBNaW5pbXVtU2l6ZSA9IG5ldyBTaXplKDEzNSwgMzQpLAogICAgICAgICAgICBNYXJnaW4gPSBuZXcgUGFkZGluZygwLCAwLCA4LCAwKQogICAgICAgIH07CiAgICAgICAgdmFyIHBhc3RlQXBpS2V5ID0gbmV3IEJ1dHRvbgogICAgICAgIHsKICAgICAgICAgICAgVGV4dCA9ICJEw6FuIGtleSIsCiAgICAgICAgICAgIEF1dG9TaXplID0gdHJ1ZSwKICAgICAgICAgICAgTWluaW11bVNpemUgPSBuZXcgU2l6ZSg5MCwgMzQpLAogICAgICAgICAgICBNYXJnaW4gPSBuZXcgUGFkZGluZygwKQogICAgICAgIH07CiAgICAgICAgZ2V0QXBpS2V5LkNsaWNrICs9IChfLCBfKSA9PgogICAgICAgIHsKICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIFByb2Nlc3MuU3RhcnQobmV3IFByb2Nlc3NTdGFydEluZm8KICAgICAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgICAgICBGaWxlTmFtZSA9ICJodHRwczovL2Fpc3R1ZGlvLmdvb2dsZS5jb20vYXBwL2FwaWtleSIsCiAgICAgICAgICAgICAgICAgICAgVXNlU2hlbGxFeGVjdXRlID0gdHJ1ZQogICAgICAgICAgICAgICAgfSk7CiAgICAgICAgICAgICAgICBzdGF0dXMuVGV4dCA9ICJEw6MgbOG7nyBHb29nbGUgQUkgU3R1ZGlvIMSR4buDIGPhuqFvL2zhuqV5IEFQSSBrZXkiOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGNhdGNoIChFeGNlcHRpb24gZXgpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIE1lc3NhZ2VCb3guU2hvdyhleC5NZXNzYWdlLCAiS2jDtG5nIG3hu58gxJHGsOG7o2MgR29vZ2xlIEFJIFN0dWRpbyIsIE1lc3NhZ2VCb3hCdXR0b25zLk9LLCBNZXNzYWdlQm94SWNvbi5FcnJvcik7CiAgICAgICAgICAgIH0KICAgICAgICB9OwogICAgICAgIHBhc3RlQXBpS2V5LkNsaWNrICs9IChfLCBfKSA9PgogICAgICAgIHsKICAgICAgICAgICAgdHJ5CiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIGlmICghQ2xpcGJvYXJkLkNvbnRhaW5zVGV4dCgpKQogICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgIE1lc3NhZ2VCb3guU2hvdygiQ2xpcGJvYXJkIGNowrBhIGPDsyBBUEkga2V5LiIsICJBTEFEIFdpbmRvd3MiLCBNZXNzYWdlQm94QnV0dG9ucy5PSywgTWVzc2FnZUJveEljb24uSW5mb3JtYXRpb24pOwogICAgICAgICAgICAgICAgICAgIHJldHVybjsKICAgICAgICAgICAgICAgIH0KICAgICAgICAgICAgICAgIHZhciB2YWx1ZSA9IENsaXBib2FyZC5HZXRUZXh0KCkuVHJpbSgpOwogICAgICAgICAgICAgICAgaWYgKHN0cmluZy5Jc051bGxPcldoaXRlU3BhY2UodmFsdWUpKSByZXR1cm47CiAgICAgICAgICAgICAgICBhcGlLZXkuVGV4dCA9IHZhbHVlOwogICAgICAgICAgICAgICAgaWYgKHJlbWVtYmVyS2V5LkNoZWNrZWQpIFNlY3VyZUtleVN0b3JlLlNhdmUodmFsdWUpOwogICAgICAgICAgICAgICAgc3RhdHVzLlRleHQgPSAiRMOjIGTDpW4gQVBJIGtleSIgKyAocmVtZW1iZXJLZXkuQ2hlY2tlZCA/ICIgdsOgIGzGsHUgYW4gdG/DoG4iIDogIiIpOwogICAgICAgICAgICB9CiAgICAgICAgICAgIGNhdGNoIChFeGNlcHRpb24gZXgpCiAgICAgICAgICAgIHsKICAgICAgICAgICAgICAgIE1lc3NhZ2VCb3guU2hvdyhleC5NZXNzYWdlLCAiS2jDtG5nIGTDpW4gxJHGsOG7o2MgQVBJIGtleSIsIE1lc3NhZ2VCb3hCdXR0b25zLk9LLCBNZXNzYWdlQm94SWNvbi5FcnJvcik7CiAgICAgICAgICAgIH0KICAgICAgICB9OwogICAgICAgIGtleUFjdGlvbnMuQ29udHJvbHMuQWRkKHJlbWVtYmVyS2V5KTsKICAgICAgICBrZXlBY3Rpb25zLkNvbnRyb2xzLkFkZChnZXRBcGlLZXkpOwogICAgICAgIGtleUFjdGlvbnMuQ29udHJvbHMuQWRkKHBhc3RlQXBpS2V5KTsKICAgICAgICBrZXlIb3N0LkNvbnRyb2xzLkFkZChrZXlBY3Rpb25zLCAwLCAxKTsKICAgICAgICBBZGRTZXR0aW5nKHJvb3QsICJHZW1pbmkgQVBJIGtleSIsIGtleUhvc3QpOw=="
         run: |
           $p = 'alad-windows-v2/Program.cs'
           $c = Get-Content $p -Raw
-
-          # Keep the v3 Android-like continuous-stream behavior.
           $c = $c.Replace('ALAD Windows v2 — Live Dubbing', 'ALAD Windows v3.1 — Live Dubbing')
           $c = $c.Replace('ALAD Windows v2', 'ALAD Windows v3.1')
           $c = $c.Replace('Gemini sẵn sàng · Low latency', 'Gemini sẵn sàng · Android-like stream')
@@ -36,91 +36,11 @@ jobs:
           $c = [regex]::Replace($c, $pattern, '        object setup;', 1)
           $c = [regex]::Replace($c, '(?m)^\s*realtimeInputConfig,\s*\r?\n', '')
 
-          # Replace the API key row with a responsive stacked block:
-          # textbox + remember checkbox + Get/Create + Paste buttons.
           $keyPattern = '(?s)        var keyGrid = TwoColumnGrid\(\);\r?\n        apiKey\.Dock = DockStyle\.Fill;\r?\n        rememberKey\.Margin = new Padding\(12, 6, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(apiKey, 0, 0\);\r?\n        keyGrid\.Controls\.Add\(rememberKey, 1, 0\);\r?\n        AddSetting\(root, "Gemini API key", keyGrid\);'
-          $keyReplacement = @'
-        var keyHost = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            ColumnCount = 1,
-            RowCount = 2,
-            Margin = new Padding(0)
-        };
-        keyHost.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        apiKey.Dock = DockStyle.Top;
-        keyHost.Controls.Add(apiKey, 0, 0);
-
-        var keyActions = new FlowLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            AutoSize = true,
-            WrapContents = true,
-            Margin = new Padding(0, 8, 0, 0)
-        };
-        rememberKey.Margin = new Padding(0, 8, 14, 0);
-        var getApiKey = new Button
-        {
-            Text = "Tạo/Lấy API key",
-            AutoSize = true,
-            MinimumSize = new Size(135, 34),
-            Margin = new Padding(0, 0, 8, 0)
-        };
-        var pasteApiKey = new Button
-        {
-            Text = "Dán key",
-            AutoSize = true,
-            MinimumSize = new Size(90, 34),
-            Margin = new Padding(0)
-        };
-        getApiKey.Click += (_, _) =>
-        {
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "https://aistudio.google.com/app/apikey",
-                    UseShellExecute = true
-                });
-                status.Text = "Đã mở Google AI Studio để tạo/lấy API key";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Không mở được Google AI Studio", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        };
-        pasteApiKey.Click += (_, _) =>
-        {
-            try
-            {
-                if (!Clipboard.ContainsText())
-                {
-                    MessageBox.Show("Clipboard chưa có API key.", "ALAD Windows", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    return;
-                }
-                var value = Clipboard.GetText().Trim();
-                if (string.IsNullOrWhiteSpace(value)) return;
-                apiKey.Text = value;
-                if (rememberKey.Checked) SecureKeyStore.Save(value);
-                status.Text = "Đã dán API key" + (rememberKey.Checked ? " và lưu an toàn" : "");
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, "Không dán được API key", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-        };
-        keyActions.Controls.Add(rememberKey);
-        keyActions.Controls.Add(getApiKey);
-        keyActions.Controls.Add(pasteApiKey);
-        keyHost.Controls.Add(keyActions, 0, 1);
-        AddSetting(root, "Gemini API key", keyHost);
-'@
-          $c2 = [regex]::Replace($c, $keyPattern, $keyReplacement, 1)
+          $replacement = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KEY_UI_B64))
+          $c2 = [regex]::Replace($c, $keyPattern, $replacement, 1)
           if ($c2 -eq $c) { throw 'API key UI block was not replaced' }
-          $c = $c2
-
-          Set-Content $p $c -Encoding UTF8
+          Set-Content $p $c2 -Encoding UTF8
 
       - name: Verify patch
         shell: pwsh
