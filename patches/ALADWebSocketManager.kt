@@ -26,8 +26,15 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         private const val TAG = "ALADWebSocketManager"
         private const val GEMINI_WS_URL =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-        private const val MAX_PENDING_AUDIO_CHUNKS = 40
-        private const val MAX_RECONNECT_DELAY_MS = 15_000L
+
+        // Keep only a short slice of source audio while reconnecting. Replaying a long
+        // stale buffer makes the translated voice fall further behind the video.
+        private const val MAX_PENDING_AUDIO_CHUNKS = 10
+
+        // Fast reconnect profile for live dubbing: 0.25s, 0.5s, 1s, 2s, then 4s max.
+        private const val FIRST_RECONNECT_DELAY_MS = 250L
+        private const val MAX_RECONNECT_DELAY_MS = 4_000L
+        private const val GO_AWAY_RECONNECT_DELAY_MS = 100L
     }
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
@@ -79,7 +86,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
         onStatusChanged?.invoke(
             if (reconnectAttempt == 0) "Connecting"
-            else "Reconnecting (${reconnectAttempt})"
+            else "Fast reconnect (${reconnectAttempt})"
         )
 
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
@@ -120,7 +127,11 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
                     val goAway = json.optJSONObject("goAway") ?: json.optJSONObject("go_away")
                     if (goAway != null) {
-                        onStatusChanged?.invoke("Server reconnect pending")
+                        // The server is asking this socket to go away. Do not wait for the
+                        // close callback; proactively open a replacement almost immediately.
+                        isSetupComplete = false
+                        onStatusChanged?.invoke("Server handoff · reconnecting")
+                        scheduleReconnect("server goAway", GO_AWAY_RECONNECT_DELAY_MS)
                         return
                     }
 
@@ -237,8 +248,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         })
                     })
                 })
-                // Native-audio Live models output AUDIO. This provides the translated
-                // text alongside that audio so Android TTS can be used instead.
                 put("outputAudioTranscription", JSONObject())
                 put("contextWindowCompression", JSONObject().apply {
                     put("slidingWindow", JSONObject())
@@ -306,13 +315,16 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     }
 
     @Synchronized
-    private fun scheduleReconnect(reason: String) {
+    private fun scheduleReconnect(reason: String, forcedDelayMs: Long? = null) {
         if (manualDisconnect || reconnectScheduled || currentApiKey.isBlank()) return
         reconnectScheduled = true
         reconnectAttempt++
+
         val exponent = min(reconnectAttempt - 1, 4)
-        val delayMs = min(1_000L shl exponent, MAX_RECONNECT_DELAY_MS)
-        onStatusChanged?.invoke("Reconnecting in ${delayMs / 1000.0}s")
+        val normalDelay = min(FIRST_RECONNECT_DELAY_MS shl exponent, MAX_RECONNECT_DELAY_MS)
+        val delayMs = (forcedDelayMs ?: normalDelay).coerceAtLeast(50L)
+
+        onStatusChanged?.invoke("Reconnecting in ${delayMs}ms")
         reconnectHandler.postDelayed({
             synchronized(this) {
                 reconnectScheduled = false
