@@ -6,7 +6,8 @@ on:
       - alad-reconnect-build
     paths:
       - '.github/workflows/alad-reconnect-build.yml'
-      - 'patches/**'
+      - 'build-trigger.txt'
+  workflow_dispatch:
 
 jobs:
   build:
