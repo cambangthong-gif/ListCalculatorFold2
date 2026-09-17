@@ -59,7 +59,7 @@
           </DockPanel>
 
           <Separator Margin="0,4,0,12"/>
-          <TextBlock Text="Font & hiển thị" FontWeight="Bold" FontSize="18"/>
+          <TextBlock Text="Font &amp; hiển thị" FontWeight="Bold" FontSize="18"/>
           <TextBlock Text="Font chữ" Margin="0,10,0,0"/>
           <ComboBox x:Name="FontCombo" SelectionChanged="FontCombo_SelectionChanged"/>
           <Button Click="ImportFont_Click" Content="Nạp font .TTF / .OTF" HorizontalAlignment="Left"/>
