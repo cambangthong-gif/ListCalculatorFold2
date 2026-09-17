@@ -86,13 +86,20 @@ jobs:
 
           $ico.Dispose(); $g.Dispose(); $bmp.Dispose(); $front.Dispose(); $back.Dispose(); $grad.Dispose(); $backBrush.Dispose(); $lineBrush.Dispose(); $tailBrush.Dispose(); $waveBrush.Dispose()
 
-      - name: Fix WinUI XAML compatibility
+      - name: Fix WinUI and NAudio compatibility
         shell: pwsh
         run: |
-          $path = 'alad-windows-v5/MainWindow.xaml'
-          $xaml = Get-Content $path -Raw
+          $xamlPath = 'alad-windows-v5/MainWindow.xaml'
+          $xaml = Get-Content $xamlPath -Raw
           $xaml = $xaml.Replace(' VerticalScrollBarVisibility="Auto"', ' ScrollViewer.VerticalScrollBarVisibility="Auto"')
-          Set-Content -Path $path -Value $xaml -Encoding utf8
+          Set-Content -Path $xamlPath -Value $xaml -Encoding utf8
+
+          $csPath = 'alad-windows-v5/MainWindow.xaml.cs'
+          $cs = Get-Content $csPath -Raw
+          if ($cs -notmatch 'using NAudio\.CoreAudioApi;') {
+            $cs = $cs.Replace('using NAudio.Wave;', "using NAudio.CoreAudioApi;`r`nusing NAudio.Wave;")
+          }
+          Set-Content -Path $csPath -Value $cs -Encoding utf8
 
       - name: Restore
         run: dotnet restore alad-windows-v5/AladWindowsV5.csproj -r ${{ matrix.rid }} -p:Platform=${{ matrix.platform }}
