@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ALAD TTS Sync v3</string>
+    <string name="app_name_full">ALAD TTS Sync v3</string>
+    <string name="system_status">System Status</string>
+    <string name="status_connected">Live Dubbing Active</string>
+    <string name="status_disconnected">Ready / Disconnected</string>
+    <string name="target_dubbing_language">Target Dubbing Language</string>
+    <string name="select_language">Select Language</string>
+    <string name="no_results_found">No results found</string>
+    <string name="floating_widget">Floating Widget</string>
+    <string name="enable_overlay">Enable overlay to control outside app</string>
+    <string name="grant_permission_widget">Grant permission to use widget</string>
+    <string name="btn_stop">Stop Dubbing</string>
+    <string name="btn_start">Start Dubbing</string>
+    <string name="settings">Settings</string>
+    <string name="gemini_api_key">Gemini API Key</string>
+    <string name="dubbing_volume">Dubbing Volume: %1$d%%</string>
+    <string name="volume_description">Controls the dubbing voice volume.</string>
+    <string name="save_settings">Save Settings</string>
+    <string name="settings_saved">Settings saved</string>
+    <string name="hide">Hide</string>
+    <string name="show">Show</string>
+    <string name="get_api_key">Get Gemini API Key</string>
+    <string name="api_key_guide">To use this app, you need a Gemini API Key from Google AI Studio.</string>
+    <string name="help_title">How to use ALAD TTS Sync v3</string>
+    <string name="help_content">1. Set your Gemini API Key.\n2. Choose target language.\n3. Choose Gemini Voice or Device TTS.\n4. Start dubbing.\n5. Use the floating SYNC controls while watching video.</string>
+    <string name="close">Close</string>
+</resources>
