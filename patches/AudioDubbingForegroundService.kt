@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 import kotlin.math.sqrt
 
@@ -62,6 +63,13 @@ class AudioDubbingForegroundService : Service() {
     private val transcriptBuffer = StringBuilder()
     private var lastTranscriptSnapshot = ""
     private var activeVoiceSource = "gemini"
+
+    // Conservative playback-VAD. It mostly suppresses true/near silence; music and
+    // ambiguous audio are intentionally passed through so spoken words are not clipped.
+    private val vadPreRoll = ArrayDeque<ByteArray>()
+    private var vadSpeechActive = false
+    private var vadHangoverChunks = 0
+    private var vadNoiseFloor = 0.0025f
 
     override fun onCreate() {
         super.onCreate()
@@ -182,7 +190,7 @@ class AudioDubbingForegroundService : Service() {
                 if (activeVoiceSource == "device_tts") processTranscriptFragment(text)
             }
             webSocketManager?.onTurnComplete = {
-                if (activeVoiceSource == "device_tts") flushTranscriptBuffer()
+                if (activeVoiceSource == "device_tts") flushTranscriptBuffer(resetSnapshot = true)
             }
             webSocketManager?.onInterrupted = {
                 synchronized(transcriptBuffer) {
@@ -226,24 +234,61 @@ class AudioDubbingForegroundService : Service() {
             val appUid = applicationInfo.uid
             mediaProjection?.let { projection ->
                 audioCaptureManager?.startCapture(projection, appUid) { pcmData ->
-                    webSocketManager?.sendAudioData(pcmData)
-                    var sum = 0.0
-                    for (i in pcmData.indices step 2) {
-                        if (i + 1 < pcmData.size) {
-                            val sample = (pcmData[i].toInt() and 0xFF) or
-                                (pcmData[i + 1].toInt() shl 8)
-                            val signedSample = sample.toShort().toFloat()
-                            sum += signedSample * signedSample
-                        }
-                    }
-                    val rms = if (pcmData.isNotEmpty()) {
-                        sqrt(sum / (pcmData.size / 2)).toFloat()
-                    } else 0f
-                    val normalized = (rms / 32767f * 3f).coerceIn(0f, 1f)
+                    val normalized = calculateNormalizedLevel(pcmData)
+                    feedAudioThroughVad(pcmData, normalized)
                     val current = audioAmplitude.value
                     audioAmplitude.value = current * 0.5f + normalized * 0.5f
                 }
             }
+        }
+    }
+
+    private fun calculateNormalizedLevel(pcmData: ByteArray): Float {
+        if (pcmData.size < 2) return 0f
+        var sum = 0.0
+        var samples = 0
+        for (i in pcmData.indices step 2) {
+            if (i + 1 < pcmData.size) {
+                val sample = (pcmData[i].toInt() and 0xFF) or (pcmData[i + 1].toInt() shl 8)
+                val signedSample = sample.toShort().toFloat()
+                sum += signedSample * signedSample
+                samples++
+            }
+        }
+        if (samples == 0) return 0f
+        val rms = sqrt(sum / samples).toFloat()
+        return (rms / 32767f * 3f).coerceIn(0f, 1f)
+    }
+
+    @Synchronized
+    private fun feedAudioThroughVad(pcmData: ByteArray, level: Float) {
+        val copy = pcmData.copyOf()
+        vadPreRoll.addLast(copy)
+        while (vadPreRoll.size > 4) vadPreRoll.removeFirst()
+
+        val threshold = maxOf(0.006f, vadNoiseFloor * 2.8f)
+        val voiceOrUsefulAudio = level >= threshold
+
+        if (!vadSpeechActive && !voiceOrUsefulAudio) {
+            vadNoiseFloor = (vadNoiseFloor * 0.97f + level * 0.03f).coerceIn(0.0015f, 0.025f)
+        }
+
+        if (voiceOrUsefulAudio) {
+            if (!vadSpeechActive) {
+                // Send a tiny pre-roll so the first consonant is not clipped.
+                vadPreRoll.forEach { webSocketManager?.sendAudioData(it) }
+                vadPreRoll.clear()
+            } else {
+                webSocketManager?.sendAudioData(copy)
+            }
+            vadSpeechActive = true
+            vadHangoverChunks = 12
+        } else if (vadSpeechActive && vadHangoverChunks > 0) {
+            // Keep enough trailing silence for Gemini to detect the end of speech.
+            webSocketManager?.sendAudioData(copy)
+            vadHangoverChunks--
+        } else {
+            vadSpeechActive = false
         }
     }
 
@@ -254,6 +299,7 @@ class AudioDubbingForegroundService : Service() {
             val delta = when {
                 lastTranscriptSnapshot.isNotBlank() && cleaned.startsWith(lastTranscriptSnapshot) ->
                     cleaned.removePrefix(lastTranscriptSnapshot).trimStart()
+                cleaned == lastTranscriptSnapshot -> ""
                 else -> cleaned
             }
             lastTranscriptSnapshot = cleaned
@@ -263,20 +309,24 @@ class AudioDubbingForegroundService : Service() {
                 }
                 transcriptBuffer.append(delta)
             }
-            val shouldFlush = transcriptBuffer.length >= 80 ||
-                transcriptBuffer.toString().trimEnd().lastOrNull() in listOf('.', '!', '?', '…', ':', ';')
-            if (shouldFlush) flushTranscriptBufferLocked()
+
+            val trimmed = transcriptBuffer.toString().trimEnd()
+            val endChar = trimmed.lastOrNull()
+            val naturalBreak = endChar in listOf('.', '!', '?', '…', ':', ';', ',')
+            val shouldFlush = transcriptBuffer.length >= 48 ||
+                (transcriptBuffer.length >= 24 && naturalBreak)
+            if (shouldFlush) flushTranscriptBufferLocked(resetSnapshot = false)
         }
     }
 
-    private fun flushTranscriptBuffer() {
-        synchronized(transcriptBuffer) { flushTranscriptBufferLocked() }
+    private fun flushTranscriptBuffer(resetSnapshot: Boolean = false) {
+        synchronized(transcriptBuffer) { flushTranscriptBufferLocked(resetSnapshot) }
     }
 
-    private fun flushTranscriptBufferLocked() {
+    private fun flushTranscriptBufferLocked(resetSnapshot: Boolean) {
         val text = transcriptBuffer.toString().trim()
         transcriptBuffer.clear()
-        lastTranscriptSnapshot = ""
+        if (resetSnapshot) lastTranscriptSnapshot = ""
         if (text.isNotBlank()) deviceTtsManager?.enqueueText(text)
     }
 
@@ -320,6 +370,12 @@ class AudioDubbingForegroundService : Service() {
         synchronized(transcriptBuffer) {
             transcriptBuffer.clear()
             lastTranscriptSnapshot = ""
+        }
+        synchronized(this) {
+            vadPreRoll.clear()
+            vadSpeechActive = false
+            vadHangoverChunks = 0
+            vadNoiseFloor = 0.0025f
         }
         audioAmplitude.value = 0f
         queueLatencyMs.value = 0
