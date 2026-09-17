@@ -1,0 +1,49 @@
+name: Build ALAD reconnect APK
+
+on:
+  push:
+    branches:
+      - alad-reconnect-build
+    paths:
+      - '.github/workflows/alad-reconnect-build.yml'
+      - 'patches/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout helper branch
+        uses: actions/checkout@v4
+
+      - name: Clone ALAD Mobile upstream
+        run: git clone --depth 1 https://github.com/navidseyedain/ALAD-Mobile.git alad
+
+      - name: Apply reconnect patches
+        run: |
+          cp patches/ALADWebSocketManager.kt alad/app/src/main/kotlin/com/alad/app/core/network/ALADWebSocketManager.kt
+          cp patches/AudioDubbingForegroundService.kt alad/app/src/main/kotlin/com/alad/app/core/service/AudioDubbingForegroundService.kt
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+          cache-dependency-path: alad/**/*.gradle*
+
+      - name: Build debug APK
+        working-directory: alad
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-Mobile-Reconnect-Fix.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Mobile-Reconnect-Fix
+          path: ALAD-Mobile-Reconnect-Fix.apk
+          if-no-files-found: error
