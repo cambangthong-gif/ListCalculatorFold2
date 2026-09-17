@@ -110,9 +110,13 @@ jobs:
       - name: Verify output
         shell: pwsh
         run: |
-          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter 'ALAD-Windows-v5.exe' -Recurse | Select-Object -First 1
+          $out = "out/${{ matrix.rid }}"
+          $exe = Get-ChildItem $out -Filter 'ALAD-Windows-v5.exe' -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'ALAD-Windows-v5.exe not found' }
+          $pri = Get-ChildItem $out -Filter 'ALAD-Windows-v5.pri' -Recurse | Select-Object -First 1
+          if (-not $pri) { throw 'ALAD-Windows-v5.pri not found - WinUI publish would crash at startup' }
           Write-Host "Built: $($exe.FullName)"
+          Write-Host "PRI:   $($pri.FullName)"
 
       - uses: actions/upload-artifact@v4
         with:
