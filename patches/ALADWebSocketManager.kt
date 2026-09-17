@@ -4,7 +4,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Base64
 import android.util.Log
-import okhttp3.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,28 +29,28 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
 
-    @Volatile
-    private var isSetupComplete = false
-
-    @Volatile
-    private var manualDisconnect = false
-
-    @Volatile
-    private var reconnectScheduled = false
+    @Volatile private var isSetupComplete = false
+    @Volatile private var manualDisconnect = false
+    @Volatile private var reconnectScheduled = false
 
     private var reconnectAttempt = 0
     private var socketGeneration = 0L
-
     private var currentApiKey = ""
     private var currentTargetLang = ""
+    private var currentVoiceName = "Kore"
     private var sessionHandle: String? = null
-
     private val pendingAudio = ArrayDeque<String>()
 
     @Synchronized
-    fun connect(apiKey: String, sourceLang: String, targetLang: String) {
+    fun connect(
+        apiKey: String,
+        sourceLang: String,
+        targetLang: String,
+        voiceName: String = "Kore"
+    ) {
         currentApiKey = apiKey
         currentTargetLang = targetLang
+        currentVoiceName = voiceName.ifBlank { "Kore" }
         manualDisconnect = false
         reconnectScheduled = false
         reconnectAttempt = 0
@@ -83,7 +87,12 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     if (sessionHandle.isNullOrBlank()) "Connected"
                     else "Connected - resuming session"
                 )
-                sendGeminiSetup(ws, currentTargetLang, sessionHandle)
+                sendGeminiSetup(
+                    ws = ws,
+                    targetLang = currentTargetLang,
+                    voiceName = currentVoiceName,
+                    resumeHandle = sessionHandle
+                )
             }
 
             override fun onMessage(ws: WebSocket, text: String) {
@@ -145,13 +154,18 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                                     if (inlineData != null) {
                                         val base64Data = inlineData.optString("data")
                                         if (base64Data.isNotBlank()) {
-                                            val audioBytes =
-                                                Base64.decode(base64Data, Base64.DEFAULT)
+                                            val audioBytes = Base64.decode(base64Data, Base64.DEFAULT)
                                             onBinaryMessageReceived?.invoke(audioBytes)
                                         }
                                     }
                                 }
                             }
+                        }
+
+                        // If Gemini reports that its turn was interrupted, stale generated
+                        // audio should not continue to accumulate client-side.
+                        if (serverContent?.optBoolean("interrupted", false) == true) {
+                            onStatusChanged?.invoke("Gemini interrupted")
                         }
                         return
                     }
@@ -159,7 +173,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     if (json.has("setupComplete") || json.has("setup_complete")) {
                         isSetupComplete = true
                         reconnectAttempt = 0
-                        onStatusChanged?.invoke("Gemini Ready")
+                        onStatusChanged?.invoke("Gemini Ready · $currentVoiceName")
                         flushPendingAudio()
                         return
                     }
@@ -215,6 +229,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private fun sendGeminiSetup(
         ws: WebSocket,
         targetLang: String,
+        voiceName: String,
         resumeHandle: String?
     ) {
         val targetLangCode = targetLang.split("-")[0]
@@ -228,6 +243,13 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     put("translationConfig", JSONObject().apply {
                         put("targetLanguageCode", targetLangCode)
                         put("echoTargetLanguage", true)
+                    })
+                    put("speechConfig", JSONObject().apply {
+                        put("voiceConfig", JSONObject().apply {
+                            put("prebuiltVoiceConfig", JSONObject().apply {
+                                put("voiceName", voiceName)
+                            })
+                        })
                     })
                 })
 
@@ -280,7 +302,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                 })
             })
         }
-
         return webSocket?.send(inputPayload.toString()) == true
     }
 
@@ -302,7 +323,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         for (i in snapshot.indices) {
             if (!sendAudioNow(snapshot[i])) {
                 isSetupComplete = false
-
                 synchronized(this) {
                     for (j in i until snapshot.size) {
                         pendingAudio.addLast(snapshot[j])
@@ -311,7 +331,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         pendingAudio.removeFirst()
                     }
                 }
-
                 scheduleReconnect("pending audio flush failed")
                 return
             }
@@ -324,7 +343,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
         reconnectScheduled = true
         reconnectAttempt++
-
         val exponent = min(reconnectAttempt - 1, 4)
         val delayMs = min(1_000L shl exponent, MAX_RECONNECT_DELAY_MS)
 
@@ -335,7 +353,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             synchronized(this) {
                 reconnectScheduled = false
                 if (manualDisconnect) return@postDelayed
-
                 isSetupComplete = false
                 socketGeneration++
                 webSocket?.cancel()
