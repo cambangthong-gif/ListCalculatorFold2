@@ -8,11 +8,11 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.alad.app.tts.v3"
+        applicationId = "com.alad.app.tts.v31"
         minSdk = 29
         targetSdk = 34
-        versionCode = 3
-        versionName = "1.3.0-tts-sync"
+        versionCode = 31
+        versionName = "1.3.1-tts-select"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
