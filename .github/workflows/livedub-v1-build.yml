@@ -24,8 +24,8 @@ jobs:
         working-directory: LiveDubV1
         run: gradle --no-daemon assembleDebug
       - name: Rename APK
-        run: cp LiveDubV1/app/build/outputs/apk/debug/app-debug.apk LiveDub-Viet-v0.1-debug.apk
+        run: cp LiveDubV1/app/build/outputs/apk/debug/app-debug.apk LiveDub-Viet-v0.2-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: LiveDub-Viet-v0.1-debug
-          path: LiveDub-Viet-v0.1-debug.apk
+          name: LiveDub-Viet-v0.2-debug
+          path: LiveDub-Viet-v0.2-debug.apk
