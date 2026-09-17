@@ -1,4 +1,4 @@
-name: Build ALAD reconnect APK
+name: Build ALAD dubbing modes APK
 
 on:
   push:
@@ -20,10 +20,15 @@ jobs:
       - name: Clone ALAD Mobile upstream
         run: git clone --depth 1 https://github.com/navidseyedain/ALAD-Mobile.git alad
 
-      - name: Apply reconnect patches
+      - name: Apply ALAD v2 patches
         run: |
           cp patches/ALADWebSocketManager.kt alad/app/src/main/kotlin/com/alad/app/core/network/ALADWebSocketManager.kt
           cp patches/AudioDubbingForegroundService.kt alad/app/src/main/kotlin/com/alad/app/core/service/AudioDubbingForegroundService.kt
+          cp patches/AudioPlayerManager.kt alad/app/src/main/kotlin/com/alad/app/core/audio/AudioPlayerManager.kt
+          cp patches/OverlayWidgetService.kt alad/app/src/main/kotlin/com/alad/app/core/service/OverlayWidgetService.kt
+          cp patches/UserPreferencesRepository.kt alad/app/src/main/kotlin/com/alad/app/data/repository/UserPreferencesRepository.kt
+          cp patches/SettingsViewModel.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsViewModel.kt
+          cp patches/SettingsScreen.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -40,11 +45,11 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-Mobile-Reconnect-Fix.apk
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-Mobile-Dubbing-Modes-Sync-v2.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALAD-Mobile-Reconnect-Fix
-          path: ALAD-Mobile-Reconnect-Fix.apk
+          name: ALAD-Mobile-Dubbing-Modes-Sync-v2
+          path: ALAD-Mobile-Dubbing-Modes-Sync-v2.apk
           if-no-files-found: error
