@@ -127,8 +127,6 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
                     val goAway = json.optJSONObject("goAway") ?: json.optJSONObject("go_away")
                     if (goAway != null) {
-                        // The server is asking this socket to go away. Do not wait for the
-                        // close callback; proactively open a replacement almost immediately.
                         isSetupComplete = false
                         onStatusChanged?.invoke("Server handoff · reconnecting")
                         scheduleReconnect("server goAway", GO_AWAY_RECONNECT_DELAY_MS)
@@ -238,7 +236,9 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     put("responseModalities", JSONArray().put("AUDIO"))
                     put("translationConfig", JSONObject().apply {
                         put("targetLanguageCode", targetLangCode)
-                        put("echoTargetLanguage", true)
+                        // Do not parrot audio that is already in the target language.
+                        // For Vietnamese target, Vietnamese source segments stay silent.
+                        put("echoTargetLanguage", false)
                     })
                     put("speechConfig", JSONObject().apply {
                         put("voiceConfig", JSONObject().apply {
