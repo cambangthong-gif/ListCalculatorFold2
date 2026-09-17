@@ -1,0 +1,42 @@
+name: Build ALAD Windows v1 fixed
+
+on:
+  push:
+    branches: [ "alad-windows-v1-build" ]
+    paths:
+      - ".github/workflows/alad-windows-v1-fix.yml"
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Patch NAudio 3 API migration
+        shell: pwsh
+        run: |
+          $p = "alad-windows/Program.cs"
+          $s = Get-Content $p -Raw
+          $s = $s.Replace('outputBuffer = new BufferedWaveProvider(new WaveFormat(24000, 16, 1)) { BufferDuration = TimeSpan.FromSeconds(12), DiscardOnBufferOverflow = true, ReadFully = true };', 'outputBuffer = new BufferedWaveProvider(new WaveFormat(24000, 16, 1)) { DiscardOnBufferOverflow = true, ReadFully = true };')
+          $s = $s.Replace('outputBuffer.Read(temp, 0, temp.Length);', 'outputBuffer.Read(temp.AsSpan());')
+          Set-Content $p $s -Encoding UTF8
+      - name: Restore
+        run: dotnet restore alad-windows/AladWindows.csproj -r ${{ matrix.rid }}
+      - name: Publish
+        run: dotnet publish alad-windows/AladWindows.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+      - name: Rename executable
+        shell: pwsh
+        run: |
+          Copy-Item "out/${{ matrix.rid }}/ALAD-Windows.exe" "out/${{ matrix.rid }}/ALAD-Windows-${{ matrix.rid }}.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-${{ matrix.rid }}.exe
+          if-no-files-found: error
