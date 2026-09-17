@@ -23,6 +23,12 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     private val _voiceName = MutableStateFlow("Kore")
     val voiceName: StateFlow<String> = _voiceName.asStateFlow()
 
+    private val _voiceSource = MutableStateFlow("gemini")
+    val voiceSource: StateFlow<String> = _voiceSource.asStateFlow()
+
+    private val _ttsRate = MutableStateFlow(1.0f)
+    val ttsRate: StateFlow<Float> = _ttsRate.asStateFlow()
+
     private val _manualSyncMs = MutableStateFlow(0)
     val manualSyncMs: StateFlow<Int> = _manualSyncMs.asStateFlow()
 
@@ -44,6 +50,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             _volumeRatio.value = repository.volumeRatioFlow.first()
             _dubMode.value = repository.dubModeFlow.first()
             _voiceName.value = repository.voiceNameFlow.first()
+            _voiceSource.value = repository.voiceSourceFlow.first()
+            _ttsRate.value = repository.ttsRateFlow.first()
             _manualSyncMs.value = repository.manualSyncMsFlow.first()
             _autoSync.value = repository.autoSyncFlow.first()
             _catchUp.value = repository.catchUpFlow.first()
@@ -56,6 +64,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     fun updateVolumeRatio(value: Float) { _volumeRatio.value = value.coerceIn(0f, 1f) }
     fun updateDubMode(value: String) { _dubMode.value = value }
     fun updateVoiceName(value: String) { _voiceName.value = value }
+    fun updateVoiceSource(value: String) { _voiceSource.value = value }
+    fun updateTtsRate(value: Float) { _ttsRate.value = value.coerceIn(0.70f, 1.50f) }
     fun updateManualSyncMs(value: Int) { _manualSyncMs.value = value.coerceIn(-2000, 5000) }
     fun updateAutoSync(value: Boolean) { _autoSync.value = value }
     fun updateCatchUp(value: Boolean) { _catchUp.value = value }
@@ -68,6 +78,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             repository.updateVolumeRatio(_volumeRatio.value)
             repository.updateDubMode(_dubMode.value)
             repository.updateVoiceName(_voiceName.value)
+            repository.updateVoiceSource(_voiceSource.value)
+            repository.updateTtsRate(_ttsRate.value)
             repository.updateManualSyncMs(_manualSyncMs.value)
             repository.updateAutoSync(_autoSync.value)
             repository.updateCatchUp(_catchUp.value)
