@@ -13,40 +13,30 @@ import kotlinx.coroutines.launch
 class SettingsViewModel(private val repository: UserPreferencesRepository) : ViewModel() {
     private val _apiKey = MutableStateFlow("")
     val apiKey: StateFlow<String> = _apiKey.asStateFlow()
-
     private val _volumeRatio = MutableStateFlow(1.0f)
     val volumeRatio: StateFlow<Float> = _volumeRatio.asStateFlow()
-
+    private val _originalVolume = MutableStateFlow(0.35f)
+    val originalVolume: StateFlow<Float> = _originalVolume.asStateFlow()
     private val _dubMode = MutableStateFlow("auto_duck")
     val dubMode: StateFlow<String> = _dubMode.asStateFlow()
-
     private val _voiceName = MutableStateFlow("Kore")
     val voiceName: StateFlow<String> = _voiceName.asStateFlow()
-
     private val _voiceSource = MutableStateFlow("gemini")
     val voiceSource: StateFlow<String> = _voiceSource.asStateFlow()
-
     private val _ttsEnginePackage = MutableStateFlow("")
     val ttsEnginePackage: StateFlow<String> = _ttsEnginePackage.asStateFlow()
-
     private val _ttsVoiceName = MutableStateFlow("")
     val ttsVoiceName: StateFlow<String> = _ttsVoiceName.asStateFlow()
-
     private val _ttsRate = MutableStateFlow(1.0f)
     val ttsRate: StateFlow<Float> = _ttsRate.asStateFlow()
-
     private val _manualSyncMs = MutableStateFlow(0)
     val manualSyncMs: StateFlow<Int> = _manualSyncMs.asStateFlow()
-
     private val _autoSync = MutableStateFlow(true)
     val autoSync: StateFlow<Boolean> = _autoSync.asStateFlow()
-
     private val _catchUp = MutableStateFlow(true)
     val catchUp: StateFlow<Boolean> = _catchUp.asStateFlow()
-
     private val _lowLatency = MutableStateFlow(true)
     val lowLatency: StateFlow<Boolean> = _lowLatency.asStateFlow()
-
     private val _maxCatchUpSpeed = MutableStateFlow(1.15f)
     val maxCatchUpSpeed: StateFlow<Float> = _maxCatchUpSpeed.asStateFlow()
 
@@ -54,6 +44,7 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
         viewModelScope.launch {
             _apiKey.value = repository.apiKeyFlow.first()
             _volumeRatio.value = repository.volumeRatioFlow.first()
+            _originalVolume.value = repository.originalVolumeFlow.first()
             _dubMode.value = repository.dubModeFlow.first()
             _voiceName.value = repository.voiceNameFlow.first()
             _voiceSource.value = repository.voiceSourceFlow.first()
@@ -68,29 +59,31 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
         }
     }
 
-    fun updateApiKey(value: String) { _apiKey.value = value }
-    fun updateVolumeRatio(value: Float) { _volumeRatio.value = value.coerceIn(0f, 1f) }
-    fun updateDubMode(value: String) { _dubMode.value = value }
-    fun updateVoiceName(value: String) { _voiceName.value = value }
-    fun updateVoiceSource(value: String) { _voiceSource.value = value }
-    fun updateTtsEnginePackage(value: String) {
-        if (_ttsEnginePackage.value != value) {
-            _ttsEnginePackage.value = value
+    fun updateApiKey(v: String) { _apiKey.value = v }
+    fun updateVolumeRatio(v: Float) { _volumeRatio.value = v.coerceIn(0f, 1f) }
+    fun updateOriginalVolume(v: Float) { _originalVolume.value = v.coerceIn(0f, 1f) }
+    fun updateDubMode(v: String) { _dubMode.value = v }
+    fun updateVoiceName(v: String) { _voiceName.value = v }
+    fun updateVoiceSource(v: String) { _voiceSource.value = v }
+    fun updateTtsEnginePackage(v: String) {
+        if (_ttsEnginePackage.value != v) {
+            _ttsEnginePackage.value = v
             _ttsVoiceName.value = ""
         }
     }
-    fun updateTtsVoiceName(value: String) { _ttsVoiceName.value = value }
-    fun updateTtsRate(value: Float) { _ttsRate.value = value.coerceIn(0.70f, 1.50f) }
-    fun updateManualSyncMs(value: Int) { _manualSyncMs.value = value.coerceIn(-2000, 5000) }
-    fun updateAutoSync(value: Boolean) { _autoSync.value = value }
-    fun updateCatchUp(value: Boolean) { _catchUp.value = value }
-    fun updateLowLatency(value: Boolean) { _lowLatency.value = value }
-    fun updateMaxCatchUpSpeed(value: Float) { _maxCatchUpSpeed.value = value.coerceIn(1.0f, 1.30f) }
+    fun updateTtsVoiceName(v: String) { _ttsVoiceName.value = v }
+    fun updateTtsRate(v: Float) { _ttsRate.value = v.coerceIn(0.70f, 1.50f) }
+    fun updateManualSyncMs(v: Int) { _manualSyncMs.value = v.coerceIn(-2000, 5000) }
+    fun updateAutoSync(v: Boolean) { _autoSync.value = v }
+    fun updateCatchUp(v: Boolean) { _catchUp.value = v }
+    fun updateLowLatency(v: Boolean) { _lowLatency.value = v }
+    fun updateMaxCatchUpSpeed(v: Float) { _maxCatchUpSpeed.value = v.coerceIn(1.0f, 1.30f) }
 
     fun saveSettings() {
         viewModelScope.launch {
             repository.updateApiKey(_apiKey.value)
             repository.updateVolumeRatio(_volumeRatio.value)
+            repository.updateOriginalVolume(_originalVolume.value)
             repository.updateDubMode(_dubMode.value)
             repository.updateVoiceName(_voiceName.value)
             repository.updateVoiceSource(_voiceSource.value)
@@ -106,13 +99,10 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     }
 }
 
-class SettingsViewModelFactory(
-    private val repository: UserPreferencesRepository
-) : ViewModelProvider.Factory {
+class SettingsViewModelFactory(private val repository: UserPreferencesRepository) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(SettingsViewModel::class.java)) {
-            @Suppress("UNCHECKED_CAST")
-            return SettingsViewModel(repository) as T
+            @Suppress("UNCHECKED_CAST") return SettingsViewModel(repository) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }
