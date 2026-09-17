@@ -1,4 +1,4 @@
-name: Build ALAD TTS Select v3.1 APK
+name: Build ALAD TTS Select v3.2 APK
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - name: Clone ALAD Mobile upstream
         run: git clone --depth 1 https://github.com/navidseyedain/ALAD-Mobile.git alad
 
-      - name: Apply ALAD TTS Select v3.1 patches
+      - name: Apply ALAD TTS Select v3.2 patches
         run: |
           cp patches/build.gradle.kts alad/app/build.gradle.kts
           cp patches/AndroidManifest.xml alad/app/src/main/AndroidManifest.xml
@@ -34,6 +34,53 @@ jobs:
           cp patches/UserPreferencesRepository.kt alad/app/src/main/kotlin/com/alad/app/data/repository/UserPreferencesRepository.kt
           cp patches/SettingsViewModel.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsViewModel.kt
           cp patches/SettingsScreen.kt alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Keep the same applicationId as v3.1 so this APK updates v3.1,
+          # while v2 and v3 remain installed separately.
+          p = Path('alad/app/build.gradle.kts')
+          s = p.read_text()
+          s = s.replace('versionCode = 31', 'versionCode = 32')
+          s = s.replace('versionName = "1.3.1-tts-select"', 'versionName = "1.3.2-original-volume"')
+          p.write_text(s)
+
+          p = Path('alad/app/src/main/res/values/strings.xml')
+          s = p.read_text().replace('ALAD TTS Select v3.1', 'ALAD TTS Select v3.2')
+          p.write_text(s)
+
+          # Wire original-volume preference into the foreground service.
+          p = Path('alad/app/src/main/kotlin/com/alad/app/core/service/AudioDubbingForegroundService.kt')
+          s = p.read_text()
+          s = s.replace(
+              'val volumeRatio = prefs.volumeRatioFlow.first()\n            val dubMode = prefs.dubModeFlow.first()',
+              'val volumeRatio = prefs.volumeRatioFlow.first()\n            val originalVolume = prefs.originalVolumeFlow.first()\n            val dubMode = prefs.dubModeFlow.first()'
+          )
+          s = s.replace(
+              'outputVolume = volumeRatio,\n                        catchUp = catchUp,',
+              'outputVolume = volumeRatio,\n                        originalLevel = originalVolume,\n                        mode = dubMode,\n                        catchUp = catchUp,'
+          )
+          s = s.replace(
+              'volume = volumeRatio,\n                        syncMs = manualSync,',
+              'volume = volumeRatio,\n                        originalLevel = originalVolume,\n                        syncMs = manualSync,'
+          )
+          p.write_text(s)
+
+          # Add original-audio slider to Settings.
+          p = Path('alad/app/src/main/kotlin/com/alad/app/presentation/settings/SettingsScreen.kt')
+          s = p.read_text()
+          s = s.replace(
+              'val aiVolume by viewModel.volumeRatio.collectAsState()\n    val dubMode',
+              'val aiVolume by viewModel.volumeRatio.collectAsState()\n    val originalVolume by viewModel.originalVolume.collectAsState()\n    val dubMode'
+          )
+          needle = '''                    Slider(\n                        value = aiVolume,\n                        onValueChange = viewModel::updateVolumeRatio,\n                        valueRange = 0.20f..1.0f\n                    )'''
+          insert = needle + '''\n\n                    Spacer(modifier = Modifier.height(14.dp))\n                    SettingLabel("Âm lượng tiếng gốc ${(originalVolume * 100).roundToInt()}%")\n                    Slider(\n                        value = originalVolume,\n                        onValueChange = viewModel::updateOriginalVolume,\n                        valueRange = 0f..1.0f\n                    )\n                    Text(\n                        "100% = giữ nguyên tiếng gốc; khoảng 20–70% = yêu cầu app nguồn tự duck khi tiếng lồng phát; 0–15% = ưu tiên tiếng lồng mạnh nhất. Mức giảm thực tế phụ thuộc YouTube/X và cơ chế Audio Focus của Android.",\n                        color = TextSecondary,\n                        fontSize = 12.sp,\n                        lineHeight = 18.sp\n                    )'''
+          if needle not in s:
+              raise SystemExit('Could not find AI volume slider insertion point')
+          s = s.replace(needle, insert, 1)
+          p.write_text(s)
+          PY
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -50,11 +97,11 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v3.1.apk
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v3.2.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALAD-TTS-Select-v3.1
-          path: ALAD-TTS-Select-v3.1.apk
+          name: ALAD-TTS-Select-v3.2
+          path: ALAD-TTS-Select-v3.2.apk
           if-no-files-found: error
