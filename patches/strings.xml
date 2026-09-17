@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ALAD TTS Sync v3</string>
-    <string name="app_name_full">ALAD TTS Sync v3</string>
+    <string name="app_name">ALAD TTS Select v3.1</string>
+    <string name="app_name_full">ALAD TTS Select v3.1</string>
     <string name="system_status">System Status</string>
     <string name="status_connected">Live Dubbing Active</string>
     <string name="status_disconnected">Ready / Disconnected</string>
@@ -23,7 +23,7 @@
     <string name="show">Show</string>
     <string name="get_api_key">Get Gemini API Key</string>
     <string name="api_key_guide">To use this app, you need a Gemini API Key from Google AI Studio.</string>
-    <string name="help_title">How to use ALAD TTS Sync v3</string>
-    <string name="help_content">1. Set your Gemini API Key.\n2. Choose target language.\n3. Choose Gemini Voice or Device TTS.\n4. Start dubbing.\n5. Use the floating SYNC controls while watching video.</string>
+    <string name="help_title">How to use ALAD TTS Select v3.1</string>
+    <string name="help_content">1. Set Gemini API Key.\n2. Choose target language.\n3. Choose Device TTS.\n4. Choose TTS engine and voice like a reader app.\n5. Start dubbing and use floating SYNC controls.</string>
     <string name="close">Close</string>
 </resources>
