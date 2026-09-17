@@ -86,6 +86,14 @@ jobs:
 
           $ico.Dispose(); $g.Dispose(); $bmp.Dispose(); $front.Dispose(); $back.Dispose(); $grad.Dispose(); $backBrush.Dispose(); $lineBrush.Dispose(); $tailBrush.Dispose(); $waveBrush.Dispose()
 
+      - name: Fix WinUI XAML compatibility
+        shell: pwsh
+        run: |
+          $path = 'alad-windows-v5/MainWindow.xaml'
+          $xaml = Get-Content $path -Raw
+          $xaml = $xaml.Replace(' VerticalScrollBarVisibility="Auto"', ' ScrollViewer.VerticalScrollBarVisibility="Auto"')
+          Set-Content -Path $path -Value $xaml -Encoding utf8
+
       - name: Restore
         run: dotnet restore alad-windows-v5/AladWindowsV5.csproj -r ${{ matrix.rid }} -p:Platform=${{ matrix.platform }}
 
