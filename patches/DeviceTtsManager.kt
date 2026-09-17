@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Bundle
+import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.util.ArrayDeque
@@ -15,10 +16,12 @@ class DeviceTtsManager(
     private val context: Context,
     private val onSpeakingChanged: (Boolean) -> Unit = {}
 ) {
+    private data class TtsItem(val text: String, val queuedAtMs: Long)
+
     private var tts: TextToSpeech? = null
     private var ready = false
     private var stopped = false
-    private val queue = ArrayDeque<String>()
+    private val queue = ArrayDeque<TtsItem>()
 
     private var targetLanguageTag = "vi-VN"
     private var selectedEnginePackage = ""
@@ -142,20 +145,30 @@ class DeviceTtsManager(
         if (stopped) return
         val cleaned = text.replace(Regex("\\s+"), " ").trim()
         if (cleaned.isBlank()) return
-        splitForSpeech(cleaned).forEach { if (it.isNotBlank()) queue.addLast(it) }
-        val maxQueued = if (lowLatencyEnabled) 3 else 6
+        val now = SystemClock.elapsedRealtime()
+        splitForSpeech(cleaned).forEach {
+            if (it.isNotBlank()) queue.addLast(TtsItem(it, now))
+        }
+
+        // Keep the live edge. Old TTS is worse than skipping a stale phrase.
+        val maxQueued = if (lowLatencyEnabled) 4 else 7
         if (catchUpEnabled) while (queue.size > maxQueued) queue.removeFirst()
+        trimStaleQueue()
         speakNextIfNeeded()
     }
 
     private fun splitForSpeech(text: String): List<String> {
-        if (text.length <= 110) return listOf(text)
+        if (text.length <= 72) return listOf(text)
         val out = mutableListOf<String>()
         var remaining = text
-        while (remaining.length > 110) {
-            val window = remaining.take(110)
-            val cut = listOf(window.lastIndexOf('.'), window.lastIndexOf('!'), window.lastIndexOf('?'), window.lastIndexOf(','), window.lastIndexOf(';'), window.lastIndexOf(' '))
-                .maxOrNull()?.takeIf { it >= 45 } ?: 110
+        while (remaining.length > 72) {
+            val window = remaining.take(72)
+            val cuts = listOf(
+                window.lastIndexOf('.'), window.lastIndexOf('!'), window.lastIndexOf('?'),
+                window.lastIndexOf('…'), window.lastIndexOf(','), window.lastIndexOf(';'),
+                window.lastIndexOf(':'), window.lastIndexOf(' ')
+            )
+            val cut = cuts.maxOrNull()?.takeIf { it >= 24 } ?: 72
             out += remaining.substring(0, (cut + 1).coerceAtMost(remaining.length)).trim()
             remaining = remaining.substring((cut + 1).coerceAtMost(remaining.length)).trim()
         }
@@ -164,21 +177,37 @@ class DeviceTtsManager(
     }
 
     @Synchronized
+    private fun trimStaleQueue() {
+        if (!catchUpEnabled || queue.size <= 1) return
+        val now = SystemClock.elapsedRealtime()
+        val staleLimit = if (lowLatencyEnabled) 1_600L else 2_600L
+        while (queue.size > 1 && now - (queue.firstOrNull()?.queuedAtMs ?: now) > staleLimit) {
+            queue.removeFirst()
+        }
+    }
+
+    @Synchronized
     private fun speakNextIfNeeded() {
         if (!ready || stopped || speaking || queue.isEmpty()) return
+        trimStaleQueue()
         val engine = tts ?: return
-        val text = queue.removeFirst()
+        val item = queue.removeFirst()
+        val ageMs = (SystemClock.elapsedRealtime() - item.queuedAtMs).coerceAtLeast(0L)
+
         val backlogFactor = if (catchUpEnabled) when {
-            queue.size >= 3 -> maxCatchUpSpeed
-            queue.size >= 1 -> 1.08f.coerceAtMost(maxCatchUpSpeed)
+            ageMs >= 1_400L -> maxCatchUpSpeed
+            ageMs >= 850L -> 1.18f.coerceAtMost(maxCatchUpSpeed)
+            ageMs >= 400L || queue.size >= 2 -> 1.10f.coerceAtMost(maxCatchUpSpeed)
+            queue.isNotEmpty() -> 1.05f.coerceAtMost(maxCatchUpSpeed)
             else -> 1.0f
         } else 1.0f
-        engine.setSpeechRate((baseRate * backlogFactor).coerceIn(0.70f, 1.60f))
+
+        engine.setSpeechRate((baseRate * backlogFactor).coerceIn(0.70f, 1.65f))
         val params = Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, volume) }
         speaking = true
         acquireFocusForSpeech()
         onSpeakingChanged(true)
-        if (engine.speak(text, TextToSpeech.QUEUE_FLUSH, params, "alad_tts_${UUID.randomUUID()}") == TextToSpeech.ERROR) {
+        if (engine.speak(item.text, TextToSpeech.QUEUE_FLUSH, params, "alad_tts_${UUID.randomUUID()}") == TextToSpeech.ERROR) {
             speaking = false
             releaseFocus()
             onSpeakingChanged(false)
