@@ -8,8 +8,11 @@ namespace VietVoiceReader.Services;
 
 public sealed class TtsService : IDisposable
 {
+    private const string EspeakArchiveUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/espeak-ng-data.tar.bz2";
+
     private readonly HttpClient http = new(new HttpClientHandler { AllowAutoRedirect = true });
     private readonly string modelsRoot;
+    private readonly string commonRoot;
     private OfflineTts? cachedTts;
     private string? cachedVoiceId;
 
@@ -17,8 +20,11 @@ public sealed class TtsService : IDisposable
 
     public TtsService()
     {
-        modelsRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VietVoiceReader", "Models");
+        var appRoot = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VietVoiceReader");
+        modelsRoot = Path.Combine(appRoot, "Models");
+        commonRoot = Path.Combine(appRoot, "Common");
         Directory.CreateDirectory(modelsRoot);
+        Directory.CreateDirectory(commonRoot);
         http.Timeout = TimeSpan.FromMinutes(30);
         http.DefaultRequestHeaders.UserAgent.ParseAdd("VietVoiceReader/1.0");
     }
@@ -26,9 +32,13 @@ public sealed class TtsService : IDisposable
     public bool IsInstalled(VoiceDefinition voice)
     {
         var folder = VoiceFolder(voice);
-        return Directory.Exists(folder)
+        bool filesOk = Directory.Exists(folder)
             && Directory.EnumerateFiles(folder, "*.onnx", SearchOption.AllDirectories).Any()
             && Directory.EnumerateFiles(folder, "tokens.txt", SearchOption.AllDirectories).Any();
+
+        if (!filesOk) return false;
+        if (!RequiresSharedEspeak(voice)) return true;
+        return Directory.Exists(SharedEspeakPath) && Directory.EnumerateFiles(SharedEspeakPath, "*", SearchOption.AllDirectories).Any();
     }
 
     public async Task InstallAsync(VoiceDefinition voice, CancellationToken cancellationToken)
@@ -41,27 +51,50 @@ public sealed class TtsService : IDisposable
             var archivePath = Path.Combine(folder, "voice.tar.bz2");
             await DownloadAsync(voice.ArchiveUrl!, archivePath, cancellationToken);
             ProgressChanged?.Invoke(0.93, "Đang giải nén model...");
-            await Task.Run(() =>
-            {
-                ArchiveFactory.WriteToDirectory(
-                    archivePath,
-                    folder,
-                    new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
-            }, cancellationToken);
+            await ExtractAsync(archivePath, folder, cancellationToken);
             File.Delete(archivePath);
         }
         else
         {
             if (string.IsNullOrWhiteSpace(voice.ModelUrl) || string.IsNullOrWhiteSpace(voice.TokensUrl))
                 throw new InvalidOperationException("Giọng này chưa có nguồn model hợp lệ.");
-            await DownloadAsync(voice.ModelUrl!, Path.Combine(folder, voice.ModelFileName), cancellationToken, 0.0, 0.9);
-            await DownloadAsync(voice.TokensUrl!, Path.Combine(folder, "tokens.txt"), cancellationToken, 0.9, 0.99);
+
+            await DownloadAsync(voice.ModelUrl!, Path.Combine(folder, voice.ModelFileName), cancellationToken, 0.0, 0.78);
+            await DownloadAsync(voice.TokensUrl!, Path.Combine(folder, "tokens.txt"), cancellationToken, 0.78, 0.04);
+            await EnsureSharedEspeakAsync(cancellationToken);
         }
 
         if (!IsInstalled(voice))
-            throw new InvalidDataException("Tải xong nhưng không tìm thấy model .onnx hoặc tokens.txt.");
+            throw new InvalidDataException("Tải xong nhưng bộ model TTS chưa đầy đủ (model/tokens/espeak-ng-data).");
 
         ProgressChanged?.Invoke(1, "Đã cài giọng " + voice.DisplayName);
+    }
+
+    private async Task EnsureSharedEspeakAsync(CancellationToken cancellationToken)
+    {
+        if (Directory.Exists(SharedEspeakPath) && Directory.EnumerateFiles(SharedEspeakPath, "*", SearchOption.AllDirectories).Any())
+            return;
+
+        var archivePath = Path.Combine(commonRoot, "espeak-ng-data.tar.bz2");
+        ProgressChanged?.Invoke(0.83, "Đang tải dữ liệu phát âm tiếng Việt (chỉ tải một lần)...");
+        await DownloadAsync(EspeakArchiveUrl, archivePath, cancellationToken, 0.83, 0.12);
+        ProgressChanged?.Invoke(0.96, "Đang giải nén dữ liệu phát âm...");
+        await ExtractAsync(archivePath, commonRoot, cancellationToken);
+        if (File.Exists(archivePath)) File.Delete(archivePath);
+
+        if (!Directory.Exists(SharedEspeakPath))
+            throw new InvalidDataException("Không tìm thấy espeak-ng-data sau khi giải nén.");
+    }
+
+    private static async Task ExtractAsync(string archivePath, string destination, CancellationToken cancellationToken)
+    {
+        await Task.Run(() =>
+        {
+            ArchiveFactory.WriteToDirectory(
+                archivePath,
+                destination,
+                new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
+        }, cancellationToken);
     }
 
     private async Task DownloadAsync(string url, string target, CancellationToken ct, double baseProgress = 0, double span = 0.92)
@@ -87,7 +120,7 @@ public sealed class TtsService : IDisposable
     public async Task<string> SynthesizeToWaveAsync(VoiceDefinition voice, string text, float speed, string outputPath, CancellationToken ct)
     {
         if (!IsInstalled(voice))
-            throw new InvalidOperationException("Hãy tải giọng trước khi đọc.");
+            throw new InvalidOperationException("Hãy tải đầy đủ giọng trước khi đọc.");
         if (string.IsNullOrWhiteSpace(text))
             throw new InvalidOperationException("Không có nội dung để đọc.");
 
@@ -115,7 +148,10 @@ public sealed class TtsService : IDisposable
         var folder = VoiceFolder(voice);
         var model = Directory.EnumerateFiles(folder, "*.onnx", SearchOption.AllDirectories).First();
         var tokens = Directory.EnumerateFiles(folder, "tokens.txt", SearchOption.AllDirectories).First();
-        var espeak = Directory.EnumerateDirectories(folder, "espeak-ng-data", SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty;
+        var localEspeak = Directory.EnumerateDirectories(folder, "espeak-ng-data", SearchOption.AllDirectories).FirstOrDefault();
+        var espeak = localEspeak ?? (Directory.Exists(SharedEspeakPath) ? SharedEspeakPath : string.Empty);
+        if (string.IsNullOrWhiteSpace(espeak))
+            throw new InvalidDataException("Thiếu espeak-ng-data cho model TTS.");
 
         var config = new OfflineTtsConfig();
         config.Model.Vits.Model = model;
@@ -143,6 +179,8 @@ public sealed class TtsService : IDisposable
         if (Directory.Exists(folder)) Directory.Delete(folder, true);
     }
 
+    private bool RequiresSharedEspeak(VoiceDefinition voice) => string.IsNullOrWhiteSpace(voice.ArchiveUrl);
+    private string SharedEspeakPath => Path.Combine(commonRoot, "espeak-ng-data");
     private string VoiceFolder(VoiceDefinition voice) => Path.Combine(modelsRoot, voice.Id);
 
     public void Dispose()
