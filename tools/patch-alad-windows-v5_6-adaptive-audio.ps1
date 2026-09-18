@@ -39,8 +39,7 @@ $c = $c.Replace(
             outputBuffer = new BufferedWaveProvider(new WaveFormat(24000, 16, 1))
             {
                 DiscardOnBufferOverflow = true,
-                ReadFully = false,
-                BufferDuration = TimeSpan.FromSeconds(3)
+                ReadFully = false
             };
             smoothOutput = new AdaptiveJitterWaveProvider(outputBuffer, 120, 240);
 '@
