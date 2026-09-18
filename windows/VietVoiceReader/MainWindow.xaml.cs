@@ -55,6 +55,12 @@ public partial class MainWindow : Window
     private AudioFileReader? waveReader;
     private string? playbackTempWav;
 
+    private readonly object playbackOutputLock = new();
+    private readonly HashSet<WaveOutEvent> livePlaybackOutputs = new();
+    private readonly HashSet<AudioFileReader> livePlaybackReaders = new();
+    private readonly HashSet<string> livePlaybackTempFiles =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private int playbackSessionId;
     private int playCommandGate;
     private bool userStopRequested;
@@ -1473,77 +1479,172 @@ public partial class MainWindow : Window
         int session,
         CancellationToken token)
     {
-        if (session != playbackSessionId)
+        if (session != playbackSessionId
+            || token.IsCancellationRequested)
         {
             TryDelete(wav);
             return;
         }
 
-        // Absolute singleton: dispose any stale output before creating a new one.
-        DisposeCurrentOutput();
+        var localReader =
+            new AudioFileReader(wav);
 
-        var localReader = new AudioFileReader(wav);
-        var localOutput = new WaveOutEvent();
-
-        localOutput.Init(localReader);
-
-        waveReader = localReader;
-        waveOut = localOutput;
-        playbackTempWav = wav;
-
-        var completion =
-            new TaskCompletionSource(
-                TaskCreationOptions.RunContinuationsAsynchronously);
-
-        int signaled = 0;
-
-        localOutput.PlaybackStopped += (_, args) =>
-        {
-            if (Interlocked.Exchange(
-                    ref signaled,
-                    1) != 0)
-                return;
-
-            if (args.Exception != null)
-                completion.TrySetException(args.Exception);
-            else
-                completion.TrySetResult();
-        };
-
-        using var registration =
-            token.Register(() =>
-            {
-                completion.TrySetCanceled(token);
-                try { localOutput.Stop(); } catch { }
-            });
+        var localOutput =
+            new WaveOutEvent();
 
         try
         {
-            if (session != playbackSessionId
-                || token.IsCancellationRequested)
+            localOutput.Init(localReader);
+
+            bool accepted;
+
+            lock (playbackOutputLock)
+            {
+                accepted =
+                    session == playbackSessionId
+                    && !token.IsCancellationRequested
+                    && isPlaybackActive;
+
+                if (accepted)
+                {
+                    livePlaybackOutputs.Add(
+                        localOutput);
+
+                    livePlaybackReaders.Add(
+                        localReader);
+
+                    livePlaybackTempFiles.Add(
+                        wav);
+
+                    waveOut =
+                        localOutput;
+
+                    waveReader =
+                        localReader;
+
+                    playbackTempWav =
+                        wav;
+                }
+            }
+
+            if (!accepted)
+                return;
+
+            var completion =
+                new TaskCompletionSource(
+                    TaskCreationOptions.RunContinuationsAsynchronously);
+
+            int signaled = 0;
+
+            localOutput.PlaybackStopped +=
+                (_, args) =>
+                {
+                    if (Interlocked.Exchange(
+                            ref signaled,
+                            1) != 0)
+                        return;
+
+                    if (args.Exception != null)
+                    {
+                        completion.TrySetException(
+                            args.Exception);
+                    }
+                    else
+                    {
+                        completion.TrySetResult();
+                    }
+                };
+
+            using var registration =
+                token.Register(() =>
+                {
+                    completion.TrySetCanceled(
+                        token);
+
+                    try
+                    {
+                        localOutput.Stop();
+                    }
+                    catch
+                    {
+                    }
+                });
+
+            lock (playbackOutputLock)
+            {
+                accepted =
+                    session == playbackSessionId
+                    && !token.IsCancellationRequested
+                    && isPlaybackActive
+                    && livePlaybackOutputs.Contains(
+                        localOutput);
+            }
+
+            if (!accepted)
                 return;
 
             localOutput.Play();
+
             await completion.Task;
         }
         finally
         {
-            try { localOutput.Stop(); } catch { }
-            try { localOutput.Dispose(); } catch { }
-            try { localReader.Dispose(); } catch { }
-
-            if (ReferenceEquals(waveOut, localOutput))
-                waveOut = null;
-
-            if (ReferenceEquals(waveReader, localReader))
-                waveReader = null;
-
-            if (string.Equals(
-                    playbackTempWav,
-                    wav,
-                    StringComparison.OrdinalIgnoreCase))
+            lock (playbackOutputLock)
             {
-                playbackTempWav = null;
+                livePlaybackOutputs.Remove(
+                    localOutput);
+
+                livePlaybackReaders.Remove(
+                    localReader);
+
+                livePlaybackTempFiles.Remove(
+                    wav);
+
+                if (ReferenceEquals(
+                        waveOut,
+                        localOutput))
+                {
+                    waveOut = null;
+                }
+
+                if (ReferenceEquals(
+                        waveReader,
+                        localReader))
+                {
+                    waveReader = null;
+                }
+
+                if (string.Equals(
+                        playbackTempWav,
+                        wav,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    playbackTempWav = null;
+                }
+            }
+
+            try
+            {
+                localOutput.Stop();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                localOutput.Dispose();
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                localReader.Dispose();
+            }
+            catch
+            {
             }
 
             TryDelete(wav);
@@ -1733,39 +1834,138 @@ public partial class MainWindow : Window
 
     private void StopPlayback(bool userInitiated)
     {
-        userStopRequested = userInitiated;
-        isPlaybackActive = false;
-        activePlaybackBookPath = null;
+        userStopRequested =
+            userInitiated;
 
-        // Invalidate EVERY old callback/task immediately.
+        isPlaybackActive =
+            false;
+
+        activePlaybackBookPath =
+            null;
+
+        // Invalidate every old synth/playback callback before touching audio.
         playbackSessionId++;
 
-        try { playbackCts?.Cancel(); } catch { }
-        playbackCts?.Dispose();
-        playbackCts = null;
+        var cts =
+            playbackCts;
 
-        DisposeCurrentOutput();
+        playbackCts =
+            null;
 
-        PlayButton.IsEnabled = true;
-        MiniPlayButton.IsEnabled = true;
+        try
+        {
+            cts?.Cancel();
+        }
+        catch
+        {
+        }
+
+        cts?.Dispose();
+
+        StopAndDisposeAllPlaybackOutputs();
+
+        PlayButton.IsEnabled =
+            true;
+
+        MiniPlayButton.IsEnabled =
+            true;
+    }
+
+    private void StopAndDisposeAllPlaybackOutputs()
+    {
+        List<WaveOutEvent> outputs;
+        List<AudioFileReader> readers;
+        List<string> tempFiles;
+
+        lock (playbackOutputLock)
+        {
+            outputs =
+                livePlaybackOutputs
+                    .ToList();
+
+            readers =
+                livePlaybackReaders
+                    .ToList();
+
+            tempFiles =
+                livePlaybackTempFiles
+                    .ToList();
+
+            if (waveOut != null
+                && !outputs.Contains(waveOut))
+            {
+                outputs.Add(waveOut);
+            }
+
+            if (waveReader != null
+                && !readers.Contains(waveReader))
+            {
+                readers.Add(waveReader);
+            }
+
+            if (!string.IsNullOrWhiteSpace(
+                    playbackTempWav)
+                && !tempFiles.Contains(
+                    playbackTempWav,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                tempFiles.Add(
+                    playbackTempWav);
+            }
+
+            livePlaybackOutputs.Clear();
+            livePlaybackReaders.Clear();
+            livePlaybackTempFiles.Clear();
+
+            waveOut = null;
+            waveReader = null;
+            playbackTempWav = null;
+        }
+
+        // Stop outside the lock because PlaybackStopped may fire synchronously.
+        foreach (var output in outputs)
+        {
+            try
+            {
+                output.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var output in outputs)
+        {
+            try
+            {
+                output.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var reader in readers)
+        {
+            try
+            {
+                reader.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        foreach (var file in tempFiles)
+        {
+            TryDelete(file);
+        }
     }
 
     private void DisposeCurrentOutput()
     {
-        var output = waveOut;
-        var reader = waveReader;
-        var temp = playbackTempWav;
-
-        waveOut = null;
-        waveReader = null;
-        playbackTempWav = null;
-
-        try { output?.Stop(); } catch { }
-        try { output?.Dispose(); } catch { }
-        try { reader?.Dispose(); } catch { }
-
-        if (!string.IsNullOrWhiteSpace(temp))
-            TryDelete(temp);
+        // Kept as a compatibility helper for older call sites.
+        StopAndDisposeAllPlaybackOutputs();
     }
 
     private static void TryDelete(string path)
