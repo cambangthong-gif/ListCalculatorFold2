@@ -600,7 +600,36 @@ public partial class MainWindow : Window
         Dispatcher.BeginInvoke(() =>
         {
             var scroll = FindScrollableViewer(state.Reader);
-            scroll?.ScrollToTop();
+            if (scroll == null)
+                return;
+
+            HookReaderScroll(state, scroll);
+
+            if (state.ScrollRatio > 0
+                && scroll.ScrollableHeight > 0)
+            {
+                scroll.ScrollToVerticalOffset(
+                    scroll.ScrollableHeight
+                    * Math.Clamp(state.ScrollRatio, 0, 1));
+            }
+            else if (state.LastSentenceIndex > 0
+                     && state.LastSentenceIndex < state.SentenceRuns.Count)
+            {
+                try
+                {
+                    state.SentenceRuns[state.LastSentenceIndex].BringIntoView();
+                }
+                catch
+                {
+                    scroll.ScrollToTop();
+                }
+            }
+            else
+            {
+                scroll.ScrollToTop();
+            }
+
+            UpdateBookProgressUi(state);
         });
     }
 
