@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
         if (incoming?.action != Intent.ACTION_SEND || incoming.type != "text/plain") return
         val sharedText = incoming.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
         val url = Regex(
-            """https?://(?:www\\.)?(?:youtube\\.com/[^\\s]+|youtu\\.be/[^\\s]+)"""
+            """https?://(?:www\.)?(?:youtube\.com/[^\s]+|youtu\.be/[^\s]+)"""
         ).find(sharedText)?.value.orEmpty()
 
         if (url.isBlank()) {
