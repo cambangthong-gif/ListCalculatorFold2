@@ -68,6 +68,10 @@ jobs:
               'volume = volumeRatio,\n                        syncMs = manualSync,',
               'volume = volumeRatio,\n                        originalLevel = originalVolume,\n                        syncMs = manualSync,'
           )
+          s = s.replace(
+              'volume = volumeRatio,\n                        syncMs = 0,',
+              'volume = volumeRatio,\n                        originalLevel = originalVolume,\n                        syncMs = 0,'
+          )
           s = s.replace('.pingInterval(15, TimeUnit.SECONDS)', '.pingInterval(5, TimeUnit.SECONDS)')
           s = s.replace(
               '.retryOnConnectionFailure(true)\n                .build()',
