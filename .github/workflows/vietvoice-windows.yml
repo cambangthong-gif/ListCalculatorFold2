@@ -27,18 +27,39 @@ jobs:
       - name: Restore
         run: dotnet restore windows/VietVoiceReader/VietVoiceReader.csproj -r ${{ matrix.rid }}
 
-      - name: Publish self-contained
-        run: dotnet publish windows/VietVoiceReader/VietVoiceReader.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishReadyToRun=true -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+      - name: Publish clean single-file app
+        run: dotnet publish windows/VietVoiceReader/VietVoiceReader.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:PublishReadyToRun=false -o out/${{ matrix.rid }}
 
-      - name: Smoke check files
+      - name: Build clean portable package
         shell: pwsh
         run: |
-          if (!(Test-Path "out/${{ matrix.rid }}/VietVoiceReader.exe")) { throw "VietVoiceReader.exe missing" }
-          Get-ChildItem "out/${{ matrix.rid }}" | Select-Object Name,Length | Format-Table
+          $exe = "out/${{ matrix.rid }}/VietVoiceReader.exe"
+          if (!(Test-Path $exe)) { throw "VietVoiceReader.exe missing" }
+
+          New-Item -ItemType Directory -Force -Path package/${{ matrix.rid }} | Out-Null
+          Copy-Item $exe package/${{ matrix.rid }}/VietVoiceReader.exe
+
+          @"
+VietVoice Reader
+================
+Chạy trực tiếp VietVoiceReader.exe.
+
+Các thư viện .NET/Sherpa/NAudio đã được đóng gói trong EXE.
+Model giọng tải về được lưu trong LocalAppData\VietVoiceReader,
+không nằm cạnh file EXE.
+"@ | Set-Content -Encoding UTF8 package/${{ matrix.rid }}/README.txt
+
+          $rootFiles = Get-ChildItem package/${{ matrix.rid }} -File
+          if (!(Test-Path "package/${{ matrix.rid }}/VietVoiceReader.exe")) {
+            throw "Clean package EXE missing"
+          }
+
+          Write-Host "Clean package:"
+          $rootFiles | Select-Object Name,Length | Format-Table
 
       - name: Zip portable app
         shell: pwsh
-        run: Compress-Archive -Path "out/${{ matrix.rid }}/*" -DestinationPath "VietVoice-Reader-Windows-${{ matrix.rid }}.zip" -Force
+        run: Compress-Archive -Path "package/${{ matrix.rid }}/*" -DestinationPath "VietVoice-Reader-Windows-${{ matrix.rid }}.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
