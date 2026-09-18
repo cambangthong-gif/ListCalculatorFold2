@@ -37,6 +37,8 @@ class SmartSyncManager(
         private const val TAG = "SmartSyncManager"
         private const val PREFS = "alad_smart_sync"
         private const val KEY_VIDEO_URL = "video_url"
+        private const val KEY_VIDEO_URL_AT = "video_url_at"
+        private const val SHARED_LINK_TTL_MS = 20L * 60L * 1000L
 
         @Volatile var status: String = "Live Sync"
             private set
@@ -49,19 +51,25 @@ class SmartSyncManager(
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .putString(KEY_VIDEO_URL, url.trim())
+                .putLong(KEY_VIDEO_URL_AT, System.currentTimeMillis())
                 .apply()
             status = "Smart Sync link saved"
         }
 
-        fun getSharedVideoUrl(context: Context): String =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-                .getString(KEY_VIDEO_URL, "")
-                .orEmpty()
+        fun getSharedVideoUrl(context: Context): String {
+            val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            val savedAt = prefs.getLong(KEY_VIDEO_URL_AT, 0L)
+            if (savedAt <= 0L || System.currentTimeMillis() - savedAt > SHARED_LINK_TTL_MS) {
+                return ""
+            }
+            return prefs.getString(KEY_VIDEO_URL, "").orEmpty()
+        }
 
         fun clearSharedVideoUrl(context: Context) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .edit()
                 .remove(KEY_VIDEO_URL)
+                .remove(KEY_VIDEO_URL_AT)
                 .apply()
             status = "Live Sync"
             loadedCueCount = 0
