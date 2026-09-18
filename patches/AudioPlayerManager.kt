@@ -40,6 +40,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var catchUp = true
     @Volatile private var lowLatency = true
     @Volatile private var maxCatchUpSpeed = 1.15f
+    @Volatile private var externallyPaused = false
 
     private var audioTrack: AudioTrack? = null
     private var audioManager: AudioManager? = null
@@ -118,6 +119,37 @@ class AudioPlayerManager(private val context: Context) {
     fun setManualSyncMs(value: Int) { manualSyncMs = value.coerceIn(-2000, 5000) }
     fun setAutoSyncEnabled(enabled: Boolean) { autoSync = enabled }
 
+    fun setExternalPaused(paused: Boolean) {
+        externallyPaused = paused
+        synchronized(trackLock) {
+            try {
+                val track = audioTrack ?: return@synchronized
+                if (paused) {
+                    track.pause()
+                } else {
+                    track.play()
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "Could not apply external pause state", t)
+            }
+        }
+    }
+
+    fun clearForExternalSeek() {
+        queue.clear()
+        queuedBytes.set(0)
+        synchronized(trackLock) {
+            try {
+                val track = audioTrack ?: return@synchronized
+                track.pause()
+                track.flush()
+                if (!externallyPaused && running.get()) track.play()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Could not flush after external seek", t)
+            }
+        }
+    }
+
     fun nudgeSync(deltaMs: Int): Int {
         manualSyncMs = (manualSyncMs + deltaMs).coerceIn(-2000, 5000)
         if (deltaMs < 0) {
@@ -133,6 +165,10 @@ class AudioPlayerManager(private val context: Context) {
     private fun playbackLoop() {
         while (running.get()) {
             try {
+                if (externallyPaused) {
+                    Thread.sleep(40)
+                    continue
+                }
                 if (autoSync) rebalanceBacklog()
                 val chunk = queue.poll(180, TimeUnit.MILLISECONDS)
                 if (chunk == null) { onPlaybackIdle(); continue }
@@ -251,6 +287,7 @@ class AudioPlayerManager(private val context: Context) {
     fun stop() {
         if (!running.getAndSet(false)) return
         workerThread?.interrupt(); workerThread = null
+        externallyPaused = false
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
         synchronized(trackLock) {
             try { audioTrack?.pause(); audioTrack?.flush(); audioTrack?.stop() } catch (_: Throwable) {}
