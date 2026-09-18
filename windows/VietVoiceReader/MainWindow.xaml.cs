@@ -415,8 +415,14 @@ public partial class MainWindow : Window
 
         LoadSettingsIntoControls(state);
         ShowCurrentChapter(state);
-        libraryStore.UpdateProgress(book, state.ChapterIndex);
+        libraryStore.UpdateProgress(
+            book,
+            state.ChapterIndex,
+            state.LastSentenceIndex,
+            state.ScrollRatio);
         RefreshLibrary(book.SourcePath);
+        RefreshBookmarks();
+        UpdateBookProgressUi(state);
     }
 
     // ---------------------------------------------------------------------
