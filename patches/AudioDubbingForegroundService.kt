@@ -88,17 +88,14 @@ class AudioDubbingForegroundService : Service() {
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
-            val ownUid = applicationInfo.uid
+            // ALAD's own dubbed output uses USAGE_ASSISTANT, so it is naturally
+            // excluded from this source-media detector without sensitive UID APIs.
             val mediaActive = configs.orEmpty().any { config ->
-                if (config.clientUid == ownUid) {
-                    false
-                } else {
-                    when (config.audioAttributes.usage) {
-                        AudioAttributes.USAGE_MEDIA,
-                        AudioAttributes.USAGE_GAME,
-                        AudioAttributes.USAGE_UNKNOWN -> true
-                        else -> false
-                    }
+                when (config.audioAttributes.usage) {
+                    AudioAttributes.USAGE_MEDIA,
+                    AudioAttributes.USAGE_GAME,
+                    AudioAttributes.USAGE_UNKNOWN -> true
+                    else -> false
                 }
             }
             if (mediaActive == sourceMediaPlaying) return
