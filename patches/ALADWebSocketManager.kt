@@ -302,6 +302,15 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         })
                     })
                 })
+                put("realtimeInputConfig", JSONObject().apply {
+                    put("automaticActivityDetection", JSONObject().apply {
+                        put("disabled", false)
+                        put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                        put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
+                        put("prefixPaddingMs", 20)
+                        put("silenceDurationMs", 550)
+                    })
+                })
                 if (enableTranscription) {
                     put("inputAudioTranscription", JSONObject())
                     put("outputAudioTranscription", JSONObject())
