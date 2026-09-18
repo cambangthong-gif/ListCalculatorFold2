@@ -634,6 +634,370 @@ public partial class MainWindow : Window
     }
 
     // ---------------------------------------------------------------------
+    // Bookmarks / search
+    // ---------------------------------------------------------------------
+
+    private void RefreshBookmarks()
+    {
+        if (BookmarkList == null)
+            return;
+
+        BookmarkList.ItemsSource =
+            activeTab == null
+                ? Array.Empty<BookmarkItem>()
+                : bookmarkStore.ForBook(
+                    activeTab.Book.SourcePath);
+    }
+
+    private void AddBookmark_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (activeTab == null)
+            return;
+
+        activeTab.ScrollRatio =
+            GetCurrentScrollRatio(activeTab);
+
+        bookmarkStore.Add(
+            activeTab.Book,
+            activeTab.ChapterIndex,
+            activeTab.LastSentenceIndex,
+            activeTab.ScrollRatio);
+
+        RefreshBookmarks();
+        LeftTabs.SelectedIndex = 2;
+
+        StatusText.Text =
+            $"Đã đánh dấu chương {activeTab.ChapterIndex + 1}.";
+    }
+
+    private async void OpenBookmark_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (BookmarkList.SelectedItem
+            is BookmarkItem item)
+        {
+            await OpenBookmarkAsync(item);
+        }
+    }
+
+    private async void BookmarkList_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (BookmarkList.SelectedItem
+            is BookmarkItem item)
+        {
+            await OpenBookmarkAsync(item);
+        }
+    }
+
+    private void DeleteBookmark_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (BookmarkList.SelectedItem
+            is not BookmarkItem item)
+            return;
+
+        bookmarkStore.Remove(item.Id);
+        RefreshBookmarks();
+        StatusText.Text = "Đã xóa dấu trang.";
+    }
+
+    private async Task OpenBookmarkAsync(
+        BookmarkItem item)
+    {
+        await OpenBookPathAsync(
+            item.SourcePath,
+            resumeProgress: false,
+            switchToContents: false,
+            selectTab: true);
+
+        var key =
+            SafeFullPath(item.SourcePath);
+
+        if (!openBooks.TryGetValue(
+                key,
+                out var state))
+            return;
+
+        BookTabs.SelectedItem =
+            state.Tab;
+
+        state.ChapterIndex =
+            Math.Clamp(
+                item.ChapterIndex,
+                0,
+                state.Book.Chapters.Count - 1);
+
+        state.LastSentenceIndex =
+            Math.Max(
+                0,
+                item.SentenceIndex);
+
+        state.ScrollRatio =
+            Math.Clamp(
+                item.ScrollRatio,
+                0,
+                1);
+
+        suppressChapterSelection = true;
+        try
+        {
+            ChapterList.SelectedIndex =
+                state.ChapterIndex;
+        }
+        finally
+        {
+            suppressChapterSelection = false;
+        }
+
+        ShowCurrentChapter(state);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (state.LastSentenceIndex >= 0
+                && state.LastSentenceIndex
+                   < state.SentenceRuns.Count)
+            {
+                try
+                {
+                    state.SentenceRuns[
+                        state.LastSentenceIndex]
+                        .BringIntoView();
+                }
+                catch
+                {
+                }
+            }
+
+            var scroll =
+                FindScrollableViewer(
+                    state.Reader);
+
+            if (scroll != null
+                && scroll.ScrollableHeight > 0
+                && state.ScrollRatio > 0)
+            {
+                scroll.ScrollToVerticalOffset(
+                    scroll.ScrollableHeight
+                    * state.ScrollRatio);
+            }
+
+            UpdateBookProgressUi(state);
+        });
+
+        libraryStore.UpdateProgress(
+            state.Book,
+            state.ChapterIndex,
+            state.LastSentenceIndex,
+            state.ScrollRatio);
+
+        StatusText.Text =
+            $"Đã mở dấu trang: {item.DisplayTitle}";
+    }
+
+    private void SearchBox_KeyDown(
+        object sender,
+        KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+            return;
+
+        e.Handled = true;
+        SearchCurrentBook();
+    }
+
+    private void SearchBook_Click(
+        object sender,
+        RoutedEventArgs e) =>
+        SearchCurrentBook();
+
+    private void SearchCurrentBook()
+    {
+        if (activeTab == null)
+            return;
+
+        string query =
+            SearchBox.Text.Trim();
+
+        if (query.Length < 2)
+        {
+            SearchSummaryText.Text =
+                "Nhập ít nhất 2 ký tự.";
+            SearchResultsList.ItemsSource =
+                null;
+            return;
+        }
+
+        var results =
+            new List<BookSearchResult>();
+
+        for (int chapterIndex = 0;
+             chapterIndex < activeTab.Book.Chapters.Count;
+             chapterIndex++)
+        {
+            var chapter =
+                activeTab.Book.Chapters[
+                    chapterIndex];
+
+            int start = 0;
+
+            while (start < chapter.Text.Length
+                   && results.Count < 200)
+            {
+                int hit =
+                    chapter.Text.IndexOf(
+                        query,
+                        start,
+                        StringComparison.CurrentCultureIgnoreCase);
+
+                if (hit < 0)
+                    break;
+
+                results.Add(
+                    new BookSearchResult
+                    {
+                        ChapterIndex =
+                            chapterIndex,
+                        ChapterTitle =
+                            chapter.Title,
+                        CharacterIndex =
+                            hit,
+                        Snippet =
+                            BuildSearchSnippet(
+                                chapter.Text,
+                                hit,
+                                query.Length)
+                    });
+
+                start =
+                    hit
+                    + Math.Max(
+                        1,
+                        query.Length);
+            }
+
+            if (results.Count >= 200)
+                break;
+        }
+
+        SearchResultsList.ItemsSource =
+            results;
+
+        SearchSummaryText.Text =
+            results.Count >= 200
+                ? "Có ít nhất 200 kết quả (đang giới hạn 200)."
+                : $"{results.Count} kết quả.";
+
+        LeftTabs.SelectedIndex = 3;
+    }
+
+    private static string BuildSearchSnippet(
+        string text,
+        int hit,
+        int length)
+    {
+        int from =
+            Math.Max(
+                0,
+                hit - 55);
+
+        int to =
+            Math.Min(
+                text.Length,
+                hit + length + 75);
+
+        string snippet =
+            Regex.Replace(
+                text[from..to],
+                @"\s+",
+                " ")
+            .Trim();
+
+        if (from > 0)
+            snippet = "… " + snippet;
+
+        if (to < text.Length)
+            snippet += " …";
+
+        return snippet;
+    }
+
+    private void SearchResults_MouseDoubleClick(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (SearchResultsList.SelectedItem
+            is not BookSearchResult result
+            || activeTab == null)
+            return;
+
+        string query =
+            SearchBox.Text.Trim();
+
+        MoveToChapterFromReading(
+            activeTab,
+            result.ChapterIndex);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            var run =
+                activeTab.SentenceRuns
+                    .FirstOrDefault(x =>
+                        x.Text.IndexOf(
+                            query,
+                            StringComparison.CurrentCultureIgnoreCase)
+                        >= 0);
+
+            if (run == null)
+                return;
+
+            if (activeTab.HighlightedRun != null)
+            {
+                activeTab.HighlightedRun.Background =
+                    null;
+                activeTab.HighlightedRun.FontWeight =
+                    FontWeights.Normal;
+            }
+
+            run.Background =
+                new SolidColorBrush(
+                    Color.FromArgb(
+                        170,
+                        132,
+                        196,
+                        255));
+
+            activeTab.HighlightedRun = run;
+
+            try
+            {
+                run.BringIntoView();
+            }
+            catch
+            {
+            }
+
+            activeTab.ScrollRatio =
+                GetCurrentScrollRatio(
+                    activeTab);
+
+            libraryStore.UpdateProgress(
+                activeTab.Book,
+                activeTab.ChapterIndex,
+                activeTab.LastSentenceIndex,
+                activeTab.ScrollRatio);
+
+            UpdateBookProgressUi(
+                activeTab);
+        });
+    }
+
+    // ---------------------------------------------------------------------
     // Voice download
     // ---------------------------------------------------------------------
 
