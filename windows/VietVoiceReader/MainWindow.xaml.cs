@@ -25,7 +25,7 @@ public partial class MainWindow : Window
         public int LastSentenceIndex { get; set; }
         public double ScrollRatio { get; set; }
         public double LastSavedScrollRatio { get; set; } = -1;
-        public bool ScrollHooked { get; set; }
+        public ScrollViewer? AttachedScroll { get; set; }
         public List<Run> SentenceRuns { get; } = new();
         public Run? HighlightedRun { get; set; }
     }
