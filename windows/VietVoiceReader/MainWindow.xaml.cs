@@ -1212,10 +1212,22 @@ public partial class MainWindow : Window
         OpenBookTab state,
         int chapterIndex)
     {
-        state.ChapterIndex = Math.Clamp(
+        int nextChapter = Math.Clamp(
             chapterIndex,
             0,
             state.Book.Chapters.Count - 1);
+
+        bool chapterChanged =
+            state.ChapterIndex != nextChapter;
+
+        state.ChapterIndex =
+            nextChapter;
+
+        if (chapterChanged)
+        {
+            state.LastSentenceIndex = 0;
+            state.ScrollRatio = 0;
+        }
 
         if (ReferenceEquals(activeTab, state))
         {
@@ -1234,15 +1246,19 @@ public partial class MainWindow : Window
                 suppressChapterSelection = false;
             }
 
-            ShowCurrentChapter(state);
+            if (chapterChanged)
+                ShowCurrentChapter(state);
         }
 
         libraryStore.UpdateProgress(
             state.Book,
-            state.ChapterIndex);
+            state.ChapterIndex,
+            state.LastSentenceIndex,
+            state.ScrollRatio);
 
         RefreshLibrary(
             state.Book.SourcePath);
+        UpdateBookProgressUi(state);
     }
 
     private void Stop_Click(
