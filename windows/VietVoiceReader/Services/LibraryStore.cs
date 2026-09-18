@@ -32,7 +32,11 @@ public sealed class LibraryStore
         return item;
     }
 
-    public BookLibraryItem UpsertBook(BookDocument book, int chapterIndex)
+    public BookLibraryItem UpsertBook(
+        BookDocument book,
+        int chapterIndex,
+        int sentenceIndex = 0,
+        double scrollRatio = 0)
     {
         var key = Normalize(book.SourcePath);
         if (!items.TryGetValue(key, out var item))
@@ -46,6 +50,8 @@ public sealed class LibraryStore
         item.Author = book.Author;
         item.ChapterCount = book.Chapters.Count;
         item.LastChapterIndex = ClampChapter(chapterIndex, item.ChapterCount);
+        item.LastSentenceIndex = Math.Max(0, sentenceIndex);
+        item.LastScrollRatio = Math.Clamp(scrollRatio, 0, 1);
         item.LastChapterTitle = item.ChapterCount > 0
             ? book.Chapters[item.LastChapterIndex].Title
             : string.Empty;
@@ -54,12 +60,21 @@ public sealed class LibraryStore
         return item;
     }
 
-    public void UpdateProgress(BookDocument book, int chapterIndex)
+    public void UpdateProgress(
+        BookDocument book,
+        int chapterIndex,
+        int sentenceIndex = 0,
+        double scrollRatio = 0,
+        bool touchLastOpened = true)
     {
         var key = Normalize(book.SourcePath);
         if (!items.TryGetValue(key, out var item))
         {
-            UpsertBook(book, chapterIndex);
+            UpsertBook(
+                book,
+                chapterIndex,
+                sentenceIndex,
+                scrollRatio);
             return;
         }
 
@@ -67,10 +82,15 @@ public sealed class LibraryStore
         item.Author = book.Author;
         item.ChapterCount = book.Chapters.Count;
         item.LastChapterIndex = ClampChapter(chapterIndex, item.ChapterCount);
+        item.LastSentenceIndex = Math.Max(0, sentenceIndex);
+        item.LastScrollRatio = Math.Clamp(scrollRatio, 0, 1);
         item.LastChapterTitle = item.ChapterCount > 0
             ? book.Chapters[item.LastChapterIndex].Title
             : string.Empty;
-        item.LastOpenedUtc = DateTime.UtcNow;
+
+        if (touchLastOpened)
+            item.LastOpenedUtc = DateTime.UtcNow;
+
         Save();
     }
 
