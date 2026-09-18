@@ -73,6 +73,7 @@ class AudioDubbingForegroundService : Service() {
     private var repository: UserPreferencesRepository? = null
     private var smartSyncManager: SmartSyncManager? = null
     private var smartSyncJob: Job? = null
+    private var mediaStopJob: Job? = null
     private var lastSmartCueStartMs = Long.MIN_VALUE
     private var smartSubtitlePlaybackActive = false
     private var playbackAudioManager: AudioManager? = null
@@ -80,12 +81,17 @@ class AudioDubbingForegroundService : Service() {
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
+            val ownUid = applicationInfo.uid
             val mediaActive = configs.orEmpty().any { config ->
-                when (config.audioAttributes.usage) {
-                    AudioAttributes.USAGE_MEDIA,
-                    AudioAttributes.USAGE_GAME,
-                    AudioAttributes.USAGE_UNKNOWN -> true
-                    else -> false
+                if (config.clientUid == ownUid) {
+                    false
+                } else {
+                    when (config.audioAttributes.usage) {
+                        AudioAttributes.USAGE_MEDIA,
+                        AudioAttributes.USAGE_GAME,
+                        AudioAttributes.USAGE_UNKNOWN -> true
+                        else -> false
+                    }
                 }
             }
             if (mediaActive == sourceMediaPlaying) return
@@ -95,14 +101,60 @@ class AudioDubbingForegroundService : Service() {
             smartSyncPositionMs.value = smartSyncManager?.estimatePosition() ?: -1L
 
             if (!isRunning.value) return
+
+            mediaStopJob?.cancel()
+            mediaStopJob = null
+
             if (mediaActive) {
                 audioPlayerManager?.setExternalPaused(false)
-            } else {
-                audioPlayerManager?.setExternalPaused(true)
-                deviceTtsManager?.clearBacklog()
-                synchronized(transcriptBuffer) {
-                    transcriptBuffer.clear()
-                    lastTranscriptSnapshot = ""
+                deviceTtsManager?.setExternalPaused(false)
+                return
+            }
+
+            mediaStopJob = serviceScope.launch {
+                val manager = smartSyncManager
+                val nearSmartEnd = manager?.isNearEnd(9_000L) == true
+
+                if (nearSmartEnd) {
+                    // Natural end: do not cut the translated tail. Freeze the timeline,
+                    // enqueue the remaining final caption cues, and let both audio paths drain.
+                    smartSyncStatus.value = "TAIL FINISH"
+
+                    if (
+                        activeVoiceSource == "device_tts" &&
+                        smartSubtitlePlaybackActive &&
+                        manager != null &&
+                        manager.hasTargetTimeline
+                    ) {
+                        val tail = manager.remainingTargetCues(
+                            lastStartMs = lastSmartCueStartMs,
+                            maxLookaheadMs = 12_000L,
+                            maxCues = 4
+                        )
+                        for (cue in tail) {
+                            lastSmartCueStartMs = maxOf(lastSmartCueStartMs, cue.startMs)
+                            deviceTtsManager?.enqueueText(cue.text)
+                        }
+                    }
+
+                    val remaining = manager?.remainingTimelineMs() ?: 0L
+                    val drainMs = (remaining + 3_500L).coerceIn(3_000L, 12_000L)
+                    delay(drainMs)
+
+                    if (!sourceMediaPlaying) {
+                        audioPlayerManager?.setExternalPaused(true)
+                        deviceTtsManager?.setExternalPaused(true)
+                        smartSyncStatus.value = "TAIL DONE"
+                    }
+                } else {
+                    // Ordinary pause: keep the backlog intact. Wait briefly so a tiny
+                    // playback gap does not chop speech, then freeze output until resume.
+                    val pauseGraceMs = if (manager?.hasTimeline == true) 500L else 1_800L
+                    delay(pauseGraceMs)
+                    if (!sourceMediaPlaying) {
+                        audioPlayerManager?.setExternalPaused(true)
+                        deviceTtsManager?.setExternalPaused(true)
+                    }
                 }
             }
         }
@@ -589,6 +641,8 @@ class AudioDubbingForegroundService : Service() {
         sessionSettingsJob = null
         smartSyncJob?.cancel()
         smartSyncJob = null
+        mediaStopJob?.cancel()
+        mediaStopJob = null
         smartSyncManager = null
         smartSubtitlePlaybackActive = false
         lastSmartCueStartMs = Long.MIN_VALUE
