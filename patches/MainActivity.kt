@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.alad.app.core.service.AudioDubbingForegroundService
+import com.alad.app.core.sync.SmartSyncManager
 import com.alad.app.data.repository.UserPreferencesRepository
 import com.alad.app.presentation.main.MainScreen
 import com.alad.app.presentation.main.MainViewModel
@@ -60,7 +61,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         val repository = UserPreferencesRepository(applicationContext)
-        
+        handleShareIntent(intent)
+
         setContent {
             com.alad.app.ui.theme.ALADTheme {
                 Surface(
@@ -93,6 +95,43 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleShareIntent(intent)
+    }
+
+    private fun handleShareIntent(incoming: Intent?) {
+        if (incoming?.action != Intent.ACTION_SEND || incoming.type != "text/plain") return
+        val sharedText = incoming.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
+        val url = Regex(
+            """https?://(?:www\\.)?(?:youtube\\.com/[^\\s]+|youtu\\.be/[^\\s]+)"""
+        ).find(sharedText)?.value.orEmpty()
+
+        if (url.isBlank()) {
+            Toast.makeText(
+                this,
+                "Smart Sync: nội dung chia sẻ không có link YouTube.",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
+        SmartSyncManager.setSharedVideoUrl(this, url)
+        Toast.makeText(
+            this,
+            "Smart Sync đã nhận video. ALAD sẽ lấy subtitle và tự bám timestamp.",
+            Toast.LENGTH_LONG
+        ).show()
+
+        if (AudioDubbingForegroundService.isRunning.value) {
+            val serviceIntent = Intent(this, AudioDubbingForegroundService::class.java).apply {
+                action = AudioDubbingForegroundService.ACTION_SMART_SYNC_PREPARE
+            }
+            startService(serviceIntent)
         }
     }
 
