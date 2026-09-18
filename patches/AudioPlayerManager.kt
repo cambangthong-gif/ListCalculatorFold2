@@ -118,7 +118,6 @@ class AudioPlayerManager(private val context: Context) {
         val chunk = AudioChunk(data.copyOf(), SystemClock.elapsedRealtime(), sourceClockMs)
         queue.offerLast(chunk)
         queuedBytes.addAndGet(chunk.data.size.toLong())
-        if (lowLatency && queuedDurationMs() > 2600) dropOldestUntil(1000)
     }
 
     fun setVolume(volume: Float) {
@@ -207,16 +206,8 @@ class AudioPlayerManager(private val context: Context) {
     }
 
     private fun rebalanceBacklog() {
-        val qMs = queuedDurationMs()
-        val sourceLag = headSourceLagMs()
-        val hardQueueLimit = if (lowLatency) 1_700 else 2_600
-        val hardSourceLag = if (lowLatency) 2_800L else 4_200L
-
-        if (sourceLag > hardSourceLag && queue.size > 1) {
-            dropOldestBySourceClock(if (lowLatency) 1_050L else 1_600L)
-        } else if (qMs > hardQueueLimit) {
-            dropOldestUntil(if (lowLatency) 750 else 1_200)
-        }
+        // Completeness-first: never drop normal translated audio. Auto-sync catches up
+        // by playback speed only. Destructive clearing is reserved for explicit seek/resync.
     }
 
     private fun updateCatchUpSpeed() {
@@ -239,18 +230,6 @@ class AudioPlayerManager(private val context: Context) {
         val nowClock = sourceClockProvider?.invoke() ?: return 0L
         if (first.sourceClockMs < 0L || nowClock < 0L) return 0L
         return (nowClock - first.sourceClockMs).coerceAtLeast(0L)
-    }
-
-    private fun dropOldestBySourceClock(targetLagMs: Long) {
-        val provider = sourceClockProvider ?: return
-        while (queue.size > 1) {
-            val first = queue.peekFirst() ?: break
-            if (first.sourceClockMs < 0L) break
-            val lag = (provider() - first.sourceClockMs).coerceAtLeast(0L)
-            if (lag <= targetLagMs) break
-            val removed = queue.pollFirst() ?: break
-            queuedBytes.addAndGet(-removed.data.size.toLong())
-        }
     }
 
     private fun applyPlaybackSpeed(speed: Float) {
