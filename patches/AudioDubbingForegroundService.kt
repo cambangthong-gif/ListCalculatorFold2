@@ -90,6 +90,10 @@ class AudioDubbingForegroundService : Service() {
     private var playbackAudioManager: AudioManager? = null
     private var sourceMediaPlaying = true
 
+    // Stable Live input path for Gemini: 100 ms PCM16 mono @ 16 kHz = 3,200 bytes.
+    private val geminiInputChunk = ByteArray(3_200)
+    private var geminiInputChunkSize = 0
+
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
             // ALAD's own dubbed output uses USAGE_ASSISTANT, so it is naturally
@@ -114,6 +118,32 @@ class AudioDubbingForegroundService : Service() {
 
             mediaStopJob?.cancel()
             mediaStopJob = null
+
+            if (activeVoiceSource == "gemini") {
+                if (mediaActive) {
+                    audioPlayerManager?.setExternalPaused(false)
+                    smartSyncStatus.value = "STABLE LIVE"
+                } else {
+                    mediaStopJob = serviceScope.launch {
+                        // Let server-side VAD observe the pause; after >1s explicitly flush
+                        // cached audio as recommended by Gemini Live.
+                        delay(1_050L)
+                        if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
+                            flushGeminiInputChunk()
+                            webSocketManager?.sendAudioStreamEnd()
+                            smartSyncStatus.value = "STABLE TAIL"
+
+                            // Do not chop the final translated sentence.
+                            delay(3_200L)
+                            if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
+                                audioPlayerManager?.setExternalPaused(true)
+                                smartSyncStatus.value = "STABLE PAUSED"
+                            }
+                        }
+                    }
+                }
+                return
+            }
 
             if (mediaActive) {
                 audioPlayerManager?.setExternalPaused(false)
@@ -233,6 +263,7 @@ class AudioDubbingForegroundService : Service() {
     private fun startDubbing(resultCode: Int, data: Intent) {
         isRunning.value = true
         sourceMediaPlaying = true
+        synchronized(geminiInputChunk) { geminiInputChunkSize = 0 }
         audioClockSync.reset()
         audioClockMs.value = 0L
         audioClockLagMs.value = 0L
@@ -279,7 +310,13 @@ class AudioDubbingForegroundService : Service() {
                 .build()
             webSocketManager = ALADWebSocketManager(wsClient)
             smartSyncManager = SmartSyncManager(applicationContext, wsClient)
-            prepareSmartSync()
+            if (voiceSource == "device_tts") {
+                prepareSmartSync()
+            } else {
+                smartSyncStatus.value = "STABLE LIVE"
+                smartSyncPositionMs.value = -1L
+                audioClockLagMs.value = 0L
+            }
 
             if (voiceSource == "device_tts") {
                 deviceTtsManager = DeviceTtsManager(applicationContext).also { manager ->
@@ -302,14 +339,15 @@ class AudioDubbingForegroundService : Service() {
                         mode = dubMode,
                         volume = volumeRatio,
                         syncMs = manualSync,
-                        autoSyncEnabled = autoSync,
-                        catchUpEnabled = catchUp,
-                        lowLatencyEnabled = lowLatency,
-                        maxSpeed = maxCatchUpSpeed
+                        autoSyncEnabled = false,
+                        catchUpEnabled = false,
+                        lowLatencyEnabled = true,
+                        maxSpeed = 1.0f
                     )
-                    player.setSourceClockProvider { audioClockSync.currentClockMs() }
+                    player.setStableLiveMode(true)
                     player.start()
                 }
+                autoSyncActive.value = false
             }
 
             webSocketManager?.onStatusChanged = { status ->
@@ -326,30 +364,14 @@ class AudioDubbingForegroundService : Service() {
 
             webSocketManager?.onBinaryMessageReceived = { audioChunk ->
                 if (activeVoiceSource == "gemini") {
-                    if (geminiOutputSourceCursorMs < 0L) {
-                        activeOutputTurnAnchorMs = synchronized(this@AudioDubbingForegroundService) {
-                            if (pendingTurnStartClocks.isNotEmpty()) {
-                                pendingTurnStartClocks.removeFirst()
-                            } else if (lastTurnStartClockMs >= 0L) {
-                                lastTurnStartClockMs
-                            } else {
-                                audioClockSync.bestLiveAnchor()
-                            }
-                        }
-                        geminiOutputSourceCursorMs = activeOutputTurnAnchorMs
-                    }
-
-                    val anchor = geminiOutputSourceCursorMs
-                    audioPlayerManager?.playAudioData(audioChunk, anchor)
-                    val chunkDurationMs = (audioChunk.size.toLong() / 48L).coerceAtLeast(1L)
-                    geminiOutputSourceCursorMs = anchor + chunkDurationMs
-                    audioClockLagMs.value = audioClockSync.lagFrom(activeOutputTurnAnchorMs)
+                    audioPlayerManager?.playAudioData(audioChunk)
                     queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
+                    audioClockLagMs.value = queueLatencyMs.value.toLong()
                 }
             }
 
             webSocketManager?.onInputTranscription = { text, isFinal ->
-                if (isFinal) {
+                if (activeVoiceSource == "device_tts" && isFinal) {
                     val fallback = audioClockSync.markInputFinal()
                     val anchor = when {
                         currentTurnStartClockMs >= 0L -> currentTurnStartClockMs
@@ -385,9 +407,6 @@ class AudioDubbingForegroundService : Service() {
                 if (activeVoiceSource == "device_tts") {
                     flushTranscriptBuffer(resetSnapshot = true)
                     transcriptSourceAnchorMs = -1L
-                } else {
-                    activeOutputTurnAnchorMs = -1L
-                    geminiOutputSourceCursorMs = -1L
                 }
             }
             webSocketManager?.onInterrupted = {
@@ -398,8 +417,14 @@ class AudioDubbingForegroundService : Service() {
                 deviceTtsManager?.clearBacklog()
             }
 
-            webSocketManager?.connect(apiKey, "", targetLang, voiceName)
-            startSmartSyncScheduler()
+            webSocketManager?.connect(
+                apiKey,
+                "",
+                targetLang,
+                voiceName,
+                enableTranscription = voiceSource == "device_tts"
+            )
+            if (voiceSource == "device_tts") startSmartSyncScheduler()
 
             sessionSettingsJob?.cancel()
             sessionSettingsJob = serviceScope.launch {
@@ -424,7 +449,13 @@ class AudioDubbingForegroundService : Service() {
                         } else {
                             val currentKey = prefs.apiKeyFlow.first()
                             webSocketManager?.disconnect()
-                            webSocketManager?.connect(currentKey, "", newLang, newVoice)
+                            webSocketManager?.connect(
+                                currentKey,
+                                "",
+                                newLang,
+                                newVoice,
+                                enableTranscription = activeVoiceSource == "device_tts"
+                            )
                         }
                     }
             }
@@ -433,14 +464,19 @@ class AudioDubbingForegroundService : Service() {
             val appUid = applicationInfo.uid
             mediaProjection?.let { projection ->
                 audioCaptureManager?.startCapture(projection, appUid) { pcmData ->
-                    val clockUpdate = audioClockSync.onCaptured(pcmData.size)
-                    audioClockMs.value = clockUpdate.sourceClockMs
-                    if (clockUpdate.discontinuity) {
-                        handleAudioClockDiscontinuity(clockUpdate.wallGapMs)
+                    val normalized = calculateNormalizedLevel(pcmData)
+
+                    if (activeVoiceSource == "gemini") {
+                        feedGeminiContinuousAudio(pcmData)
+                    } else {
+                        val clockUpdate = audioClockSync.onCaptured(pcmData.size)
+                        audioClockMs.value = clockUpdate.sourceClockMs
+                        if (clockUpdate.discontinuity) {
+                            handleAudioClockDiscontinuity(clockUpdate.wallGapMs)
+                        }
+                        feedAudioThroughVad(pcmData, normalized)
                     }
 
-                    val normalized = calculateNormalizedLevel(pcmData)
-                    feedAudioThroughVad(pcmData, normalized)
                     val current = audioAmplitude.value
                     audioAmplitude.value = current * 0.5f + normalized * 0.5f
                 }
