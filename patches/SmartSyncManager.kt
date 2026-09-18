@@ -286,6 +286,42 @@ class SmartSyncManager(
     }
 
     @Synchronized
+    fun isNearEnd(windowMs: Long = 8_000L): Boolean {
+        if (sourceCues.isEmpty() || anchorPositionMs < 0L) return false
+        val pos = estimatePositionLocked(SystemClock.elapsedRealtime())
+        val end = sourceCues.last().endMs
+        return end - pos <= windowMs
+    }
+
+    @Synchronized
+    fun remainingTimelineMs(): Long {
+        if (sourceCues.isEmpty() || anchorPositionMs < 0L) return 0L
+        val pos = estimatePositionLocked(SystemClock.elapsedRealtime())
+        return (sourceCues.last().endMs - pos).coerceAtLeast(0L)
+    }
+
+    @Synchronized
+    fun remainingTargetCues(
+        lastStartMs: Long,
+        maxLookaheadMs: Long = 12_000L,
+        maxCues: Int = 10
+    ): List<CaptionCue> {
+        if (targetCues.isEmpty() || anchorPositionMs < 0L) return emptyList()
+        val pos = estimatePositionLocked(SystemClock.elapsedRealtime())
+        val limit = pos + maxLookaheadMs
+        val out = ArrayList<CaptionCue>()
+        for (cue in targetCues) {
+            if (cue.startMs <= lastStartMs) continue
+            if (cue.endMs < pos - 500L) continue
+            if (cue.startMs > limit) break
+            if (cue.text.isBlank()) continue
+            out.add(cue)
+            if (out.size >= maxCues) break
+        }
+        return out
+    }
+
+    @Synchronized
     fun resetAfterSeek() {
         lastMatchedIndex = -1
     }
