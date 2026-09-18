@@ -26,7 +26,11 @@ class AudioPlayerManager(private val context: Context) {
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
     }
 
-    private data class AudioChunk(val data: ByteArray, val enqueuedAtMs: Long)
+    private data class AudioChunk(
+        val data: ByteArray,
+        val enqueuedAtMs: Long,
+        val sourceClockMs: Long
+    )
     private val queue = LinkedBlockingDeque<AudioChunk>()
     private val queuedBytes = AtomicLong(0)
     private val running = AtomicBoolean(false)
@@ -41,6 +45,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var lowLatency = true
     @Volatile private var maxCatchUpSpeed = 1.15f
     @Volatile private var externallyPaused = false
+    @Volatile private var sourceClockProvider: (() -> Long)? = null
 
     private var audioTrack: AudioTrack? = null
     private var audioManager: AudioManager? = null
@@ -104,9 +109,13 @@ class AudioPlayerManager(private val context: Context) {
         }
     }
 
-    fun playAudioData(data: ByteArray) {
+    fun setSourceClockProvider(provider: (() -> Long)?) {
+        sourceClockProvider = provider
+    }
+
+    fun playAudioData(data: ByteArray, sourceClockMs: Long = -1L) {
         if (!running.get() || data.isEmpty()) return
-        val chunk = AudioChunk(data.copyOf(), SystemClock.elapsedRealtime())
+        val chunk = AudioChunk(data.copyOf(), SystemClock.elapsedRealtime(), sourceClockMs)
         queue.offerLast(chunk)
         queuedBytes.addAndGet(chunk.data.size.toLong())
         if (lowLatency && queuedDurationMs() > 2600) dropOldestUntil(1000)
@@ -199,15 +208,49 @@ class AudioPlayerManager(private val context: Context) {
 
     private fun rebalanceBacklog() {
         val qMs = queuedDurationMs()
-        val hardLimit = if (lowLatency) 1500 else 2400
-        if (qMs > hardLimit) dropOldestUntil(if (lowLatency) 650 else 1100)
+        val sourceLag = headSourceLagMs()
+        val hardQueueLimit = if (lowLatency) 1_700 else 2_600
+        val hardSourceLag = if (lowLatency) 2_800L else 4_200L
+
+        if (sourceLag > hardSourceLag && queue.size > 1) {
+            dropOldestBySourceClock(if (lowLatency) 1_050L else 1_600L)
+        } else if (qMs > hardQueueLimit) {
+            dropOldestUntil(if (lowLatency) 750 else 1_200)
+        }
     }
 
     private fun updateCatchUpSpeed() {
         if (!catchUp) { applyPlaybackSpeed(1.0f); return }
-        val excess = (queuedDurationMs() + (-manualSyncMs).coerceAtLeast(0) - if (lowLatency) 220 else 420).coerceAtLeast(0)
-        val target = if (excess <= 0) 1.0f else min(maxCatchUpSpeed, 1.0f + excess / 3500f)
+        val queueLag = queuedDurationMs().toLong()
+        val sourceLag = headSourceLagMs()
+        val effectiveLag = maxOf(queueLag, sourceLag)
+        val targetLag = if (lowLatency) 500L else 800L
+        val excess = (effectiveLag - targetLag + (-manualSyncMs).coerceAtLeast(0)).coerceAtLeast(0L)
+        val target = if (excess <= 0L) {
+            1.0f
+        } else {
+            min(maxCatchUpSpeed, 1.0f + excess / 4200f)
+        }
         applyPlaybackSpeed(target)
+    }
+
+    private fun headSourceLagMs(): Long {
+        val first = queue.peekFirst() ?: return 0L
+        val nowClock = sourceClockProvider?.invoke() ?: return 0L
+        if (first.sourceClockMs < 0L || nowClock < 0L) return 0L
+        return (nowClock - first.sourceClockMs).coerceAtLeast(0L)
+    }
+
+    private fun dropOldestBySourceClock(targetLagMs: Long) {
+        val provider = sourceClockProvider ?: return
+        while (queue.size > 1) {
+            val first = queue.peekFirst() ?: break
+            if (first.sourceClockMs < 0L) break
+            val lag = (provider() - first.sourceClockMs).coerceAtLeast(0L)
+            if (lag <= targetLagMs) break
+            val removed = queue.pollFirst() ?: break
+            queuedBytes.addAndGet(-removed.data.size.toLong())
+        }
     }
 
     private fun applyPlaybackSpeed(speed: Float) {
@@ -294,5 +337,6 @@ class AudioPlayerManager(private val context: Context) {
             audioTrack?.release(); audioTrack = null
         }
         audioManager = null
+        sourceClockProvider = null
     }
 }
