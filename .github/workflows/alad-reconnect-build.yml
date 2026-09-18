@@ -1,4 +1,4 @@
-name: Build ALAD TTS Select v3.8 YouTube Companion APK
+name: Build ALAD TTS Select v3.8 Universal Media Companion APK
 
 on:
   push:
@@ -48,7 +48,7 @@ jobs:
           p.write_text(s)
 
           p = Path('alad/app/src/main/res/values/strings.xml')
-          s = p.read_text().replace('ALAD TTS Select v3.1', 'ALAD TTS Select v3.8 Companion')
+          s = p.read_text().replace('ALAD TTS Select v3.1', 'ALAD TTS Select v3.8 Media')
           p.write_text(s)
 
           # Wire original-volume preference and preserve Fast-Reconnect from v3.4.
@@ -85,7 +85,7 @@ jobs:
               'val aiVolume by viewModel.volumeRatio.collectAsState()\n    val originalVolume by viewModel.originalVolume.collectAsState()\n    val dubMode'
           )
           needle = '''                    Slider(\n                        value = aiVolume,\n                        onValueChange = viewModel::updateVolumeRatio,\n                        valueRange = 0.20f..1.0f\n                    )'''
-          insert = needle + '''\n\n                    Spacer(modifier = Modifier.height(14.dp))\n                    SettingLabel("Âm lượng tiếng gốc ${(originalVolume * 100).roundToInt()}%")\n                    Slider(\n                        value = originalVolume,\n                        onValueChange = viewModel::updateOriginalVolume,\n                        valueRange = 0f..1.0f\n                    )\n                    Text(\n                        "v3.8: YouTube Companion - Share video sang ALAD, bám Play/Pause/Seek của app YouTube qua MediaSession; giữ Seamless Rollover + Auto-Skip + No-Pause + VAD + Adaptive Sync.",\n                        color = TextSecondary,\n                        fontSize = 12.sp,\n                        lineHeight = 18.sp\n                    )'''
+          insert = needle + '''\n\n                    Spacer(modifier = Modifier.height(14.dp))\n                    SettingLabel("Âm lượng tiếng gốc ${(originalVolume * 100).roundToInt()}%")\n                    Slider(\n                        value = originalVolume,\n                        onValueChange = viewModel::updateOriginalVolume,\n                        valueRange = 0f..1.0f\n                    )\n                    Text(\n                        "v3.8: Media Companion - tự bám Play/Pause/Seek/tốc độ của app media đang phát qua MediaSession, không cần YouTube hay Share link; giữ Seamless Rollover + Auto-Skip + No-Pause + VAD + Adaptive Sync.",\n                        color = TextSecondary,\n                        fontSize = 12.sp,\n                        lineHeight = 18.sp\n                    )'''
           if needle not in s:
               raise SystemExit('Could not find AI volume slider insertion point')
           s = s.replace(needle, insert, 1)
@@ -121,11 +121,11 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v3.8-YouTubeCompanion.apk
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v3.8-MediaCompanion.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALAD-TTS-Select-v3.8-YouTubeCompanion
-          path: ALAD-TTS-Select-v3.8-YouTubeCompanion.apk
+          name: ALAD-TTS-Select-v3.8-MediaCompanion
+          path: ALAD-TTS-Select-v3.8-MediaCompanion.apk
           if-no-files-found: error
