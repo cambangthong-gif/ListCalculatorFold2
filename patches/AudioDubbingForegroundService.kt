@@ -7,6 +7,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
@@ -64,6 +66,35 @@ class AudioDubbingForegroundService : Service() {
     private var webSocketManager: ALADWebSocketManager? = null
     private var sessionSettingsJob: Job? = null
     private var repository: UserPreferencesRepository? = null
+    private var playbackAudioManager: AudioManager? = null
+    private var sourceMediaPlaying = true
+
+    private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
+        override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
+            val mediaActive = configs.orEmpty().any { config ->
+                when (config.audioAttributes.usage) {
+                    AudioAttributes.USAGE_MEDIA,
+                    AudioAttributes.USAGE_GAME,
+                    AudioAttributes.USAGE_UNKNOWN -> true
+                    else -> false
+                }
+            }
+            if (mediaActive == sourceMediaPlaying) return
+            sourceMediaPlaying = mediaActive
+
+            if (!isRunning.value) return
+            if (mediaActive) {
+                audioPlayerManager?.setExternalPaused(false)
+            } else {
+                audioPlayerManager?.setExternalPaused(true)
+                deviceTtsManager?.clearBacklog()
+                synchronized(transcriptBuffer) {
+                    transcriptBuffer.clear()
+                    lastTranscriptSnapshot = ""
+                }
+            }
+        }
+    }
 
     private val transcriptBuffer = StringBuilder()
     private var lastTranscriptSnapshot = ""
@@ -113,6 +144,12 @@ class AudioDubbingForegroundService : Service() {
 
     private fun startDubbing(resultCode: Int, data: Intent) {
         isRunning.value = true
+        sourceMediaPlaying = true
+        playbackAudioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        try {
+            playbackAudioManager?.registerAudioPlaybackCallback(playbackCallback, null)
+        } catch (_: Throwable) {
+        }
         val projectionManager =
             getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjection = projectionManager.getMediaProjection(resultCode, data)
@@ -431,6 +468,12 @@ class AudioDubbingForegroundService : Service() {
         queueLatencyMs.value = 0
         sessionSettingsJob?.cancel()
         sessionSettingsJob = null
+        try {
+            playbackAudioManager?.unregisterAudioPlaybackCallback(playbackCallback)
+        } catch (_: Throwable) {
+        }
+        playbackAudioManager = null
+        sourceMediaPlaying = true
         mediaProjection?.stop()
         mediaProjection = null
     }
