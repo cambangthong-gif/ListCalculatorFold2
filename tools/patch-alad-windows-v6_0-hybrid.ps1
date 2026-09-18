@@ -39,6 +39,7 @@ $fieldAdd = @'
     private string hybridVideoId = "";
     private double hybridVideoTime;
     private double hybridPlaybackRate = 1.0;
+    private DateTime lastHybridCaptionUtc = DateTime.MinValue;
 '@
 if (-not $c.Contains($fieldMarker)) { throw 'MainForm field marker missing' }
 $c = $c.Replace($fieldMarker, $fieldAdd.TrimEnd())
@@ -118,6 +119,29 @@ $connectReplacement = @'
                     originalVolume = originalVolume.Value / 100.0
                 });
 
+                // Automatic fallback: if the current video has no usable captions,
+                // listen to system audio (excluding ALAD) and feed Gemini 3.8 directly.
+                // Recent captions suppress this path so text and audio are never sent together.
+                lastHybridCaptionUtc = DateTime.UtcNow;
+                recorder = await BuildRecorderAsync((uint)Environment.ProcessId, ProcessLoopbackMode.ExcludeTargetProcessTree);
+                var hybridFormat = recorder.WaveFormat;
+                recorder.DataAvailable += (buffer, _, _, _) =>
+                {
+                    if (runCts?.IsCancellationRequested != false || gemini == null) return;
+                    if ((DateTime.UtcNow - lastHybridCaptionUtc).TotalMilliseconds < 2600) return;
+
+                    var pcm = AudioConvert.ToPcm16Mono16k(buffer, hybridFormat);
+                    if (pcm.Length == 0) return;
+                    lastInputAudioUtc = DateTime.UtcNow;
+                    foreach (var chunk in chunker.Push(pcm))
+                        gemini.QueueAudio(chunk);
+                };
+                recorder.RecordingStopped += (_, e) =>
+                {
+                    if (e.Exception != null) LogStatus("Hybrid fallback capture lỗi: " + e.Exception.Message);
+                };
+                recorder.StartRecording();
+
                 isRunning = true;
                 status.Text = "● HYBRID ĐANG CHẠY";
                 status.ForeColor = Color.FromArgb(32, 165, 90);
@@ -181,7 +205,10 @@ $browserMethods = @'
                 case "caption":
                     hybridVideoTime = message.CurrentTime;
                     if (!string.IsNullOrWhiteSpace(message.Text))
+                    {
+                        lastHybridCaptionUtc = DateTime.UtcNow;
                         captionScheduler?.Push(message.Text!, message.CurrentTime, message.Duration);
+                    }
                     break;
             }
         });
@@ -254,6 +281,7 @@ $stopReplacement = @'
         hybridVideoId = "";
         hybridVideoTime = 0;
         hybridPlaybackRate = 1.0;
+        lastHybridCaptionUtc = DateTime.MinValue;
 
         try { if (gemini != null) await gemini.DisposeAsync(); } catch { }
         gemini = null;
@@ -282,7 +310,14 @@ $telemetryNeedle = @'
         }
 '@
 $telemetryReplacement = @'
-        if (isRunning && !hybridModeActive)
+        if (isRunning && hybridModeActive)
+        {
+            bool captionsFresh = (DateTime.UtcNow - lastHybridCaptionUtc).TotalMilliseconds < 2600;
+            inputState.Text = captionsFresh
+                ? $"Hybrid: phụ đề · {hybridVideoTime:0.0}s"
+                : "Hybrid: không có phụ đề · Live audio fallback";
+        }
+        else if (isRunning)
         {
             inputState.Text = (DateTime.UtcNow - lastInputAudioUtc).TotalMilliseconds < 1000
                 ? "Audio vào: đang chạy"
@@ -701,6 +736,7 @@ if ($c -notmatch 'BrowserBridge\(37921') { throw 'browser bridge missing' }
 if ($c -notmatch 'clientContent = new') { throw 'Gemini text-turn path missing' }
 if ($c -notmatch 'CaptionDubbingScheduler') { throw 'caption scheduler missing' }
 if ($c -notmatch 'case "seek"') { throw 'seek sync missing' }
+if ($c -notmatch 'Live audio fallback') { throw 'automatic live-audio fallback missing' }
 if ($c -notmatch 'player\?\.Pause') { throw 'pause sync missing' }
 if ($c -notmatch 'contextWindowCompression') { throw 'long-session compression lost' }
 if ($c -notmatch 'TimeSpan\.FromMinutes\(8\.75\)') { throw 'long-session rollover lost' }
