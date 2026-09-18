@@ -20,7 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.alad.app.core.service.AudioDubbingForegroundService
-import com.alad.app.core.service.YouTubeCompanionService
 import com.alad.app.data.repository.UserPreferencesRepository
 import com.alad.app.presentation.main.MainScreen
 import com.alad.app.presentation.main.MainViewModel
@@ -50,7 +49,7 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true
         if (audioGranted) {
-            ensureMediaCompanionAccessAndLaunch()
+            launchScreenCapture()
         } else {
             Toast.makeText(this, "Audio permission is required", Toast.LENGTH_SHORT).show()
             mainViewModel.updateStatus("Disconnected")
@@ -108,26 +107,10 @@ class MainActivity : ComponentActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            ensureMediaCompanionAccessAndLaunch()
+            launchScreenCapture()
         } else {
             permissionLauncher.launch(missingPermissions.toTypedArray())
         }
-    }
-
-    private fun ensureMediaCompanionAccessAndLaunch() {
-        if (!YouTubeCompanionService.hasNotificationAccess(this)) {
-            Toast.makeText(
-                this,
-                "Bật Truy cập thông báo cho ALAD một lần để bám Play/Pause/Seek của app đang phát media.",
-                Toast.LENGTH_LONG
-            ).show()
-            try {
-                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            } catch (_: Throwable) {
-            }
-            return
-        }
-        launchScreenCapture()
     }
 
     private fun launchScreenCapture() {
