@@ -22,6 +22,8 @@ public partial class MainWindow : Window
         public required TabItem Tab { get; init; }
         public required BookDisplaySettings Settings { get; set; }
         public int ChapterIndex { get; set; }
+        public List<Run> SentenceRuns { get; } = new();
+        public Run? HighlightedRun { get; set; }
     }
 
     private sealed record PlaybackUnit(
@@ -56,6 +58,7 @@ public partial class MainWindow : Window
 
     private bool suppressChapterSelection;
     private bool suppressSettingsEvents;
+    private bool isFocusMode;
 
     public MainWindow()
     {
@@ -230,7 +233,11 @@ public partial class MainWindow : Window
                 IsPrintEnabled = false,
                 IsFindEnabled = true,
                 Margin = new Thickness(8),
-                Background = Brushes.Transparent
+                Background = Brushes.Transparent,
+                MinZoom = 50,
+                MaxZoom = 200,
+                ZoomIncrement = 10,
+                Zoom = Math.Clamp(settings.ZoomPercent, 50, 200)
             };
 
             var tabItem = new TabItem();
@@ -243,6 +250,9 @@ public partial class MainWindow : Window
                 Settings = settings,
                 ChapterIndex = resumeIndex
             };
+
+            reader.PreviewMouseWheel += (_, e) => Reader_PreviewMouseWheel(state, e);
+            reader.PreviewKeyDown += (_, e) => Reader_PreviewKeyDown(state, e);
 
             tabItem.Tag = state;
             tabItem.Content = reader;
@@ -507,7 +517,7 @@ public partial class MainWindow : Window
             state.Book.Chapters[state.ChapterIndex]);
     }
 
-    private static void ShowChapter(
+    private void ShowChapter(
         OpenBookTab state,
         BookChapter chapter)
     {
@@ -515,34 +525,59 @@ public partial class MainWindow : Window
 
         var doc = new FlowDocument
         {
-            PagePadding = new Thickness(28, 24, 28, 40),
+            PagePadding = new Thickness(42, 34, 42, 56),
             FontFamily = new FontFamily(settings.FontFamily),
             FontSize = settings.FontSize,
             LineHeight = settings.LineHeight,
-            TextAlignment = TextAlignment.Justify
+            TextAlignment = TextAlignment.Justify,
+            ColumnWidth = double.PositiveInfinity
         };
 
-        var blocks = chapter.Text.Split(
-            "\n\n",
-            StringSplitOptions.RemoveEmptyEntries
-            | StringSplitOptions.TrimEntries);
+        state.SentenceRuns.Clear();
+        state.HighlightedRun = null;
 
-        foreach (var text in blocks)
+        var blocks = Regex.Split(
+            chapter.Text ?? string.Empty,
+            @"\r?\n\s*\r?\n")
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToList();
+
+        foreach (var block in blocks)
         {
-            doc.Blocks.Add(
-                new Paragraph(new Run(text))
-                {
-                    Margin = new Thickness(
-                        0,
-                        0,
-                        0,
-                        settings.FontSize * 0.65),
-                    TextAlignment = TextAlignment.Justify
-                });
+            var paragraph = new Paragraph
+            {
+                Margin = new Thickness(
+                    0,
+                    0,
+                    0,
+                    settings.FontSize * 0.8),
+                TextAlignment = TextAlignment.Justify
+            };
+
+            var sentences = SplitParagraphForFastTts(block);
+
+            for (int i = 0; i < sentences.Count; i++)
+            {
+                var run = new Run(sentences[i]);
+                state.SentenceRuns.Add(run);
+                paragraph.Inlines.Add(run);
+
+                if (i < sentences.Count - 1)
+                    paragraph.Inlines.Add(new Run(" "));
+            }
+
+            doc.Blocks.Add(paragraph);
         }
 
         state.Reader.Document = doc;
+        state.Reader.Zoom = Math.Clamp(settings.ZoomPercent, 50, 200);
         ApplyThemeToReader(state);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            var scroll = FindScrollableViewer(state.Reader);
+            scroll?.ScrollToTop();
+        });
     }
 
     // ---------------------------------------------------------------------
@@ -795,6 +830,10 @@ public partial class MainWindow : Window
                         state,
                         currentUnit.ChapterIndex);
 
+                    HighlightPlaybackSentence(
+                        state,
+                        currentUnit.SegmentIndex);
+
                     StatusText.Text =
                         $"Đang đọc {currentUnit.ChapterIndex + 1}/{state.Book.Chapters.Count}"
                         + $" • đoạn {currentUnit.SegmentIndex + 1}/{currentUnit.SegmentCount}"
@@ -1036,7 +1075,29 @@ public partial class MainWindow : Window
 
     private static List<string> SplitForFastTts(
         string text,
-        int maxChars = 320)
+        int maxChars = 360)
+    {
+        var result = new List<string>();
+
+        foreach (var paragraph in Regex.Split(
+                     text ?? string.Empty,
+                     @"\r?\n\s*\r?\n"))
+        {
+            if (string.IsNullOrWhiteSpace(paragraph))
+                continue;
+
+            result.AddRange(
+                SplitParagraphForFastTts(
+                    paragraph,
+                    maxChars));
+        }
+
+        return result;
+    }
+
+    private static List<string> SplitParagraphForFastTts(
+        string text,
+        int maxChars = 360)
     {
         text = Regex.Replace(
             text ?? string.Empty,
@@ -1051,64 +1112,47 @@ public partial class MainWindow : Window
             text,
             @"(?<=[\.!\?…;:])\s+");
 
-        var chunks = new List<string>();
-        var buffer = new StringBuilder();
-
-        void Flush()
-        {
-            var value = buffer.ToString().Trim();
-            if (value.Length > 0)
-                chunks.Add(value);
-            buffer.Clear();
-        }
+        var result = new List<string>();
 
         foreach (var sentence in sentences)
         {
             var s = sentence.Trim();
+
             if (s.Length == 0)
                 continue;
 
-            if (s.Length > maxChars)
+            if (s.Length <= maxChars)
             {
-                Flush();
-
-                var words = s.Split(
-                    ' ',
-                    StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (var word in words)
-                {
-                    if (buffer.Length > 0
-                        && buffer.Length + 1 + word.Length > maxChars)
-                    {
-                        Flush();
-                    }
-
-                    if (buffer.Length > 0)
-                        buffer.Append(' ');
-
-                    buffer.Append(word);
-                }
-
-                Flush();
+                result.Add(s);
                 continue;
             }
 
-            if (buffer.Length > 0
-                && buffer.Length + 1 + s.Length > maxChars)
+            var words = s.Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries);
+
+            var buffer = new StringBuilder();
+
+            foreach (var word in words)
             {
-                Flush();
+                if (buffer.Length > 0
+                    && buffer.Length + 1 + word.Length > maxChars)
+                {
+                    result.Add(buffer.ToString());
+                    buffer.Clear();
+                }
+
+                if (buffer.Length > 0)
+                    buffer.Append(' ');
+
+                buffer.Append(word);
             }
 
             if (buffer.Length > 0)
-                buffer.Append(' ');
-
-            buffer.Append(s);
+                result.Add(buffer.ToString());
         }
 
-        Flush();
-
-        return chunks;
+        return result;
     }
 
     private void SetActiveChapterFromPlayback(
@@ -1360,6 +1404,409 @@ public partial class MainWindow : Window
     // Display settings
     // ---------------------------------------------------------------------
 
+    private void ReaderZoomSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ReaderZoomText != null)
+            ReaderZoomText.Text = $"{e.NewValue:0}%";
+
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
+
+        activeTab.Settings.ZoomPercent =
+            Math.Clamp(e.NewValue, 50, 200);
+
+        activeTab.Reader.Zoom =
+            activeTab.Settings.ZoomPercent;
+
+        currentSettings =
+            activeTab.Settings;
+
+        SaveCurrentSettings();
+    }
+
+    private void GoToPage_Click(
+        object sender,
+        RoutedEventArgs e) =>
+        GoToTypedPage();
+
+    private void PageNumberBox_KeyDown(
+        object sender,
+        KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter)
+            return;
+
+        e.Handled = true;
+        GoToTypedPage();
+    }
+
+    private void GoToTypedPage()
+    {
+        if (activeTab == null)
+            return;
+
+        if (!int.TryParse(
+                PageNumberBox.Text,
+                out int page)
+            || page < 1)
+        {
+            StatusText.Text =
+                "Nhập số trang từ 1 trở lên.";
+            return;
+        }
+
+        activeTab.Settings.ViewMode =
+            "1 trang";
+
+        activeTab.Reader.ViewingMode =
+            FlowDocumentReaderViewingMode.Page;
+
+        suppressSettingsEvents = true;
+        try
+        {
+            SelectComboByText(
+                ViewModeCombo,
+                "1 trang");
+        }
+        finally
+        {
+            suppressSettingsEvents = false;
+        }
+
+        SaveCurrentSettings();
+
+        activeTab.Reader.Focus();
+
+        if (NavigationCommands.GoToPage.CanExecute(
+                page,
+                activeTab.Reader))
+        {
+            NavigationCommands.GoToPage.Execute(
+                page,
+                activeTab.Reader);
+
+            StatusText.Text =
+                $"Đã chuyển đến trang {page}.";
+        }
+        else
+        {
+            StatusText.Text =
+                $"Không thể chuyển đến trang {page}.";
+        }
+    }
+
+    private void FocusMode_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        isFocusMode = !isFocusMode;
+
+        LeftPane.Visibility =
+            isFocusMode
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+        RightPane.Visibility =
+            isFocusMode
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+
+        LeftColumn.Width =
+            isFocusMode
+                ? new GridLength(0)
+                : new GridLength(320);
+
+        RightColumn.Width =
+            isFocusMode
+                ? new GridLength(0)
+                : new GridLength(310);
+
+        FocusModeButton.Content =
+            isFocusMode
+                ? "Thoát tập trung"
+                : "Tập trung";
+    }
+
+    private void Reader_PreviewMouseWheel(
+        OpenBookTab state,
+        MouseWheelEventArgs e)
+    {
+        if ((Keyboard.Modifiers
+             & ModifierKeys.Control)
+            == ModifierKeys.Control)
+        {
+            double next =
+                Math.Clamp(
+                    state.Settings.ZoomPercent
+                    + (e.Delta > 0 ? 10 : -10),
+                    50,
+                    200);
+
+            state.Settings.ZoomPercent = next;
+            state.Reader.Zoom = next;
+            settingsStore.Save(
+                state.Book.SourcePath,
+                state.Settings);
+
+            if (ReferenceEquals(
+                    activeTab,
+                    state))
+            {
+                suppressSettingsEvents = true;
+                try
+                {
+                    ReaderZoomSlider.Value =
+                        next;
+
+                    ReaderZoomText.Text =
+                        $"{next:0}%";
+                }
+                finally
+                {
+                    suppressSettingsEvents = false;
+                }
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Delta >= 0
+            || isPlaybackActive
+            || state.Settings.ViewMode != "Cuộn")
+            return;
+
+        var scroll =
+            FindScrollableViewer(
+                state.Reader);
+
+        if (scroll == null)
+            return;
+
+        bool atBottom =
+            scroll.ScrollableHeight <= 0
+            || scroll.VerticalOffset
+               >= scroll.ScrollableHeight - 2;
+
+        if (!atBottom)
+            return;
+
+        if (state.ChapterIndex
+            >= state.Book.Chapters.Count - 1)
+            return;
+
+        e.Handled = true;
+
+        Dispatcher.BeginInvoke(() =>
+            MoveToChapterFromReading(
+                state,
+                state.ChapterIndex + 1));
+    }
+
+    private void Reader_PreviewKeyDown(
+        OpenBookTab state,
+        KeyEventArgs e)
+    {
+        if (isPlaybackActive
+            || state.Settings.ViewMode != "Cuộn")
+            return;
+
+        if (e.Key != Key.PageDown
+            && e.Key != Key.Down
+            && e.Key != Key.Space)
+            return;
+
+        var scroll =
+            FindScrollableViewer(
+                state.Reader);
+
+        if (scroll == null)
+            return;
+
+        if (scroll.VerticalOffset
+            < scroll.ScrollableHeight - 2)
+            return;
+
+        if (state.ChapterIndex
+            >= state.Book.Chapters.Count - 1)
+            return;
+
+        e.Handled = true;
+
+        MoveToChapterFromReading(
+            state,
+            state.ChapterIndex + 1);
+    }
+
+    private void MoveToChapterFromReading(
+        OpenBookTab state,
+        int chapterIndex)
+    {
+        chapterIndex =
+            Math.Clamp(
+                chapterIndex,
+                0,
+                state.Book.Chapters.Count - 1);
+
+        state.ChapterIndex =
+            chapterIndex;
+
+        if (BookTabs.SelectedItem
+            != state.Tab)
+        {
+            BookTabs.SelectedItem =
+                state.Tab;
+        }
+
+        if (ReferenceEquals(
+                activeTab,
+                state))
+        {
+            suppressChapterSelection = true;
+            try
+            {
+                ChapterList.SelectedIndex =
+                    chapterIndex;
+
+                ChapterList.ScrollIntoView(
+                    state.Book.Chapters[
+                        chapterIndex]);
+            }
+            finally
+            {
+                suppressChapterSelection =
+                    false;
+            }
+
+            ShowCurrentChapter(state);
+        }
+
+        libraryStore.UpdateProgress(
+            state.Book,
+            chapterIndex);
+
+        RefreshLibrary(
+            state.Book.SourcePath);
+
+        StatusText.Text =
+            $"Chương {chapterIndex + 1}/{state.Book.Chapters.Count}: "
+            + state.Book.Chapters[
+                chapterIndex].Title;
+    }
+
+    private void HighlightPlaybackSentence(
+        OpenBookTab state,
+        int sentenceIndex)
+    {
+        if (state.HighlightedRun != null)
+        {
+            state.HighlightedRun.Background =
+                null;
+
+            state.HighlightedRun.FontWeight =
+                FontWeights.Normal;
+        }
+
+        if (sentenceIndex < 0
+            || sentenceIndex
+               >= state.SentenceRuns.Count)
+        {
+            state.HighlightedRun = null;
+            return;
+        }
+
+        var run =
+            state.SentenceRuns[
+                sentenceIndex];
+
+        var color =
+            state.Settings.Theme == "Tối"
+                ? Color.FromArgb(
+                    150,
+                    110,
+                    92,
+                    32)
+                : Color.FromArgb(
+                    160,
+                    255,
+                    226,
+                    116);
+
+        run.Background =
+            new SolidColorBrush(color);
+
+        run.FontWeight =
+            FontWeights.SemiBold;
+
+        state.HighlightedRun = run;
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            try
+            {
+                run.BringIntoView();
+            }
+            catch
+            {
+            }
+        });
+    }
+
+    private static ScrollViewer? FindScrollableViewer(
+        DependencyObject root)
+    {
+        ScrollViewer? best = null;
+        double bestHeight = -1;
+
+        foreach (var scroll
+                 in FindVisualChildren<ScrollViewer>(
+                     root))
+        {
+            if (scroll.ScrollableHeight
+                > bestHeight)
+            {
+                best = scroll;
+                bestHeight =
+                    scroll.ScrollableHeight;
+            }
+        }
+
+        return best;
+    }
+
+    private static IEnumerable<T> FindVisualChildren<T>(
+        DependencyObject root)
+        where T : DependencyObject
+    {
+        if (root == null)
+            yield break;
+
+        int count =
+            VisualTreeHelper.GetChildrenCount(
+                root);
+
+        for (int i = 0; i < count; i++)
+        {
+            var child =
+                VisualTreeHelper.GetChild(
+                    root,
+                    i);
+
+            if (child is T typed)
+                yield return typed;
+
+            foreach (var nested
+                     in FindVisualChildren<T>(
+                         child))
+            {
+                yield return nested;
+            }
+        }
+    }
+
     private void SpeedSlider_ValueChanged(
         object sender,
         RoutedPropertyChangedEventArgs<double> e)
@@ -1555,6 +2002,18 @@ public partial class MainWindow : Window
 
             LineHeightSlider.Value =
                 state.Settings.LineHeight;
+
+            ReaderZoomSlider.Value =
+                Math.Clamp(
+                    state.Settings.ZoomPercent,
+                    50,
+                    200);
+
+            ReaderZoomText.Text =
+                $"{ReaderZoomSlider.Value:0}%";
+
+            state.Reader.Zoom =
+                ReaderZoomSlider.Value;
 
             var fonts =
                 (FontCombo.ItemsSource
