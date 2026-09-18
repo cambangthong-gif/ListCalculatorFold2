@@ -317,35 +317,59 @@
                      FontWeight="Bold"
                      Foreground="#555"/>
 
-          <TextBlock Text="Zoom"/>
-          <DockPanel Margin="0,2,0,6">
-            <TextBlock x:Name="ReaderZoomText"
-                       DockPanel.Dock="Right"
-                       Width="50"
-                       Text="100%"
-                       VerticalAlignment="Center"/>
-            <Slider x:Name="ReaderZoomSlider"
-                    Minimum="50"
-                    Maximum="200"
-                    Value="100"
-                    TickFrequency="10"
-                    ValueChanged="ReaderZoomSlider_ValueChanged"/>
-          </DockPanel>
+          <!-- Old font zoom is intentionally disabled: frame width and font size are separate. -->
+          <Slider x:Name="ReaderZoomSlider"
+                  Visibility="Collapsed"
+                  Minimum="100"
+                  Maximum="100"
+                  Value="100"
+                  ValueChanged="ReaderZoomSlider_ValueChanged"/>
+          <TextBlock x:Name="ReaderZoomText"
+                     Visibility="Collapsed"
+                     Text="100%"/>
 
-          <TextBlock Text="Độ rộng cột đọc"/>
+          <TextBlock Text="Độ rộng khung đọc"/>
           <DockPanel Margin="0,2,0,6">
+            <Button DockPanel.Dock="Right"
+                    Click="ReaderWidthFit_Click"
+                    Content="Vừa ngang"
+                    Margin="5,0,0,0"/>
             <TextBlock x:Name="ReaderWidthText"
                        DockPanel.Dock="Right"
-                       Width="58"
-                       Text="800 px"
-                       VerticalAlignment="Center"/>
+                       Width="48"
+                       Text="100%"
+                       VerticalAlignment="Center"
+                       TextAlignment="Right"/>
             <Slider x:Name="ReaderWidthSlider"
-                    Minimum="520"
-                    Maximum="1200"
-                    Value="800"
-                    TickFrequency="40"
+                    Minimum="35"
+                    Maximum="100"
+                    Value="100"
+                    TickFrequency="5"
                     ValueChanged="ReaderWidthSlider_ValueChanged"/>
           </DockPanel>
+
+          <TextBlock Text="Lề trái / phải"/>
+          <DockPanel Margin="0,2,0,6">
+            <TextBlock x:Name="PageMarginText"
+                       DockPanel.Dock="Right"
+                       Width="48"
+                       Text="44 px"
+                       VerticalAlignment="Center"
+                       TextAlignment="Right"/>
+            <Slider x:Name="PageMarginSlider"
+                    Minimum="8"
+                    Maximum="120"
+                    Value="44"
+                    TickFrequency="4"
+                    ValueChanged="PageMarginSlider_ValueChanged"/>
+          </DockPanel>
+
+          <TextBlock Text="Căn chữ"/>
+          <ComboBox x:Name="TextAlignmentCombo"
+                    SelectionChanged="TextAlignmentCombo_SelectionChanged">
+            <ComboBoxItem Content="Căn đều"/>
+            <ComboBoxItem Content="Căn trái"/>
+          </ComboBox>
 
           <TextBlock Text="Font"/>
           <ComboBox x:Name="FontCombo"
@@ -400,7 +424,7 @@
             <ComboBoxItem Content="2 trang"/>
           </ComboBox>
 
-          <TextBlock Text="Ctrl + lăn chuột: zoom.  ←/→: đổi chương."
+          <TextBlock Text="Ctrl + lăn chuột: nới/thu khung đọc. Font chỉ đổi ở mục Cỡ chữ. ←/→: đổi chương."
                      Foreground="#777"
                      FontSize="11"
                      TextWrapping="Wrap"
