@@ -253,11 +253,20 @@ public partial class MainWindow : Window
                 Reader = reader,
                 Tab = tabItem,
                 Settings = settings,
-                ChapterIndex = resumeIndex
+                ChapterIndex = resumeIndex,
+                LastSentenceIndex =
+                    resumeProgress && previous != null
+                        ? Math.Max(0, previous.LastSentenceIndex)
+                        : 0,
+                ScrollRatio =
+                    resumeProgress && previous != null
+                        ? Math.Clamp(previous.LastScrollRatio, 0, 1)
+                        : 0
             };
 
             reader.PreviewMouseWheel += (_, e) => Reader_PreviewMouseWheel(state, e);
             reader.PreviewKeyDown += (_, e) => Reader_PreviewKeyDown(state, e);
+            reader.PreviewMouseLeftButtonUp += (_, e) => Reader_PreviewMouseLeftButtonUp(state, e);
 
             tabItem.Tag = state;
             tabItem.Content = reader;
@@ -266,7 +275,11 @@ public partial class MainWindow : Window
             openBooks[filePath] = state;
             BookTabs.Items.Add(tabItem);
 
-            libraryStore.UpsertBook(loadedBook, resumeIndex);
+            libraryStore.UpsertBook(
+                loadedBook,
+                resumeIndex,
+                state.LastSentenceIndex,
+                state.ScrollRatio);
             RefreshLibrary(filePath);
 
             if (selectTab)
