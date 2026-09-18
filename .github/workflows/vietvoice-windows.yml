@@ -36,26 +36,25 @@ jobs:
           $exe = "out/${{ matrix.rid }}/VietVoiceReader.exe"
           if (!(Test-Path $exe)) { throw "VietVoiceReader.exe missing" }
 
-          New-Item -ItemType Directory -Force -Path package/${{ matrix.rid }} | Out-Null
-          Copy-Item $exe package/${{ matrix.rid }}/VietVoiceReader.exe
+          New-Item -ItemType Directory -Force -Path "package/${{ matrix.rid }}" | Out-Null
+          Copy-Item $exe "package/${{ matrix.rid }}/VietVoiceReader.exe"
 
-          @"
-VietVoice Reader
-================
-Chạy trực tiếp VietVoiceReader.exe.
+          $readme = @(
+            "VietVoice Reader",
+            "================",
+            "Chay truc tiep VietVoiceReader.exe.",
+            "",
+            "Cac thu vien .NET/Sherpa/NAudio da duoc dong goi trong EXE.",
+            "Model giong duoc luu trong LocalAppData\VietVoiceReader."
+          )
+          Set-Content -Path "package/${{ matrix.rid }}/README.txt" -Value $readme -Encoding UTF8
 
-Các thư viện .NET/Sherpa/NAudio đã được đóng gói trong EXE.
-Model giọng tải về được lưu trong LocalAppData\VietVoiceReader,
-không nằm cạnh file EXE.
-"@ | Set-Content -Encoding UTF8 package/${{ matrix.rid }}/README.txt
-
-          $rootFiles = Get-ChildItem package/${{ matrix.rid }} -File
           if (!(Test-Path "package/${{ matrix.rid }}/VietVoiceReader.exe")) {
             throw "Clean package EXE missing"
           }
 
-          Write-Host "Clean package:"
-          $rootFiles | Select-Object Name,Length | Format-Table
+          Write-Host "Clean package root:"
+          Get-ChildItem "package/${{ matrix.rid }}" | Select-Object Name,Length | Format-Table
 
       - name: Zip portable app
         shell: pwsh
