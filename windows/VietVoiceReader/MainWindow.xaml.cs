@@ -350,6 +350,8 @@ public partial class MainWindow : Window
 
     private void CloseBookTab(OpenBookTab state)
     {
+        SaveReadingPosition(state);
+
         if (isPlaybackActive
             && string.Equals(
                 activePlaybackBookPath,
@@ -378,6 +380,12 @@ public partial class MainWindow : Window
         if (BookTabs.SelectedItem is not TabItem tab
             || tab.Tag is not OpenBookTab state)
             return;
+
+        if (activeTab != null
+            && !ReferenceEquals(activeTab, state))
+        {
+            SaveReadingPosition(activeTab);
+        }
 
         if (isPlaybackActive
             && !string.Equals(
@@ -517,13 +525,18 @@ public partial class MainWindow : Window
             return;
 
         activeTab.ChapterIndex = ChapterList.SelectedIndex;
+        activeTab.LastSentenceIndex = 0;
+        activeTab.ScrollRatio = 0;
         ShowCurrentChapter(activeTab);
 
         libraryStore.UpdateProgress(
             activeTab.Book,
-            activeTab.ChapterIndex);
+            activeTab.ChapterIndex,
+            activeTab.LastSentenceIndex,
+            activeTab.ScrollRatio);
 
         RefreshLibrary(activeTab.Book.SourcePath);
+        UpdateBookProgressUi(activeTab);
     }
 
     private void ShowCurrentChapter(OpenBookTab state)
