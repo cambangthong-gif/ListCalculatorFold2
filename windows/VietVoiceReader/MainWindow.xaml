@@ -52,6 +52,10 @@
                   Click="FocusMode_Click"
                   Content="Tập trung"/>
 
+          <Button x:Name="BookmarkButton"
+                  Click="AddBookmark_Click"
+                  Content="★ Dấu trang"/>
+
           <Button x:Name="ExportButton"
                   Click="Export_Click"
                   Content="Xuất MP3"/>
@@ -154,6 +158,100 @@
                        SelectionChanged="ChapterList_SelectionChanged"
                        BorderThickness="0"
                        Background="Transparent"/>
+            </DockPanel>
+          </TabItem>
+
+          <TabItem Header="Dấu trang">
+            <DockPanel Margin="4,8,4,4">
+              <StackPanel DockPanel.Dock="Bottom"
+                          Orientation="Horizontal"
+                          Margin="0,8,0,0">
+                <Button Click="OpenBookmark_Click"
+                        Content="Mở"
+                        MinWidth="72"/>
+                <Button Click="DeleteBookmark_Click"
+                        Content="Xóa"
+                        MinWidth="72"/>
+              </StackPanel>
+              <TextBlock DockPanel.Dock="Top"
+                         Text="DẤU TRANG"
+                         FontWeight="Bold"
+                         Foreground="#555"
+                         Margin="6,2,6,8"/>
+              <ListBox x:Name="BookmarkList"
+                       BorderThickness="0"
+                       Background="Transparent"
+                       MouseDoubleClick="BookmarkList_MouseDoubleClick">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border Padding="8"
+                            Margin="0,0,0,6"
+                            Background="#F7F7F8"
+                            CornerRadius="8">
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayTitle}"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding DisplayDetail}"
+                                   Foreground="#777"
+                                   FontSize="11"
+                                   Margin="0,3,0,0"/>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </DockPanel>
+          </TabItem>
+
+          <TabItem Header="Tìm">
+            <DockPanel Margin="4,8,4,4">
+              <StackPanel DockPanel.Dock="Top">
+                <TextBlock Text="TÌM TRONG SÁCH"
+                           FontWeight="Bold"
+                           Foreground="#555"
+                           Margin="6,2,6,8"/>
+                <DockPanel>
+                  <Button DockPanel.Dock="Right"
+                          Click="SearchBook_Click"
+                          Content="Tìm"
+                          MinWidth="58"/>
+                  <TextBox x:Name="SearchBox"
+                           Height="32"
+                           Margin="0,0,6,0"
+                           VerticalContentAlignment="Center"
+                           KeyDown="SearchBox_KeyDown"/>
+                </DockPanel>
+                <TextBlock x:Name="SearchSummaryText"
+                           Foreground="#777"
+                           FontSize="11"
+                           Margin="2,6,2,8"/>
+              </StackPanel>
+
+              <ListBox x:Name="SearchResultsList"
+                       BorderThickness="0"
+                       Background="Transparent"
+                       MouseDoubleClick="SearchResults_MouseDoubleClick">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Border Padding="8"
+                            Margin="0,0,0,6"
+                            Background="#F7F7F8"
+                            CornerRadius="8">
+                      <StackPanel>
+                        <TextBlock Text="{Binding DisplayTitle}"
+                                   FontWeight="SemiBold"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Snippet}"
+                                   Foreground="#666"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"
+                                   Margin="0,4,0,0"/>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
             </DockPanel>
           </TabItem>
         </TabControl>
@@ -307,20 +405,60 @@
             Background="White"
             BorderBrush="#E5E5E5"
             BorderThickness="0,1,0,0"
-            Padding="10,6">
+            Padding="10,7">
       <Grid>
         <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="280"/>
+          <ColumnDefinition Width="Auto"/>
+          <ColumnDefinition Width="160"/>
         </Grid.ColumnDefinitions>
-        <TextBlock x:Name="StatusText"
-                   Text="Sẵn sàng"
-                   VerticalAlignment="Center"/>
+
+        <StackPanel Grid.Column="0"
+                    Orientation="Horizontal"
+                    VerticalAlignment="Center">
+          <Button x:Name="MiniPlayButton"
+                  Click="Play_Click"
+                  Content="▶"
+                  Width="38"
+                  Height="32"
+                  Padding="0"/>
+          <Button x:Name="MiniStopButton"
+                  Click="Stop_Click"
+                  Content="■"
+                  Width="38"
+                  Height="32"
+                  Padding="0"/>
+        </StackPanel>
+
+        <StackPanel Grid.Column="1"
+                    Margin="10,0"
+                    VerticalAlignment="Center">
+          <TextBlock x:Name="StatusText"
+                     Text="Sẵn sàng"
+                     FontSize="12"
+                     TextTrimming="CharacterEllipsis"/>
+          <Slider x:Name="BookProgressSlider"
+                  Minimum="0"
+                  Maximum="100"
+                  Value="0"
+                  Height="18"
+                  PreviewMouseLeftButtonUp="BookProgressSlider_MouseLeftButtonUp"/>
+        </StackPanel>
+
+        <TextBlock x:Name="BookProgressText"
+                   Grid.Column="2"
+                   Text="0%"
+                   VerticalAlignment="Center"
+                   Margin="4,0,10,0"
+                   MinWidth="82"
+                   TextAlignment="Right"/>
+
         <ProgressBar x:Name="Progress"
-                     Grid.Column="1"
+                     Grid.Column="3"
                      Minimum="0"
                      Maximum="1"
-                     Height="10"
+                     Height="8"
                      Value="0"
                      VerticalAlignment="Center"/>
       </Grid>
