@@ -242,7 +242,9 @@ public partial class MainWindow : Window
                 MinZoom = 50,
                 MaxZoom = 200,
                 ZoomIncrement = 10,
-                Zoom = Math.Clamp(settings.ZoomPercent, 50, 200)
+                Zoom = Math.Clamp(settings.ZoomPercent, 50, 200),
+                MaxWidth = Math.Clamp(settings.ReaderWidth, 520, 1200),
+                HorizontalAlignment = HorizontalAlignment.Stretch
             };
 
             var tabItem = new TabItem();
@@ -408,10 +410,15 @@ public partial class MainWindow : Window
         try
         {
             ChapterList.ItemsSource = book.Chapters;
-            ChapterList.SelectedIndex = Math.Clamp(
+            ChapterJumpCombo.ItemsSource = book.Chapters;
+
+            int selectedChapter = Math.Clamp(
                 state.ChapterIndex,
                 0,
                 Math.Max(0, book.Chapters.Count - 1));
+
+            ChapterList.SelectedIndex = selectedChapter;
+            ChapterJumpCombo.SelectedIndex = selectedChapter;
 
             if (ChapterList.SelectedItem != null)
                 ChapterList.ScrollIntoView(ChapterList.SelectedItem);
@@ -525,6 +532,18 @@ public partial class MainWindow : Window
             return;
 
         activeTab.ChapterIndex = ChapterList.SelectedIndex;
+
+        suppressChapterSelection = true;
+        try
+        {
+            ChapterJumpCombo.SelectedIndex =
+                activeTab.ChapterIndex;
+        }
+        finally
+        {
+            suppressChapterSelection = false;
+        }
+
         activeTab.LastSentenceIndex = 0;
         activeTab.ScrollRatio = 0;
         ShowCurrentChapter(activeTab);
@@ -1158,10 +1177,20 @@ public partial class MainWindow : Window
             0,
             activeTab.ChapterIndex - 1);
 
-        await StartReadingSessionAsync(
-            activeTab,
-            target,
-            forceRestart: true);
+        if (isPlaybackActive)
+        {
+            await StartReadingSessionAsync(
+                activeTab,
+                target,
+                forceRestart: true);
+        }
+        else
+        {
+            MoveToChapterFromReading(
+                activeTab,
+                target,
+                toEnd: true);
+        }
     }
 
     private async void NextChapter_Click(
@@ -1175,10 +1204,52 @@ public partial class MainWindow : Window
             activeTab.Book.Chapters.Count - 1,
             activeTab.ChapterIndex + 1);
 
-        await StartReadingSessionAsync(
-            activeTab,
-            target,
-            forceRestart: true);
+        if (isPlaybackActive)
+        {
+            await StartReadingSessionAsync(
+                activeTab,
+                target,
+                forceRestart: true);
+        }
+        else
+        {
+            MoveToChapterFromReading(
+                activeTab,
+                target);
+        }
+    }
+
+    private async void ChapterJumpCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (suppressChapterSelection
+            || activeTab == null)
+            return;
+
+        int target =
+            ChapterJumpCombo.SelectedIndex;
+
+        if (target < 0
+            || target >= activeTab.Book.Chapters.Count)
+            return;
+
+        if (target == activeTab.ChapterIndex)
+            return;
+
+        if (isPlaybackActive)
+        {
+            await StartReadingSessionAsync(
+                activeTab,
+                target,
+                forceRestart: true);
+        }
+        else
+        {
+            MoveToChapterFromReading(
+                activeTab,
+                target);
+        }
     }
 
     private async Task StartReadingSessionAsync(
@@ -1888,6 +1959,33 @@ public partial class MainWindow : Window
         SaveCurrentSettings();
     }
 
+    private void ReaderWidthSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (ReaderWidthText != null)
+            ReaderWidthText.Text =
+                $"{e.NewValue:0} px";
+
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
+
+        activeTab.Settings.ReaderWidth =
+            Math.Clamp(
+                e.NewValue,
+                520,
+                1200);
+
+        activeTab.Reader.MaxWidth =
+            activeTab.Settings.ReaderWidth;
+
+        currentSettings =
+            activeTab.Settings;
+
+        SaveCurrentSettings();
+    }
+
     private void GoToPage_Click(
         object sender,
         RoutedEventArgs e) =>
@@ -2071,8 +2169,36 @@ public partial class MainWindow : Window
         OpenBookTab state,
         KeyEventArgs e)
     {
-        if (isPlaybackActive
-            || state.Settings.ViewMode != "Cuộn")
+        if (isPlaybackActive)
+            return;
+
+        if (e.Key == Key.Left)
+        {
+            if (state.ChapterIndex > 0)
+            {
+                MoveToChapterFromReading(
+                    state,
+                    state.ChapterIndex - 1,
+                    toEnd: true);
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (e.Key == Key.Right)
+        {
+            if (state.ChapterIndex
+                < state.Book.Chapters.Count - 1)
+            {
+                MoveToChapterFromReading(
+                    state,
+                    state.ChapterIndex + 1);
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (state.Settings.ViewMode != "Cuộn")
             return;
 
         if (e.Key != Key.PageDown
@@ -2134,6 +2260,8 @@ public partial class MainWindow : Window
             try
             {
                 ChapterList.SelectedIndex =
+                    chapterIndex;
+                ChapterJumpCombo.SelectedIndex =
                     chapterIndex;
 
                 ChapterList.ScrollIntoView(
@@ -2785,6 +2913,18 @@ public partial class MainWindow : Window
 
             state.Reader.Zoom =
                 ReaderZoomSlider.Value;
+
+            ReaderWidthSlider.Value =
+                Math.Clamp(
+                    state.Settings.ReaderWidth,
+                    520,
+                    1200);
+
+            ReaderWidthText.Text =
+                $"{ReaderWidthSlider.Value:0} px";
+
+            state.Reader.MaxWidth =
+                ReaderWidthSlider.Value;
 
             var fonts =
                 (FontCombo.ItemsSource
