@@ -26,6 +26,10 @@ public partial class MainWindow : Window
         public double ScrollRatio { get; set; }
         public double LastSavedScrollRatio { get; set; } = -1;
         public ScrollViewer? AttachedScroll { get; set; }
+        public int ActiveTouchId { get; set; } = -1;
+        public Point TouchStartPoint { get; set; }
+        public bool TouchStartedAtTop { get; set; }
+        public bool TouchStartedAtBottom { get; set; }
         public List<Run> SentenceRuns { get; } = new();
         public Run? HighlightedRun { get; set; }
     }
@@ -275,6 +279,8 @@ public partial class MainWindow : Window
             reader.PreviewMouseWheel += (_, e) => Reader_PreviewMouseWheel(state, e);
             reader.PreviewKeyDown += (_, e) => Reader_PreviewKeyDown(state, e);
             reader.PreviewMouseLeftButtonUp += (_, e) => Reader_PreviewMouseLeftButtonUp(state, e);
+            reader.PreviewTouchDown += (_, e) => Reader_PreviewTouchDown(state, e);
+            reader.PreviewTouchUp += (_, e) => Reader_PreviewTouchUp(state, e);
 
             tabItem.Tag = state;
             tabItem.Content = reader;
@@ -2643,6 +2649,15 @@ public partial class MainWindow : Window
 
         state.AttachedScroll = scroll;
 
+        // Surface/touch: use pixel-based direct panning instead of text-selection-like dragging.
+        scroll.CanContentScroll = false;
+        scroll.PanningMode =
+            state.Settings.ViewMode == "Cuộn"
+                ? PanningMode.VerticalOnly
+                : PanningMode.Both;
+        scroll.PanningRatio = 1.0;
+        scroll.PanningDeceleration = 0.0012;
+
         scroll.ScrollChanged += (_, _) =>
         {
             if (!ReferenceEquals(
@@ -2797,6 +2812,149 @@ public partial class MainWindow : Window
                     * ratio);
             }
         });
+    }
+
+    private void Reader_PreviewTouchDown(
+        OpenBookTab state,
+        TouchEventArgs e)
+    {
+        if (state.ActiveTouchId != -1)
+            return;
+
+        var scroll =
+            FindScrollableViewer(
+                state.Reader);
+
+        state.ActiveTouchId =
+            e.TouchDevice.Id;
+
+        state.TouchStartPoint =
+            e.GetTouchPoint(
+                state.Reader)
+            .Position;
+
+        state.TouchStartedAtTop =
+            scroll == null
+            || scroll.VerticalOffset <= 2;
+
+        state.TouchStartedAtBottom =
+            scroll == null
+            || scroll.ScrollableHeight <= 0
+            || scroll.VerticalOffset
+               >= scroll.ScrollableHeight - 2;
+    }
+
+    private void Reader_PreviewTouchUp(
+        OpenBookTab state,
+        TouchEventArgs e)
+    {
+        if (state.ActiveTouchId
+            != e.TouchDevice.Id)
+            return;
+
+        var end =
+            e.GetTouchPoint(
+                state.Reader)
+            .Position;
+
+        double dx =
+            end.X
+            - state.TouchStartPoint.X;
+
+        double dy =
+            end.Y
+            - state.TouchStartPoint.Y;
+
+        state.ActiveTouchId = -1;
+
+        const double verticalThreshold = 72;
+        const double horizontalThreshold = 88;
+
+        // In continuous mode, swiping beyond the chapter edge naturally changes chapter.
+        if (state.Settings.ViewMode == "Cuộn")
+        {
+            if (Math.Abs(dy)
+                    >= verticalThreshold
+                && Math.Abs(dy)
+                   > Math.Abs(dx) * 1.15)
+            {
+                if (state.TouchStartedAtBottom
+                    && dy < 0
+                    && state.ChapterIndex
+                       < state.Book.Chapters.Count - 1)
+                {
+                    MoveToChapterFromReading(
+                        state,
+                        state.ChapterIndex + 1);
+
+                    e.Handled = true;
+                    return;
+                }
+
+                if (state.TouchStartedAtTop
+                    && dy > 0
+                    && state.ChapterIndex > 0)
+                {
+                    MoveToChapterFromReading(
+                        state,
+                        state.ChapterIndex - 1,
+                        toEnd: true);
+
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        // Page modes: horizontal swipe behaves like Moon/Sumatra page turn.
+        if (Math.Abs(dx)
+                < horizontalThreshold
+            || Math.Abs(dx)
+               <= Math.Abs(dy) * 1.15)
+            return;
+
+        bool next =
+            dx < 0;
+
+        var command =
+            next
+                ? NavigationCommands.NextPage
+                : NavigationCommands.PreviousPage;
+
+        if (command.CanExecute(
+                null,
+                state.Reader))
+        {
+            command.Execute(
+                null,
+                state.Reader);
+
+            e.Handled = true;
+            return;
+        }
+
+        if (next
+            && state.ChapterIndex
+               < state.Book.Chapters.Count - 1)
+        {
+            MoveToChapterFromReading(
+                state,
+                state.ChapterIndex + 1);
+
+            e.Handled = true;
+        }
+        else if (!next
+                 && state.ChapterIndex > 0)
+        {
+            MoveToChapterFromReading(
+                state,
+                state.ChapterIndex - 1,
+                toEnd: true);
+
+            e.Handled = true;
+        }
     }
 
     private void Reader_PreviewMouseLeftButtonUp(
@@ -3074,6 +3232,14 @@ public partial class MainWindow : Window
         activeTab.Reader.ViewingMode =
             ToViewingMode(
                 activeTab.Settings.ViewMode);
+
+        if (activeTab.AttachedScroll != null)
+        {
+            activeTab.AttachedScroll.PanningMode =
+                activeTab.Settings.ViewMode == "Cuộn"
+                    ? PanningMode.VerticalOnly
+                    : PanningMode.Both;
+        }
 
         currentSettings =
             activeTab.Settings;
