@@ -39,7 +39,7 @@
                   Click="PrevChapter_Click"
                   Content="‹"
                   FontSize="18"
-                  ToolTip="Chương trước"
+                  ToolTip="Trang/màn trước; hết chương sẽ sang chương trước"
                   Width="32"/>
           <ComboBox x:Name="ChapterJumpCombo"
                     Width="230"
@@ -49,7 +49,7 @@
                   Click="NextChapter_Click"
                   Content="›"
                   FontSize="18"
-                  ToolTip="Chương sau"
+                  ToolTip="Trang/màn sau; hết chương sẽ sang chương sau"
                   Width="32"/>
 
           <Separator Margin="5,2" Width="1"/>
@@ -70,12 +70,15 @@
 
           <Button x:Name="PlayButton"
                   Click="Play_Click"
-                  Content="▶"
-                  ToolTip="Đọc"/>
+                  Content="▶  Đọc"
+                  ToolTip="Bắt đầu đọc từ vị trí hiện tại"
+                  MinWidth="66"
+                  FontWeight="SemiBold"/>
           <Button x:Name="StopButton"
                   Click="Stop_Click"
-                  Content="■"
-                  ToolTip="Dừng"/>
+                  Content="■  Dừng"
+                  ToolTip="Dừng đọc ngay"
+                  MinWidth="66"/>
 
           <CheckBox x:Name="AutoNextCheckBox"
                     Content="Tự qua chương"
