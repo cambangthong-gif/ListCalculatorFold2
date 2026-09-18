@@ -34,6 +34,7 @@ class DeviceTtsManager(
     private var lowLatencyEnabled = true
     private var maxCatchUpSpeed = 1.15f
     private var speaking = false
+    @Volatile private var externallyPaused = false
 
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -188,7 +189,7 @@ class DeviceTtsManager(
 
     @Synchronized
     private fun speakNextIfNeeded() {
-        if (!ready || stopped || speaking || queue.isEmpty()) return
+        if (!ready || stopped || externallyPaused || speaking || queue.isEmpty()) return
         trimStaleQueue()
         val engine = tts ?: return
         val item = queue.removeFirst()
@@ -252,12 +253,19 @@ class DeviceTtsManager(
     }
 
     @Synchronized
+    fun setExternalPaused(paused: Boolean) {
+        externallyPaused = paused
+        if (!paused) speakNextIfNeeded()
+    }
+
+    @Synchronized
     fun clearBacklog() {
         queue.clear(); tts?.stop(); speaking = false; releaseFocus(); onSpeakingChanged(false)
     }
 
     @Synchronized
     fun stop() {
+        externallyPaused = false
         stopped = true; ready = false; queue.clear(); speaking = false; releaseFocus(); onSpeakingChanged(false)
         tts?.stop(); tts?.shutdown(); tts = null; audioManager = null
     }
