@@ -24,8 +24,8 @@ class AudioPlayerManager(private val context: Context) {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
-        private const val STABLE_PREBUFFER_MS = 110
-        private const val STABLE_PREBUFFER_MAX_WAIT_MS = 90L
+        private const val STABLE_PREBUFFER_MS = 45
+        private const val STABLE_PREBUFFER_MAX_WAIT_MS = 35L
     }
 
     private data class AudioChunk(
@@ -68,7 +68,7 @@ class AudioPlayerManager(private val context: Context) {
             .build()
         val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val desiredBuffer = if (stableLiveMode) {
-            maxOf(minBuffer * 2, BYTES_PER_MS * 140)
+            maxOf(minBuffer, BYTES_PER_MS * 70)
         } else if (lowLatency) {
             minBuffer
         } else {
