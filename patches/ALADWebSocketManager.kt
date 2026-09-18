@@ -19,6 +19,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var webSocket: WebSocket? = null
     var onBinaryMessageReceived: ((ByteArray) -> Unit)? = null
     var onOutputTranscription: ((String) -> Unit)? = null
+    var onInputTranscription: ((String, Boolean) -> Unit)? = null
     var onTurnComplete: (() -> Unit)? = null
     var onInterrupted: (() -> Unit)? = null
     var onStatusChanged: ((String) -> Unit)? = null
@@ -164,6 +165,22 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                             ?: json.optJSONObject("server_content")
 
                     if (serverContent != null) {
+                        val interimInput =
+                            serverContent.optJSONObject("interimInputTranscription")
+                                ?: serverContent.optJSONObject("interim_input_transcription")
+                        val interimText = interimInput?.optString("text").orEmpty()
+                        if (interimText.isNotBlank()) {
+                            onInputTranscription?.invoke(interimText, false)
+                        }
+
+                        val finalInput =
+                            serverContent.optJSONObject("inputTranscription")
+                                ?: serverContent.optJSONObject("input_transcription")
+                        val finalInputText = finalInput?.optString("text").orEmpty()
+                        if (finalInputText.isNotBlank()) {
+                            onInputTranscription?.invoke(finalInputText, true)
+                        }
+
                         val outputTranscription =
                             serverContent.optJSONObject("outputTranscription")
                                 ?: serverContent.optJSONObject("output_transcription")
@@ -280,6 +297,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         })
                     })
                 })
+                put("inputAudioTranscription", JSONObject())
                 put("outputAudioTranscription", JSONObject())
                 put("contextWindowCompression", JSONObject().apply {
                     put("slidingWindow", JSONObject())
