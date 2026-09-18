@@ -83,6 +83,8 @@ class AudioDubbingForegroundService : Service() {
     private var lastInputSourceAnchorMs = -1L
     private var currentTurnStartClockMs = -1L
     private var lastTurnStartClockMs = -1L
+    private val pendingTurnStartClocks = ArrayDeque<Long>()
+    private var activeOutputTurnAnchorMs = -1L
     private var geminiOutputSourceCursorMs = -1L
     private var transcriptSourceAnchorMs = -1L
     private var playbackAudioManager: AudioManager? = null
@@ -237,6 +239,8 @@ class AudioDubbingForegroundService : Service() {
         lastInputSourceAnchorMs = -1L
         currentTurnStartClockMs = -1L
         lastTurnStartClockMs = -1L
+        pendingTurnStartClocks.clear()
+        activeOutputTurnAnchorMs = -1L
         geminiOutputSourceCursorMs = -1L
         transcriptSourceAnchorMs = -1L
         playbackAudioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -322,15 +326,24 @@ class AudioDubbingForegroundService : Service() {
 
             webSocketManager?.onBinaryMessageReceived = { audioChunk ->
                 if (activeVoiceSource == "gemini") {
-                    val anchor = if (geminiOutputSourceCursorMs >= 0L) {
-                        geminiOutputSourceCursorMs
-                    } else {
-                        audioClockSync.bestLiveAnchor()
+                    if (geminiOutputSourceCursorMs < 0L) {
+                        activeOutputTurnAnchorMs = synchronized(this@AudioDubbingForegroundService) {
+                            if (pendingTurnStartClocks.isNotEmpty()) {
+                                pendingTurnStartClocks.removeFirst()
+                            } else if (lastTurnStartClockMs >= 0L) {
+                                lastTurnStartClockMs
+                            } else {
+                                audioClockSync.bestLiveAnchor()
+                            }
+                        }
+                        geminiOutputSourceCursorMs = activeOutputTurnAnchorMs
                     }
+
+                    val anchor = geminiOutputSourceCursorMs
                     audioPlayerManager?.playAudioData(audioChunk, anchor)
                     val chunkDurationMs = (audioChunk.size.toLong() / 48L).coerceAtLeast(1L)
                     geminiOutputSourceCursorMs = anchor + chunkDurationMs
-                    audioClockLagMs.value = audioClockSync.lagFrom(anchor)
+                    audioClockLagMs.value = audioClockSync.lagFrom(activeOutputTurnAnchorMs)
                     queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
                 }
             }
@@ -344,9 +357,6 @@ class AudioDubbingForegroundService : Service() {
                         else -> fallback
                     }
                     lastInputSourceAnchorMs = anchor
-                    if (geminiOutputSourceCursorMs < 0L) {
-                        geminiOutputSourceCursorMs = anchor
-                    }
                     audioClockLagMs.value = audioClockSync.lagFrom(anchor)
                     if (!smartSubtitlePlaybackActive) {
                         smartSyncStatus.value = "TURN CLOCK"
@@ -357,11 +367,28 @@ class AudioDubbingForegroundService : Service() {
 
             webSocketManager?.onOutputTranscription = { text ->
                 if (activeVoiceSource == "device_tts" && !smartSubtitlePlaybackActive) {
-                    processTranscriptFragment(text, lastInputSourceAnchorMs)
+                    if (transcriptSourceAnchorMs < 0L) {
+                        transcriptSourceAnchorMs = synchronized(this@AudioDubbingForegroundService) {
+                            if (pendingTurnStartClocks.isNotEmpty()) {
+                                pendingTurnStartClocks.removeFirst()
+                            } else if (lastTurnStartClockMs >= 0L) {
+                                lastTurnStartClockMs
+                            } else {
+                                lastInputSourceAnchorMs
+                            }
+                        }
+                    }
+                    processTranscriptFragment(text, transcriptSourceAnchorMs)
                 }
             }
             webSocketManager?.onTurnComplete = {
-                if (activeVoiceSource == "device_tts") flushTranscriptBuffer(resetSnapshot = true)
+                if (activeVoiceSource == "device_tts") {
+                    flushTranscriptBuffer(resetSnapshot = true)
+                    transcriptSourceAnchorMs = -1L
+                } else {
+                    activeOutputTurnAnchorMs = -1L
+                    geminiOutputSourceCursorMs = -1L
+                }
             }
             webSocketManager?.onInterrupted = {
                 synchronized(transcriptBuffer) {
@@ -558,8 +585,12 @@ class AudioDubbingForegroundService : Service() {
                 currentTurnStartClockMs =
                     (audioClockSync.currentClockMs() - preRollMs).coerceAtLeast(0L)
                 lastTurnStartClockMs = currentTurnStartClockMs
-                geminiOutputSourceCursorMs = currentTurnStartClockMs
-                transcriptSourceAnchorMs = currentTurnStartClockMs
+                synchronized(this) {
+                    pendingTurnStartClocks.addLast(currentTurnStartClockMs)
+                    while (pendingTurnStartClocks.size > 8) {
+                        pendingTurnStartClocks.removeFirst()
+                    }
+                }
 
                 // Send a tiny pre-roll so the first consonant is not clipped.
                 vadPreRoll.forEach { webSocketManager?.sendAudioData(it) }
@@ -599,6 +630,8 @@ class AudioDubbingForegroundService : Service() {
         lastInputSourceAnchorMs = -1L
         currentTurnStartClockMs = -1L
         lastTurnStartClockMs = -1L
+        synchronized(this) { pendingTurnStartClocks.clear() }
+        activeOutputTurnAnchorMs = -1L
         geminiOutputSourceCursorMs = -1L
         transcriptSourceAnchorMs = -1L
         audioClockLagMs.value = 0L
@@ -764,6 +797,8 @@ class AudioDubbingForegroundService : Service() {
         lastInputSourceAnchorMs = -1L
         currentTurnStartClockMs = -1L
         lastTurnStartClockMs = -1L
+        synchronized(this) { pendingTurnStartClocks.clear() }
+        activeOutputTurnAnchorMs = -1L
         geminiOutputSourceCursorMs = -1L
         transcriptSourceAnchorMs = -1L
         try {
