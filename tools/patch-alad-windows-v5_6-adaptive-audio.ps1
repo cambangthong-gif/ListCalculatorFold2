@@ -129,8 +129,10 @@ if (-not $c.Contains($customNeedle)) { throw 'Gemini 3.8 systemInstruction marke
 $c = $c.Replace($customNeedle, $customReplacement)
 
 # Live Translate is continuous-stream translation, not a conversational barge-in flow.
-# Only clear client playback on interruption for the 3.8 agent-style engine.
-$interruptPattern = '(?s)            if \\(\\(sc\\.TryGetProperty\\("interrupted", out var interrupted\\) && interrupted\\.ValueKind == JsonValueKind\\.True\\)\\)\\s*\\{\\s*clearPlayback\\(\\);\\s*\\}'
+# Splice by stable surrounding anchors instead of fragile whitespace regex.
+$interruptStart = $c.IndexOf('            if ((sc.TryGetProperty("interrupted"')
+$interruptEnd = $c.IndexOf('            if (sc.TryGetProperty("inputTranscription"', $interruptStart)
+if ($interruptStart -lt 0 -or $interruptEnd -lt 0) { throw 'interrupted handler anchors missing' }
 $interruptReplacement = @'
             if ((sc.TryGetProperty("interrupted", out var interrupted) && interrupted.ValueKind == JsonValueKind.True))
             {
@@ -139,20 +141,15 @@ $interruptReplacement = @'
                 else
                     status("Live Translate tiếp tục luồng · bỏ qua tín hiệu interruption");
             }
-'@
-$c2 = [regex]::Replace($c, $interruptPattern, $interruptReplacement.TrimEnd(), 1)
-if ($c2 -eq $c) { throw 'interrupted handler regex failed' }
-$c = $c2
 
-# Reconnect proactively on GoAway while session-resumption handle is still available.
-$goOld = @'
-            if (root.TryGetProperty("goAway", out _) || root.TryGetProperty("go_away", out _))
-            {
-                status("Gemini chuẩn bị reset kết nối...");
-                return;
-            }
 '@
-$goNew = @'
+$c = $c.Substring(0, $interruptStart) + $interruptReplacement + $c.Substring($interruptEnd)
+
+# Reconnect proactively on GoAway while the session-resumption handle is still available.
+$goStart = $c.IndexOf('            if (root.TryGetProperty("goAway"')
+$goEnd = $c.IndexOf('            if (root.TryGetProperty("error"', $goStart)
+if ($goStart -lt 0 -or $goEnd -lt 0) { throw 'GoAway handler anchors missing' }
+$goReplacement = @'
             if (root.TryGetProperty("goAway", out _) || root.TryGetProperty("go_away", out _))
             {
                 status("Gemini chuyển phiên · đang nối lại an toàn...");
@@ -161,9 +158,9 @@ $goNew = @'
                     _ = Task.Run(() => ReconnectLoop(token), token);
                 return;
             }
+
 '@
-if (-not $c.Contains($goOld)) { throw 'GoAway marker missing' }
-$c = $c.Replace($goOld, $goNew)
+$c = $c.Substring(0, $goStart) + $goReplacement + $c.Substring($goEnd)
 
 # Smooth source-volume ducking instead of abrupt jumps that sound like pumping.
 $setVolumeOld = '                s.SimpleAudioVolume.Volume = Math.Clamp(original[pid] * factor, 0f, 1f);'
