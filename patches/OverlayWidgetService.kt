@@ -171,6 +171,7 @@ fun OverlayContent(
     val queueLatency by AudioDubbingForegroundService.queueLatencyMs.collectAsState()
     val smartPosition by AudioDubbingForegroundService.smartSyncPositionMs.collectAsState()
     val audioClockLag by AudioDubbingForegroundService.audioClockLagMs.collectAsState()
+    val syncStatus by AudioDubbingForegroundService.smartSyncStatus.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "widget_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -297,15 +298,18 @@ fun OverlayContent(
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    val smartLabel = if (smartPosition >= 0L) {
-                        val totalSeconds = smartPosition / 1000L
-                        "SMART " + (totalSeconds / 60L) + ":" +
-                            "%02d".format(totalSeconds % 60L)
-                    } else {
-                        "CLK " + audioClockLag + "ms"
+                    val smartLabel = when {
+                        syncStatus.startsWith("STABLE") -> "STABLE · q" + queueLatency + "ms"
+                        smartPosition >= 0L -> {
+                            val totalSeconds = smartPosition / 1000L
+                            "SMART " + (totalSeconds / 60L) + ":" +
+                                "%02d".format(totalSeconds % 60L)
+                        }
+                        else -> "TURN · " + audioClockLag + "ms"
                     }
                     Text(
-                        text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\nAUTO · q${queueLatency}ms · " + smartLabel,
+                        text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\n" +
+                            (if (autoSync) "AUTO" else "FIXED") + " · " + smartLabel,
                         color = if (autoSync) NeonCyan else Color.White,
                         fontSize = 9.sp,
                         lineHeight = 11.sp,
