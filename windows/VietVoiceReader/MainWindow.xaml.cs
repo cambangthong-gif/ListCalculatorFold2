@@ -22,6 +22,10 @@ public partial class MainWindow : Window
         public required TabItem Tab { get; init; }
         public required BookDisplaySettings Settings { get; set; }
         public int ChapterIndex { get; set; }
+        public int LastSentenceIndex { get; set; }
+        public double ScrollRatio { get; set; }
+        public double LastSavedScrollRatio { get; set; } = -1;
+        public bool ScrollHooked { get; set; }
         public List<Run> SentenceRuns { get; } = new();
         public Run? HighlightedRun { get; set; }
     }
@@ -36,6 +40,7 @@ public partial class MainWindow : Window
     private readonly Mp3Exporter exporter;
     private readonly SettingsStore settingsStore = new();
     private readonly LibraryStore libraryStore = new();
+    private readonly BookmarkStore bookmarkStore = new();
 
     private readonly Dictionary<string, OpenBookTab> openBooks =
         new(StringComparer.OrdinalIgnoreCase);
