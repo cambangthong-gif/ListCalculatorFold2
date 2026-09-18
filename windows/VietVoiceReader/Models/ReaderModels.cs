@@ -45,6 +45,8 @@ public sealed class BookLibraryItem
     public string Title { get; set; } = "Sách EPUB";
     public string Author { get; set; } = string.Empty;
     public int LastChapterIndex { get; set; }
+    public int LastSentenceIndex { get; set; }
+    public double LastScrollRatio { get; set; }
     public string LastChapterTitle { get; set; } = string.Empty;
     public int ChapterCount { get; set; }
     public DateTime LastOpenedUtc { get; set; } = DateTime.UtcNow;
@@ -65,4 +67,36 @@ public sealed class BookLibraryItem
 
     public string LastOpenedText =>
         LastOpenedUtc.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+}
+
+
+public sealed class BookmarkItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string SourcePath { get; set; } = string.Empty;
+    public string BookTitle { get; set; } = string.Empty;
+    public int ChapterIndex { get; set; }
+    public string ChapterTitle { get; set; } = string.Empty;
+    public int SentenceIndex { get; set; }
+    public double ScrollRatio { get; set; }
+    public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
+
+    public string DisplayTitle =>
+        string.IsNullOrWhiteSpace(ChapterTitle)
+            ? $"Chương {ChapterIndex + 1}"
+            : ChapterTitle;
+
+    public string DisplayDetail =>
+        $"Chương {ChapterIndex + 1} • {CreatedUtc.ToLocalTime():dd/MM/yyyy HH:mm}";
+}
+
+public sealed class BookSearchResult
+{
+    public int ChapterIndex { get; set; }
+    public string ChapterTitle { get; set; } = string.Empty;
+    public int CharacterIndex { get; set; }
+    public string Snippet { get; set; } = string.Empty;
+
+    public string DisplayTitle =>
+        $"Chương {ChapterIndex + 1}: {ChapterTitle}";
 }
