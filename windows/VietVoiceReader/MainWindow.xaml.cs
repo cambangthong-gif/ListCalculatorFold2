@@ -1808,6 +1808,284 @@ public partial class MainWindow : Window
         });
     }
 
+    private void HookReaderScroll(
+        OpenBookTab state,
+        ScrollViewer scroll)
+    {
+        if (ReferenceEquals(
+                state.AttachedScroll,
+                scroll))
+            return;
+
+        state.AttachedScroll = scroll;
+
+        scroll.ScrollChanged += (_, _) =>
+        {
+            if (!ReferenceEquals(
+                    state.AttachedScroll,
+                    scroll))
+                return;
+
+            ReaderScrollChanged(
+                state,
+                scroll);
+        };
+    }
+
+    private void ReaderScrollChanged(
+        OpenBookTab state,
+        ScrollViewer scroll)
+    {
+        if (scroll.ScrollableHeight <= 0)
+            state.ScrollRatio = 0;
+        else
+            state.ScrollRatio =
+                Math.Clamp(
+                    scroll.VerticalOffset
+                    / scroll.ScrollableHeight,
+                    0,
+                    1);
+
+        if (Math.Abs(
+                state.ScrollRatio
+                - state.LastSavedScrollRatio)
+            >= 0.02)
+        {
+            state.LastSavedScrollRatio =
+                state.ScrollRatio;
+
+            libraryStore.UpdateProgress(
+                state.Book,
+                state.ChapterIndex,
+                state.LastSentenceIndex,
+                state.ScrollRatio,
+                touchLastOpened: false);
+        }
+
+        if (ReferenceEquals(
+                activeTab,
+                state))
+        {
+            UpdateBookProgressUi(state);
+        }
+    }
+
+    private double GetCurrentScrollRatio(
+        OpenBookTab state)
+    {
+        var scroll =
+            FindScrollableViewer(
+                state.Reader);
+
+        if (scroll == null
+            || scroll.ScrollableHeight <= 0)
+            return state.ScrollRatio;
+
+        return Math.Clamp(
+            scroll.VerticalOffset
+            / scroll.ScrollableHeight,
+            0,
+            1);
+    }
+
+    private void UpdateBookProgressUi(
+        OpenBookTab state)
+    {
+        if (!ReferenceEquals(
+                activeTab,
+                state)
+            || state.Book.Chapters.Count <= 0)
+            return;
+
+        double within =
+            Math.Clamp(
+                state.ScrollRatio,
+                0,
+                1);
+
+        double progress =
+            100.0
+            * (state.ChapterIndex + within)
+            / state.Book.Chapters.Count;
+
+        if (state.ChapterIndex
+                == state.Book.Chapters.Count - 1
+            && within >= 0.995)
+        {
+            progress = 100;
+        }
+
+        BookProgressSlider.Value =
+            Math.Clamp(progress, 0, 100);
+
+        BookProgressText.Text =
+            $"{progress:0.0}% • {state.ChapterIndex + 1}/{state.Book.Chapters.Count}";
+    }
+
+    private void BookProgressSlider_MouseLeftButtonUp(
+        object sender,
+        MouseButtonEventArgs e)
+    {
+        if (activeTab == null
+            || activeTab.Book.Chapters.Count == 0)
+            return;
+
+        double normalized =
+            Math.Clamp(
+                BookProgressSlider.Value / 100.0,
+                0,
+                0.999999);
+
+        double exactChapter =
+            normalized
+            * activeTab.Book.Chapters.Count;
+
+        int chapterIndex =
+            Math.Clamp(
+                (int)Math.Floor(exactChapter),
+                0,
+                activeTab.Book.Chapters.Count - 1);
+
+        double ratio =
+            Math.Clamp(
+                exactChapter - chapterIndex,
+                0,
+                1);
+
+        activeTab.LastSentenceIndex = 0;
+        activeTab.ScrollRatio = ratio;
+
+        MoveToChapterFromReading(
+            activeTab,
+            chapterIndex);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            var scroll =
+                FindScrollableViewer(
+                    activeTab.Reader);
+
+            if (scroll != null
+                && scroll.ScrollableHeight > 0)
+            {
+                scroll.ScrollToVerticalOffset(
+                    scroll.ScrollableHeight
+                    * ratio);
+            }
+        });
+    }
+
+    private void Reader_PreviewMouseLeftButtonUp(
+        OpenBookTab state,
+        MouseButtonEventArgs e)
+    {
+        if (isPlaybackActive)
+            return;
+
+        var point =
+            e.GetPosition(
+                state.Reader);
+
+        double width =
+            Math.Max(
+                1,
+                state.Reader.ActualWidth);
+
+        bool left =
+            point.X <= width * 0.16;
+
+        bool right =
+            point.X >= width * 0.84;
+
+        if (!left && !right)
+            return;
+
+        if (state.Settings.ViewMode == "Cuộn")
+        {
+            var scroll =
+                FindScrollableViewer(
+                    state.Reader);
+
+            if (scroll == null)
+                return;
+
+            if (left)
+            {
+                if (scroll.VerticalOffset > 2)
+                {
+                    scroll.PageUp();
+                }
+                else if (state.ChapterIndex > 0)
+                {
+                    MoveToChapterFromReading(
+                        state,
+                        state.ChapterIndex - 1,
+                        toEnd: true);
+                }
+            }
+            else
+            {
+                bool atBottom =
+                    scroll.ScrollableHeight <= 0
+                    || scroll.VerticalOffset
+                       >= scroll.ScrollableHeight - 2;
+
+                if (!atBottom)
+                {
+                    scroll.PageDown();
+                }
+                else if (state.ChapterIndex
+                         < state.Book.Chapters.Count - 1)
+                {
+                    MoveToChapterFromReading(
+                        state,
+                        state.ChapterIndex + 1);
+                }
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        var command =
+            left
+                ? NavigationCommands.PreviousPage
+                : NavigationCommands.NextPage;
+
+        if (command.CanExecute(
+                null,
+                state.Reader))
+        {
+            command.Execute(
+                null,
+                state.Reader);
+
+            e.Handled = true;
+            return;
+        }
+
+        if (left
+            && state.ChapterIndex > 0)
+        {
+            MoveToChapterFromReading(
+                state,
+                state.ChapterIndex - 1,
+                toEnd: true);
+
+            e.Handled = true;
+        }
+        else if (right
+                 && state.ChapterIndex
+                    < state.Book.Chapters.Count - 1)
+        {
+            MoveToChapterFromReading(
+                state,
+                state.ChapterIndex + 1);
+
+            e.Handled = true;
+        }
+    }
+
     private static ScrollViewer? FindScrollableViewer(
         DependencyObject root)
     {
