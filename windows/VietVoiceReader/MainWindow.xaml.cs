@@ -1845,6 +1845,7 @@ public partial class MainWindow : Window
             FontWeights.SemiBold;
 
         state.HighlightedRun = run;
+        state.LastSentenceIndex = sentenceIndex;
 
         Dispatcher.BeginInvoke(() =>
         {
@@ -1855,6 +1856,18 @@ public partial class MainWindow : Window
             catch
             {
             }
+
+            state.ScrollRatio =
+                GetCurrentScrollRatio(state);
+
+            libraryStore.UpdateProgress(
+                state.Book,
+                state.ChapterIndex,
+                state.LastSentenceIndex,
+                state.ScrollRatio,
+                touchLastOpened: false);
+
+            UpdateBookProgressUi(state);
         });
     }
 
