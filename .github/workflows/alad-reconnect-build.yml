@@ -1,4 +1,4 @@
-name: Build ALAD TTS Select v4.0 Stable Live APK
+name: Build ALAD TTS Select v4.1 Hybrid Fast APK
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
       - name: Clone ALAD Mobile upstream
         run: git clone --depth 1 https://github.com/navidseyedain/ALAD-Mobile.git alad
 
-      - name: Apply ALAD TTS Select v4.0 Stable Live patches
+      - name: Apply ALAD TTS Select v4.1 Hybrid Fast patches
         run: |
           cp patches/build.gradle.kts alad/app/build.gradle.kts
           cp patches/AndroidManifest.xml alad/app/src/main/AndroidManifest.xml
@@ -44,13 +44,13 @@ jobs:
 
           p = Path('alad/app/build.gradle.kts')
           s = p.read_text()
-          s = s.replace('applicationId = "com.alad.app.tts.v31"', 'applicationId = "com.alad.app.tts.v40"')
-          s = s.replace('versionCode = 31', 'versionCode = 400')
-          s = s.replace('versionName = "1.3.1-tts-select"', 'versionName = "1.4.0-stable-live"')
+          s = s.replace('applicationId = "com.alad.app.tts.v31"', 'applicationId = "com.alad.app.tts.v41"')
+          s = s.replace('versionCode = 31', 'versionCode = 410')
+          s = s.replace('versionName = "1.3.1-tts-select"', 'versionName = "1.4.1-hybrid-fast"')
           p.write_text(s)
 
           p = Path('alad/app/src/main/res/values/strings.xml')
-          s = p.read_text().replace('ALAD TTS Select v3.1', 'ALAD TTS Select v4.0 Stable Live')
+          s = p.read_text().replace('ALAD TTS Select v3.1', 'ALAD TTS Select v4.1 Hybrid Fast')
           p.write_text(s)
 
           # Wire original-volume preference and preserve Fast-Reconnect from v3.4.
@@ -87,7 +87,7 @@ jobs:
               'val aiVolume by viewModel.volumeRatio.collectAsState()\n    val originalVolume by viewModel.originalVolume.collectAsState()\n    val dubMode'
           )
           needle = '''                    Slider(\n                        value = aiVolume,\n                        onValueChange = viewModel::updateVolumeRatio,\n                        valueRange = 0.20f..1.0f\n                    )'''
-          insert = needle + '''\n\n                    Spacer(modifier = Modifier.height(14.dp))\n                    SettingLabel("Âm lượng tiếng gốc ${(originalVolume * 100).roundToInt()}%")\n                    Slider(\n                        value = originalVolume,\n                        onValueChange = viewModel::updateOriginalVolume,\n                        valueRange = 0f..1.0f\n                    )\n                    Text(\n                        "v4.0 Stable Live: Gemini voice dùng PCM liên tục 100ms + server VAD + jitter buffer nhỏ, không Audio/Turn Clock, không tăng tốc hay drop. Device TTS giữ đường sync riêng.",\n                        color = TextSecondary,\n                        fontSize = 12.sp,\n                        lineHeight = 18.sp\n                    )'''
+          insert = needle + '''\n\n                    Spacer(modifier = Modifier.height(14.dp))\n                    SettingLabel("Âm lượng tiếng gốc ${(originalVolume * 100).roundToInt()}%")\n                    Slider(\n                        value = originalVolume,\n                        onValueChange = viewModel::updateOriginalVolume,\n                        valueRange = 0f..1.0f\n                    )\n                    Text(\n                        "v4.1 Hybrid Fast: PCM 100ms + server VAD tinh chỉnh + client end-of-turn 500ms; jitter buffer ~45ms, Gemini sync mặc định 0ms, không drop hay tăng tốc.",\n                        color = TextSecondary,\n                        fontSize = 12.sp,\n                        lineHeight = 18.sp\n                    )'''
           if needle not in s:
               raise SystemExit('Could not find AI volume slider insertion point')
           s = s.replace(needle, insert, 1)
@@ -123,11 +123,11 @@ jobs:
           ./gradlew assembleDebug --stacktrace
 
       - name: Rename APK
-        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v4.0-StableLive.apk
+        run: cp alad/app/build/outputs/apk/debug/app-debug.apk ALAD-TTS-Select-v4.1-HybridFast.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ALAD-TTS-Select-v4.0-StableLive
-          path: ALAD-TTS-Select-v4.0-StableLive.apk
+          name: ALAD-TTS-Select-v4.1-HybridFast
+          path: ALAD-TTS-Select-v4.1-HybridFast.apk
           if-no-files-found: error
