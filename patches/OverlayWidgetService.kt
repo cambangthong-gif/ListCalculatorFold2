@@ -169,6 +169,7 @@ fun OverlayContent(
     val syncOffset by AudioDubbingForegroundService.syncOffsetMs.collectAsState()
     val autoSync by AudioDubbingForegroundService.autoSyncActive.collectAsState()
     val queueLatency by AudioDubbingForegroundService.queueLatencyMs.collectAsState()
+    val smartPosition by AudioDubbingForegroundService.smartSyncPositionMs.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "widget_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -295,8 +296,15 @@ fun OverlayContent(
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     contentAlignment = Alignment.Center
                 ) {
+                    val smartLabel = if (smartPosition >= 0L) {
+                        val totalSeconds = smartPosition / 1000L
+                        "SMART " + (totalSeconds / 60L) + ":" +
+                            "%02d".format(totalSeconds % 60L)
+                    } else {
+                        "LIVE"
+                    }
                     Text(
-                        text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\nAUTO · q${queueLatency}ms",
+                        text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\nAUTO · q${queueLatency}ms · " + smartLabel,
                         color = if (autoSync) NeonCyan else Color.White,
                         fontSize = 9.sp,
                         lineHeight = 11.sp,
