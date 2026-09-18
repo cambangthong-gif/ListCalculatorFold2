@@ -109,12 +109,8 @@ $c = $c.Replace(
 
 # 3.8 dubbing is a continuous interpreter use-case: source speech must not barge-in and cut generated dubbing.
 # Current API supports NO_INTERRUPTION in realtimeInputConfig.
-$customNeedle = @'
-                outputAudioTranscription = new { },
-                systemInstruction = new
-'@
+$customNeedle = '                systemInstruction = new'
 $customReplacement = @'
-                outputAudioTranscription = new { },
                 realtimeInputConfig = new
                 {
                     automaticActivityDetection = new
@@ -129,7 +125,7 @@ $customReplacement = @'
                 },
                 systemInstruction = new
 '@
-if (-not $c.Contains($customNeedle)) { throw 'Gemini 3.8 realtimeInputConfig insertion marker missing' }
+if (-not $c.Contains($customNeedle)) { throw 'Gemini 3.8 systemInstruction marker missing' }
 $c = $c.Replace($customNeedle, $customReplacement)
 
 # Live Translate is continuous-stream translation, not a conversational barge-in flow.
