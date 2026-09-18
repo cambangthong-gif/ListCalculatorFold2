@@ -1,0 +1,96 @@
+name: Build ALAD Windows v6.2 Safe Browser Sync
+
+on:
+  push:
+    branches: [ alad-windows-v5-fluent ]
+    paths:
+      - 'tools/patch-alad-windows-v6_2-safe-browser-sync.ps1'
+      - 'tools/patch-alad-windows-v5_7-long-session.ps1'
+      - 'alad-browser-bridge/**'
+      - '.github/workflows/alad-windows-v6_2-safe-browser-sync.yml'
+      - 'alad-windows-v2/**'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: windows-2025
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-arm64, win-x64]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Generate ALAD icon
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $dir = 'alad-windows-v2/Assets'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $bmp = New-Object System.Drawing.Bitmap 256,256
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+          $g.Clear([System.Drawing.Color]::Transparent)
+          $blue = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(0,103,192))
+          $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+          $g.FillEllipse($blue,18,18,220,220)
+          $g.FillRectangle($white,64,91,18,74)
+          $g.FillRectangle($white,96,68,18,120)
+          $g.FillRectangle($white,128,84,18,88)
+          $g.FillRectangle($white,160,105,18,46)
+          $h = $bmp.GetHicon()
+          $ico = [System.Drawing.Icon]::FromHandle($h)
+          $fs = [IO.File]::Create((Join-Path $dir 'alad-compact.ico'))
+          $ico.Save($fs); $fs.Close()
+          $ico.Dispose(); $blue.Dispose(); $white.Dispose(); $g.Dispose(); $bmp.Dispose()
+
+      - name: Apply v6.2 Safe Browser Sync
+        shell: pwsh
+        run: ./tools/patch-alad-windows-v6_2-safe-browser-sync.ps1
+
+      - name: Set app identity and icon
+        shell: pwsh
+        run: |
+          $p = 'alad-windows-v2/AladWindowsV2.csproj'
+          $x = Get-Content $p -Raw
+          $replacement = "<AssemblyName>ALAD-Windows-v6.2-SafeBrowser</AssemblyName>`r`n    <ApplicationIcon>Assets\alad-compact.ico</ApplicationIcon>"
+          $x = $x.Replace('<AssemblyName>ALAD-Windows-v2</AssemblyName>', $replacement)
+          Set-Content $p $x -Encoding UTF8
+
+      - name: Restore
+        run: dotnet restore alad-windows-v2/AladWindowsV2.csproj -r ${{ matrix.rid }}
+
+      - name: Publish single EXE
+        run: dotnet publish alad-windows-v2/AladWindowsV2.csproj -c Release -r ${{ matrix.rid }} --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o out/${{ matrix.rid }}
+
+      - name: Verify app
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem "out/${{ matrix.rid }}" -Filter 'ALAD-Windows-v6.2-SafeBrowser.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'SafeBrowser EXE not found' }
+          if ($exe.Length -lt 5MB) { throw 'EXE unexpectedly small' }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Windows-v6.2-SafeBrowser-${{ matrix.rid }}
+          path: out/${{ matrix.rid }}/ALAD-Windows-v6.2-SafeBrowser.exe
+          if-no-files-found: error
+
+  extension:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package universal extension
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Compress-Archive -Path 'alad-browser-bridge/*' -DestinationPath 'out/ALAD-Universal-Browser-Bridge-v1.1.zip' -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Universal-Browser-Bridge-v1.1
+          path: out/ALAD-Universal-Browser-Bridge-v1.1.zip
+          if-no-files-found: error
