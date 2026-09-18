@@ -327,6 +327,18 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         }
     }
 
+    fun sendAudioStreamEnd() {
+        if (!isSetupComplete) return
+        val payload = JSONObject().apply {
+            put("realtimeInput", JSONObject().apply {
+                put("audioStreamEnd", true)
+            })
+        }
+        if (webSocket?.send(payload.toString()) != true) {
+            scheduleReconnect("audio stream end failed")
+        }
+    }
+
     private fun sendAudioNow(base64Audio: String): Boolean {
         val inputPayload = JSONObject().apply {
             put("realtimeInput", JSONObject().apply {
