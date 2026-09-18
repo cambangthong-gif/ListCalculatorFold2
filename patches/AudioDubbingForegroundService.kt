@@ -18,6 +18,7 @@ import com.alad.app.core.audio.AudioCaptureManager
 import com.alad.app.core.audio.AudioPlayerManager
 import com.alad.app.core.audio.DeviceTtsManager
 import com.alad.app.core.network.ALADWebSocketManager
+import com.alad.app.core.sync.AudioClockSyncController
 import com.alad.app.core.sync.SmartSyncManager
 import com.alad.app.data.repository.UserPreferencesRepository
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,8 @@ class AudioDubbingForegroundService : Service() {
         val queueLatencyMs = MutableStateFlow(0)
         val smartSyncStatus = MutableStateFlow("Live Sync")
         val smartSyncPositionMs = MutableStateFlow(-1L)
+        val audioClockMs = MutableStateFlow(0L)
+        val audioClockLagMs = MutableStateFlow(0L)
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
@@ -72,10 +75,14 @@ class AudioDubbingForegroundService : Service() {
     private var sessionSettingsJob: Job? = null
     private var repository: UserPreferencesRepository? = null
     private var smartSyncManager: SmartSyncManager? = null
+    private val audioClockSync = AudioClockSyncController()
     private var smartSyncJob: Job? = null
     private var mediaStopJob: Job? = null
     private var lastSmartCueStartMs = Long.MIN_VALUE
     private var smartSubtitlePlaybackActive = false
+    private var lastInputSourceAnchorMs = -1L
+    private var geminiOutputSourceCursorMs = -1L
+    private var transcriptSourceAnchorMs = -1L
     private var playbackAudioManager: AudioManager? = null
     private var sourceMediaPlaying = true
 
@@ -98,7 +105,9 @@ class AudioDubbingForegroundService : Service() {
             sourceMediaPlaying = mediaActive
 
             smartSyncManager?.setPlaying(mediaActive)
+            audioClockSync.setPlaying(mediaActive)
             smartSyncPositionMs.value = smartSyncManager?.estimatePosition() ?: -1L
+            audioClockMs.value = audioClockSync.currentClockMs()
 
             if (!isRunning.value) return
 
@@ -147,13 +156,26 @@ class AudioDubbingForegroundService : Service() {
                         smartSyncStatus.value = "TAIL DONE"
                     }
                 } else {
-                    // Ordinary pause: keep the backlog intact. Wait briefly so a tiny
-                    // playback gap does not chop speech, then freeze output until resume.
-                    val pauseGraceMs = if (manager?.hasTimeline == true) 500L else 1_800L
+                    // Without an external timeline, allow the last translated sentence to
+                    // finish when playback stops after recent speech. This also avoids
+                    // chopping the final line at end-of-video. A manual pause may finish
+                    // the already-generated sentence, then output freezes.
+                    val recentSpeech = audioClockSync.hasRecentSpeech(2_800L)
+                    val pauseGraceMs = when {
+                        manager?.hasTimeline == true -> 500L
+                        recentSpeech -> 3_800L
+                        else -> 1_000L
+                    }
+                    if (recentSpeech && manager?.hasTimeline != true) {
+                        smartSyncStatus.value = "AUDIO TAIL"
+                    }
                     delay(pauseGraceMs)
                     if (!sourceMediaPlaying) {
                         audioPlayerManager?.setExternalPaused(true)
                         deviceTtsManager?.setExternalPaused(true)
+                        if (manager?.hasTimeline != true) {
+                            smartSyncStatus.value = "AUDIO PAUSED"
+                        }
                     }
                 }
             }
@@ -210,6 +232,12 @@ class AudioDubbingForegroundService : Service() {
     private fun startDubbing(resultCode: Int, data: Intent) {
         isRunning.value = true
         sourceMediaPlaying = true
+        audioClockSync.reset()
+        audioClockMs.value = 0L
+        audioClockLagMs.value = 0L
+        lastInputSourceAnchorMs = -1L
+        geminiOutputSourceCursorMs = -1L
+        transcriptSourceAnchorMs = -1L
         playbackAudioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         try {
             playbackAudioManager?.registerAudioPlaybackCallback(playbackCallback, null)
@@ -260,6 +288,7 @@ class AudioDubbingForegroundService : Service() {
                         lowLatency = lowLatency,
                         maxSpeed = maxCatchUpSpeed
                     )
+                    manager.setSourceClockProvider { audioClockSync.currentClockMs() }
                     manager.start()
                 }
             } else {
@@ -273,6 +302,7 @@ class AudioDubbingForegroundService : Service() {
                         lowLatencyEnabled = lowLatency,
                         maxSpeed = maxCatchUpSpeed
                     )
+                    player.setSourceClockProvider { audioClockSync.currentClockMs() }
                     player.start()
                 }
             }
@@ -291,18 +321,35 @@ class AudioDubbingForegroundService : Service() {
 
             webSocketManager?.onBinaryMessageReceived = { audioChunk ->
                 if (activeVoiceSource == "gemini") {
-                    audioPlayerManager?.playAudioData(audioChunk)
+                    val anchor = if (geminiOutputSourceCursorMs >= 0L) {
+                        geminiOutputSourceCursorMs
+                    } else {
+                        audioClockSync.bestLiveAnchor()
+                    }
+                    audioPlayerManager?.playAudioData(audioChunk, anchor)
+                    val chunkDurationMs = (audioChunk.size.toLong() / 48L).coerceAtLeast(1L)
+                    geminiOutputSourceCursorMs = anchor + chunkDurationMs
+                    audioClockLagMs.value = audioClockSync.lagFrom(anchor)
                     queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
                 }
             }
 
             webSocketManager?.onInputTranscription = { text, isFinal ->
-                if (isFinal) handleSmartInputTranscript(text)
+                if (isFinal) {
+                    val anchor = audioClockSync.markInputFinal()
+                    lastInputSourceAnchorMs = anchor
+                    geminiOutputSourceCursorMs = anchor
+                    audioClockLagMs.value = audioClockSync.lagFrom(anchor)
+                    if (!smartSubtitlePlaybackActive) {
+                        smartSyncStatus.value = "AUDIO CLOCK"
+                    }
+                    handleSmartInputTranscript(text)
+                }
             }
 
             webSocketManager?.onOutputTranscription = { text ->
                 if (activeVoiceSource == "device_tts" && !smartSubtitlePlaybackActive) {
-                    processTranscriptFragment(text)
+                    processTranscriptFragment(text, lastInputSourceAnchorMs)
                 }
             }
             webSocketManager?.onTurnComplete = {
@@ -351,6 +398,12 @@ class AudioDubbingForegroundService : Service() {
             val appUid = applicationInfo.uid
             mediaProjection?.let { projection ->
                 audioCaptureManager?.startCapture(projection, appUid) { pcmData ->
+                    val clockUpdate = audioClockSync.onCaptured(pcmData.size)
+                    audioClockMs.value = clockUpdate.sourceClockMs
+                    if (clockUpdate.discontinuity) {
+                        handleAudioClockDiscontinuity(clockUpdate.wallGapMs)
+                    }
+
                     val normalized = calculateNormalizedLevel(pcmData)
                     feedAudioThroughVad(pcmData, normalized)
                     val current = audioAmplitude.value
@@ -488,6 +541,7 @@ class AudioDubbingForegroundService : Service() {
         }
 
         if (voiceOrUsefulAudio) {
+            audioClockSync.markSpeechSent()
             if (!vadSpeechActive) {
                 // Send a tiny pre-roll so the first consonant is not clipped.
                 vadPreRoll.forEach { webSocketManager?.sendAudioData(it) }
@@ -506,7 +560,30 @@ class AudioDubbingForegroundService : Service() {
         }
     }
 
-    private fun processTranscriptFragment(text: String) {
+    private fun handleAudioClockDiscontinuity(wallGapMs: Long) {
+        if (!isRunning.value) return
+        audioPlayerManager?.clearForExternalSeek()
+        deviceTtsManager?.clearBacklog()
+        synchronized(transcriptBuffer) {
+            transcriptBuffer.clear()
+            lastTranscriptSnapshot = ""
+            transcriptSourceAnchorMs = -1L
+        }
+        synchronized(this) {
+            vadPreRoll.clear()
+            vadSpeechActive = false
+            vadHangoverChunks = 0
+        }
+        lastInputSourceAnchorMs = -1L
+        geminiOutputSourceCursorMs = -1L
+        audioClockLagMs.value = 0L
+        queueLatencyMs.value = 0
+        if (!smartSubtitlePlaybackActive) {
+            smartSyncStatus.value = "AUDIO RESYNC"
+        }
+    }
+
+    private fun processTranscriptFragment(text: String, sourceClockMs: Long = -1L) {
         val cleaned = text.replace(Regex("\\s+"), " ").trim()
         if (cleaned.isBlank()) return
         synchronized(transcriptBuffer) {
@@ -518,6 +595,9 @@ class AudioDubbingForegroundService : Service() {
             }
             lastTranscriptSnapshot = cleaned
             if (delta.isNotBlank()) {
+                if (transcriptBuffer.isEmpty()) {
+                    transcriptSourceAnchorMs = sourceClockMs
+                }
                 if (transcriptBuffer.isNotEmpty() && !transcriptBuffer.last().isWhitespace()) {
                     transcriptBuffer.append(' ')
                 }
@@ -539,9 +619,14 @@ class AudioDubbingForegroundService : Service() {
 
     private fun flushTranscriptBufferLocked(resetSnapshot: Boolean) {
         val text = transcriptBuffer.toString().trim()
+        val sourceAnchor = transcriptSourceAnchorMs
         transcriptBuffer.clear()
+        transcriptSourceAnchorMs = -1L
         if (resetSnapshot) lastTranscriptSnapshot = ""
-        if (text.isNotBlank()) deviceTtsManager?.enqueueText(text)
+        if (text.isNotBlank()) {
+            deviceTtsManager?.enqueueText(text, sourceAnchor)
+            audioClockLagMs.value = audioClockSync.lagFrom(sourceAnchor)
+        }
     }
 
     private fun handleCompanionState(intent: Intent) {
@@ -648,6 +733,12 @@ class AudioDubbingForegroundService : Service() {
         lastSmartCueStartMs = Long.MIN_VALUE
         smartSyncStatus.value = "Live Sync"
         smartSyncPositionMs.value = -1L
+        audioClockSync.reset()
+        audioClockMs.value = 0L
+        audioClockLagMs.value = 0L
+        lastInputSourceAnchorMs = -1L
+        geminiOutputSourceCursorMs = -1L
+        transcriptSourceAnchorMs = -1L
         try {
             playbackAudioManager?.unregisterAudioPlaybackCallback(playbackCallback)
         } catch (_: Throwable) {
