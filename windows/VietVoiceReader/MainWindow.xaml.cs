@@ -2906,6 +2906,24 @@ public partial class MainWindow : Window
                 FlowDocumentReaderViewingMode.Scroll
         };
 
+    private void SaveReadingPosition(
+        OpenBookTab state)
+    {
+        state.ScrollRatio =
+            GetCurrentScrollRatio(state);
+
+        libraryStore.UpdateProgress(
+            state.Book,
+            state.ChapterIndex,
+            state.LastSentenceIndex,
+            state.ScrollRatio,
+            touchLastOpened: false);
+
+        settingsStore.Save(
+            state.Book.SourcePath,
+            state.Settings);
+    }
+
     // ---------------------------------------------------------------------
     // UI helpers
     // ---------------------------------------------------------------------
@@ -2969,6 +2987,10 @@ public partial class MainWindow : Window
         EventArgs e)
     {
         operationCts?.Cancel();
+
+        foreach (var state in openBooks.Values.ToList())
+            SaveReadingPosition(state);
+
         StopPlayback(true);
         tts.Dispose();
         base.OnClosed(e);
