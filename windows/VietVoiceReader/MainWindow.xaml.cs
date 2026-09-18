@@ -250,7 +250,7 @@ public partial class MainWindow : Window
                 ZoomIncrement = 10,
                 Zoom = Math.Clamp(settings.ZoomPercent, 50, 200),
                 MaxWidth = Math.Clamp(settings.ReaderWidth, 520, 1200),
-                HorizontalAlignment = HorizontalAlignment.Stretch
+                HorizontalAlignment = HorizontalAlignment.Center
             };
 
             var tabItem = new TabItem();
@@ -2254,6 +2254,62 @@ public partial class MainWindow : Window
         {
             StatusText.Text =
                 $"Không thể chuyển đến trang {page}.";
+        }
+    }
+
+    private void ToggleNavigationPane_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        bool show =
+            LeftPane.Visibility
+            != Visibility.Visible;
+
+        LeftPane.Visibility =
+            show
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        LeftColumn.Width =
+            show
+                ? new GridLength(300)
+                : new GridLength(0);
+
+        if (show)
+        {
+            RightPane.Visibility =
+                Visibility.Collapsed;
+
+            RightColumn.Width =
+                new GridLength(0);
+        }
+    }
+
+    private void ToggleSettingsPane_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        bool show =
+            RightPane.Visibility
+            != Visibility.Visible;
+
+        RightPane.Visibility =
+            show
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        RightColumn.Width =
+            show
+                ? new GridLength(280)
+                : new GridLength(0);
+
+        if (show)
+        {
+            LeftPane.Visibility =
+                Visibility.Collapsed;
+
+            LeftColumn.Width =
+                new GridLength(0);
         }
     }
 
