@@ -1,59 +1,71 @@
 (() => {
+  if (window.__ALAD_UNIVERSAL_BRIDGE__) return;
+  window.__ALAD_UNIVERSAL_BRIDGE__ = true;
+
   let connected = false;
-  let video = null;
-  let observer = null;
+  let media = null;
+  let captionObserver = null;
+  let textTrackHandlers = [];
   let lastCaption = "";
   let lastCaptionAt = 0;
-  let lastVideoId = "";
   let lastStateSent = 0;
+  let lastMediaKey = "";
   let originalVolumeBeforeAlad = null;
+  let scanTimer = null;
+
+  const HOST = location.hostname.toLowerCase();
 
   function send(payload) {
     if (!connected) return;
     chrome.runtime.sendMessage({ type: "aladBridgeMessage", payload }).catch(() => {});
   }
 
-  function videoId() {
-    try { return new URL(location.href).searchParams.get("v") || ""; }
-    catch { return ""; }
+  function mediaKey(el) {
+    if (!el) return "";
+    const src = el.currentSrc || el.src || "";
+    return location.href + "|" + src;
+  }
+
+  function visibleScore(el) {
+    if (!el) return -1;
+    const r = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return -1;
+    const area = Math.max(0, r.width) * Math.max(0, r.height);
+    const playingBonus = !el.paused && !el.ended ? 1e9 : 0;
+    const audibleBonus = !el.muted && el.volume > 0 ? 1e8 : 0;
+    return area + playingBonus + audibleBonus;
+  }
+
+  function findBestMedia() {
+    const list = [...document.querySelectorAll("video, audio")];
+    if (!list.length) return null;
+    list.sort((a, b) => visibleScore(b) - visibleScore(a));
+    return list[0] || null;
   }
 
   function currentState(type = "state") {
-    if (!video) return;
+    if (!media) return;
     send({
       type,
-      videoId: videoId(),
-      currentTime: Number(video.currentTime || 0),
-      duration: Number(video.duration || 0),
-      playbackRate: Number(video.playbackRate || 1),
-      paused: Boolean(video.paused)
+      videoId: mediaKey(media),
+      currentTime: Number(media.currentTime || 0),
+      duration: Number(media.duration || 0),
+      playbackRate: Number(media.playbackRate || 1),
+      paused: Boolean(media.paused),
+      site: HOST,
+      title: document.title || ""
     });
   }
 
-  function ensureCaptionsEnabled() {
-    if (!connected) return;
-    const button = document.querySelector(".ytp-subtitles-button");
-    if (!button) return;
-    const pressed = button.getAttribute("aria-pressed");
-    if (pressed === "false") {
-      try { button.click(); } catch {}
-    }
+  function normalize(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
   }
 
-  function captionText() {
-    const segments = [...document.querySelectorAll(".ytp-caption-segment")];
-    if (segments.length) {
-      return segments.map(x => (x.textContent || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-    }
-
-    const windows = [...document.querySelectorAll(".ytp-caption-window-container .caption-visual-line")];
-    return windows.map(x => (x.textContent || "").trim()).filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-  }
-
-  function emitCaption() {
-    if (!connected || !video) return;
-    const text = captionText();
-    if (!text || text === lastCaption) return;
+  function emitCaption(text, source = "dom") {
+    if (!connected || !media) return;
+    text = normalize(text);
+    if (!text || text === lastCaption || text.length > 500) return;
 
     const now = performance.now();
     const elapsed = lastCaptionAt ? Math.max(0.2, (now - lastCaptionAt) / 1000) : 0.8;
@@ -63,29 +75,139 @@
     send({
       type: "caption",
       text,
-      videoId: videoId(),
-      currentTime: Number(video.currentTime || 0),
-      duration: Math.min(4, elapsed),
-      playbackRate: Number(video.playbackRate || 1),
-      paused: Boolean(video.paused)
+      videoId: mediaKey(media),
+      currentTime: Number(media.currentTime || 0),
+      duration: Math.min(5, elapsed),
+      playbackRate: Number(media.playbackRate || 1),
+      paused: Boolean(media.paused),
+      source,
+      site: HOST
     });
   }
 
-  function attachCaptionObserver() {
-    if (observer) observer.disconnect();
-    observer = new MutationObserver(() => emitCaption());
-    const root = document.querySelector(".ytp-caption-window-container") || document.body;
-    observer.observe(root, { subtree: true, childList: true, characterData: true });
+  function activeTrackText() {
+    if (!media?.textTracks) return "";
+    const parts = [];
+    for (const track of media.textTracks) {
+      if (track.kind !== "captions" && track.kind !== "subtitles") continue;
+
+      // If the page keeps the track disabled, hidden lets activeCues update
+      // without forcing subtitles visibly on the page.
+      try {
+        if (track.mode === "disabled") track.mode = "hidden";
+      } catch {}
+
+      const cues = track.activeCues;
+      if (!cues) continue;
+      for (let i = 0; i < cues.length; i++) {
+        const cue = cues[i];
+        const text = cue?.text || "";
+        if (text) parts.push(text);
+      }
+    }
+    return normalize(parts.join(" "));
   }
 
-  function detachVideo() {
-    if (!video) return;
-    video.removeEventListener("play", onPlay);
-    video.removeEventListener("pause", onPause);
-    video.removeEventListener("seeked", onSeeked);
-    video.removeEventListener("ratechange", onRate);
-    video.removeEventListener("loadedmetadata", onLoaded);
-    video = null;
+  function attachTextTracks() {
+    for (const [track, fn] of textTrackHandlers) {
+      try { track.removeEventListener("cuechange", fn); } catch {}
+    }
+    textTrackHandlers = [];
+
+    if (!media?.textTracks) return;
+
+    for (const track of media.textTracks) {
+      if (track.kind !== "captions" && track.kind !== "subtitles") continue;
+      const fn = () => {
+        const text = activeTrackText();
+        if (text) emitCaption(text, "textTrack");
+      };
+      try {
+        track.addEventListener("cuechange", fn);
+        textTrackHandlers.push([track, fn]);
+      } catch {}
+    }
+
+    const text = activeTrackText();
+    if (text) emitCaption(text, "textTrack");
+  }
+
+  function isLikelyCaptionElement(el) {
+    if (!(el instanceof HTMLElement) || !media) return false;
+    const text = normalize(el.innerText || el.textContent || "");
+    if (!text || text.length > 500) return false;
+
+    const er = el.getBoundingClientRect();
+    const mr = media.getBoundingClientRect();
+    if (er.width <= 0 || er.height <= 0 || mr.width <= 0 || mr.height <= 0) return false;
+
+    const overlapsX = er.right >= mr.left && er.left <= mr.right;
+    const overlapsY = er.bottom >= mr.top && er.top <= mr.bottom;
+    const nearLowerArea = er.top >= mr.top + mr.height * 0.35;
+    return overlapsX && overlapsY && nearLowerArea;
+  }
+
+  function siteSpecificCaption() {
+    let nodes = [];
+
+    if (HOST.includes("youtube.com")) {
+      nodes = [...document.querySelectorAll(".ytp-caption-segment, .ytp-caption-window-container .caption-visual-line")];
+    } else if (HOST.includes("netflix.com")) {
+      nodes = [...document.querySelectorAll(".player-timedtext-text-container, [class*='timedtext']")];
+    } else {
+      nodes = [...document.querySelectorAll(
+        "[class*='subtitle' i], [class*='caption' i], [data-testid*='subtitle' i], [data-testid*='caption' i]"
+      )].filter(isLikelyCaptionElement);
+    }
+
+    return normalize(nodes.map(x => x.innerText || x.textContent || "").filter(Boolean).join(" "));
+  }
+
+  function scanCaption() {
+    if (!connected || !media) return;
+
+    const trackText = activeTrackText();
+    if (trackText) {
+      emitCaption(trackText, "textTrack");
+      return;
+    }
+
+    const domText = siteSpecificCaption();
+    if (domText) emitCaption(domText, "dom");
+  }
+
+  function attachCaptionObserver() {
+    if (captionObserver) captionObserver.disconnect();
+
+    captionObserver = new MutationObserver(() => {
+      if (scanTimer) return;
+      scanTimer = setTimeout(() => {
+        scanTimer = null;
+        scanCaption();
+      }, 80);
+    });
+
+    captionObserver.observe(document.documentElement || document.body, {
+      subtree: true,
+      childList: true,
+      characterData: true
+    });
+  }
+
+  function detachMedia() {
+    if (!media) return;
+    media.removeEventListener("play", onPlay);
+    media.removeEventListener("pause", onPause);
+    media.removeEventListener("seeked", onSeeked);
+    media.removeEventListener("ratechange", onRate);
+    media.removeEventListener("loadedmetadata", onLoaded);
+    media.removeEventListener("emptied", onLoaded);
+    media = null;
+
+    for (const [track, fn] of textTrackHandlers) {
+      try { track.removeEventListener("cuechange", fn); } catch {}
+    }
+    textTrackHandlers = [];
   }
 
   function onPlay() { currentState("state"); }
@@ -93,53 +215,59 @@
   function onSeeked() {
     lastCaption = "";
     currentState("seek");
+    scanCaption();
   }
   function onRate() { currentState("state"); }
   function onLoaded() {
     lastCaption = "";
-    send({
-      type: "video",
-      videoId: videoId(),
-      currentTime: Number(video?.currentTime || 0),
-      duration: Number(video?.duration || 0),
-      playbackRate: Number(video?.playbackRate || 1),
-      paused: Boolean(video?.paused)
-    });
+    currentState("video");
+    attachTextTracks();
+    scanCaption();
   }
 
-  function attachVideo() {
-    const found = document.querySelector("video");
-    if (!found || found === video) return;
-    detachVideo();
-    video = found;
-    video.addEventListener("play", onPlay);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("seeked", onSeeked);
-    video.addEventListener("ratechange", onRate);
-    video.addEventListener("loadedmetadata", onLoaded);
-    onLoaded();
+  function attachMedia() {
+    const found = findBestMedia();
+    if (!found || found === media) return;
+
+    detachMedia();
+    media = found;
+    lastMediaKey = mediaKey(media);
+    media.addEventListener("play", onPlay);
+    media.addEventListener("pause", onPause);
+    media.addEventListener("seeked", onSeeked);
+    media.addEventListener("ratechange", onRate);
+    media.addEventListener("loadedmetadata", onLoaded);
+    media.addEventListener("emptied", onLoaded);
+    attachTextTracks();
+    currentState("video");
+    scanCaption();
   }
 
   function setVolume(value) {
-    attachVideo();
-    if (!video) return;
-    if (originalVolumeBeforeAlad == null) originalVolumeBeforeAlad = video.volume;
+    attachMedia();
+    if (!media) return;
+    if (originalVolumeBeforeAlad == null) originalVolumeBeforeAlad = media.volume;
     const v = Math.max(0, Math.min(1, Number(value)));
-    if (Number.isFinite(v)) video.volume = v;
+    if (Number.isFinite(v)) media.volume = v;
+  }
+
+  function restoreVolume() {
+    if (media && originalVolumeBeforeAlad != null) {
+      try { media.volume = originalVolumeBeforeAlad; } catch {}
+    }
+    originalVolumeBeforeAlad = null;
   }
 
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === "aladBridgeStatus") {
       connected = Boolean(message.connected);
       if (connected) {
-        attachVideo();
-        ensureCaptionsEnabled();
+        attachMedia();
         attachCaptionObserver();
         currentState("state");
-        emitCaption();
-      } else if (video && originalVolumeBeforeAlad != null) {
-        video.volume = originalVolumeBeforeAlad;
-        originalVolumeBeforeAlad = null;
+        scanCaption();
+      } else {
+        restoreVolume();
       }
     }
 
@@ -149,50 +277,41 @@
 
     if (message?.type === "aladConfig") {
       connected = true;
-      attachVideo();
-      ensureCaptionsEnabled();
+      attachMedia();
       setVolume(message.originalVolume ?? 1);
       attachCaptionObserver();
       currentState("state");
-      emitCaption();
+      scanCaption();
     }
   });
 
   chrome.runtime.sendMessage({ type: "aladBridgeProbe" }).then(r => {
     connected = Boolean(r?.connected);
     if (connected) {
-      attachVideo();
-      ensureCaptionsEnabled();
+      attachMedia();
       attachCaptionObserver();
       currentState("state");
-      emitCaption();
+      scanCaption();
     }
   }).catch(() => {});
 
   setInterval(() => {
-    attachVideo();
+    attachMedia();
 
-    const id = videoId();
-    if (id !== lastVideoId) {
-      lastVideoId = id;
-      lastCaption = "";
-      if (connected && video) {
-        send({
-          type: "video",
-          videoId: id,
-          currentTime: Number(video.currentTime || 0),
-          duration: Number(video.duration || 0),
-          playbackRate: Number(video.playbackRate || 1),
-          paused: Boolean(video.paused)
-        });
-        ensureCaptionsEnabled();
-        attachCaptionObserver();
+    if (media) {
+      const key = mediaKey(media);
+      if (key !== lastMediaKey) {
+        lastMediaKey = key;
+        lastCaption = "";
+        currentState("video");
+        attachTextTracks();
       }
     }
 
-    if (connected && video && performance.now() - lastStateSent > 500) {
+    if (connected && media && performance.now() - lastStateSent > 500) {
       lastStateSent = performance.now();
       currentState("state");
+      scanCaption();
     }
   }, 250);
 })();
