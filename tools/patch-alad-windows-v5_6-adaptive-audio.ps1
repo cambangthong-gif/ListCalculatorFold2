@@ -118,7 +118,7 @@ $customReplacement = @'
                         startOfSpeechSensitivity = "START_SENSITIVITY_HIGH",
                         endOfSpeechSensitivity = "END_SENSITIVITY_LOW",
                         prefixPaddingMs = 40,
-                        silenceDurationMs = 220
+                        silenceDurationMs = 500
                     },
                     activityHandling = "NO_INTERRUPTION"
                 },
