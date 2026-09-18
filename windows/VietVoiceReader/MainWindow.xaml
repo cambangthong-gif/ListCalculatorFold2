@@ -259,7 +259,7 @@
 
       <Grid Grid.Column="1" Background="#ECECEF">
         <Border Margin="8"
-                Background="White"
+                Background="#ECECEF"
                 BorderBrush="#DDDDDF"
                 BorderThickness="1"
                 CornerRadius="10">
@@ -268,6 +268,64 @@
                       Background="Transparent"
                       BorderThickness="0"
                       SelectionChanged="BookTabs_SelectionChanged"/>
+        </Border>
+
+        <Button x:Name="ReaderPrevOverlay"
+                Click="PrevChapter_Click"
+                Content="‹"
+                FontSize="34"
+                FontWeight="Light"
+                Width="46"
+                Height="92"
+                Padding="0"
+                Margin="12,0,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Opacity="0.55"
+                ToolTip="Chương trước (←)"/>
+
+        <Button x:Name="ReaderNextOverlay"
+                Click="NextChapter_Click"
+                Content="›"
+                FontSize="34"
+                FontWeight="Light"
+                Width="46"
+                Height="92"
+                Padding="0"
+                Margin="0,0,12,0"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                Opacity="0.55"
+                ToolTip="Chương sau (→)"/>
+
+        <Border x:Name="ChapterQuickBar"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Bottom"
+                Margin="0,0,0,18"
+                Padding="7,5"
+                CornerRadius="18"
+                Background="#EEFFFFFF"
+                BorderBrush="#D8D8DA"
+                BorderThickness="1">
+          <StackPanel Orientation="Horizontal">
+            <Button Click="PrevChapter_Click"
+                    Content="‹"
+                    Width="34"
+                    Height="30"
+                    Padding="0"
+                    Margin="0"/>
+            <ComboBox x:Name="ChapterJumpCombo"
+                      Width="240"
+                      Height="30"
+                      Margin="5,0"
+                      SelectionChanged="ChapterJumpCombo_SelectionChanged"/>
+            <Button Click="NextChapter_Click"
+                    Content="›"
+                    Width="34"
+                    Height="30"
+                    Padding="0"
+                    Margin="0"/>
+          </StackPanel>
         </Border>
 
         <TextBlock x:Name="EmptyHint"
@@ -339,6 +397,26 @@
                     TickFrequency="10"
                     ValueChanged="ReaderZoomSlider_ValueChanged"/>
           </DockPanel>
+
+          <TextBlock Text="Độ rộng vùng sách" Margin="0,4,0,0"/>
+          <DockPanel Margin="0,4,0,10">
+            <TextBlock x:Name="ReaderWidthText"
+                       DockPanel.Dock="Right"
+                       Width="64"
+                       Text="800 px"
+                       VerticalAlignment="Center"/>
+            <Slider x:Name="ReaderWidthSlider"
+                    Minimum="520"
+                    Maximum="1200"
+                    Value="800"
+                    TickFrequency="40"
+                    ValueChanged="ReaderWidthSlider_ValueChanged"/>
+          </DockPanel>
+          <TextBlock Text="Giảm độ rộng để đọc giống Moon/Sumatra: cột chữ nằm giữa, không kéo căng ngang màn hình."
+                     Foreground="#777"
+                     FontSize="11"
+                     TextWrapping="Wrap"
+                     Margin="0,0,0,10"/>
 
           <TextBlock Text="Font chữ"/>
           <ComboBox x:Name="FontCombo"
