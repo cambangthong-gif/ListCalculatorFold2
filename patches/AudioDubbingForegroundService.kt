@@ -615,29 +615,19 @@ class AudioDubbingForegroundService : Service() {
 
     private fun handleAudioClockDiscontinuity(wallGapMs: Long) {
         if (!isRunning.value) return
-        audioPlayerManager?.clearForExternalSeek()
-        deviceTtsManager?.clearBacklog()
-        synchronized(transcriptBuffer) {
-            transcriptBuffer.clear()
-            lastTranscriptSnapshot = ""
-            transcriptSourceAnchorMs = -1L
-        }
+
+        // A capture gap may be buffering, app scheduling, or a pause. It is NOT enough
+        // evidence to throw away translated content. Preserve all generated/queued speech
+        // and only reset VAD boundary detection for the next source turn.
         synchronized(this) {
             vadPreRoll.clear()
             vadSpeechActive = false
             vadHangoverChunks = 0
+            currentTurnStartClockMs = -1L
         }
-        lastInputSourceAnchorMs = -1L
-        currentTurnStartClockMs = -1L
-        lastTurnStartClockMs = -1L
-        synchronized(this) { pendingTurnStartClocks.clear() }
-        activeOutputTurnAnchorMs = -1L
-        geminiOutputSourceCursorMs = -1L
-        transcriptSourceAnchorMs = -1L
-        audioClockLagMs.value = 0L
-        queueLatencyMs.value = 0
+
         if (!smartSubtitlePlaybackActive) {
-            smartSyncStatus.value = "AUDIO RESYNC"
+            smartSyncStatus.value = "CLOCK GAP · keep audio"
         }
     }
 
