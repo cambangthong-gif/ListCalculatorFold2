@@ -241,6 +241,21 @@ internal sealed class AdaptiveJitterWaveProvider : IWaveProvider
         Interlocked.Exchange(ref lastWriteTicks, 0);
     }
 
+    public int Read(Span<byte> buffer)
+    {
+        byte[] temp = ArrayPool<byte>.Shared.Rent(buffer.Length);
+        try
+        {
+            int read = Read(temp, 0, buffer.Length);
+            temp.AsSpan(0, read).CopyTo(buffer);
+            return read;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(temp);
+        }
+    }
+
     public int Read(byte[] buffer, int offset, int count)
     {
         long now = DateTime.UtcNow.Ticks;
