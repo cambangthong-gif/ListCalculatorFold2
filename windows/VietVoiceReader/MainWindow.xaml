@@ -16,48 +16,87 @@
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <Border Grid.Row="0" Background="White" BorderBrush="#E5E5E5" BorderThickness="0,0,0,1" Padding="10">
+    <Border Grid.Row="0"
+            Background="White"
+            BorderBrush="#E5E5E5"
+            BorderThickness="0,0,0,1"
+            Padding="8">
       <DockPanel>
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
           <Button x:Name="OpenBookButton" Click="OpenBook_Click" Content="Mở EPUB"/>
-          <Button x:Name="PrevChapterButton" Click="PrevChapter_Click" Content="← Chương trước"/>
+          <Button x:Name="PrevChapterButton" Click="PrevChapter_Click" Content="← Chương"/>
           <Button x:Name="PlayButton" Click="Play_Click" Content="Đọc"/>
           <Button x:Name="StopButton" Click="Stop_Click" Content="Dừng"/>
-          <Button x:Name="NextChapterButton" Click="NextChapter_Click" Content="Chương sau →"/>
+          <Button x:Name="NextChapterButton" Click="NextChapter_Click" Content="Chương →"/>
+
+          <Separator Margin="8,4" Width="1"/>
+
+          <TextBlock Text="Trang" VerticalAlignment="Center" Margin="4,0,4,0"/>
+          <TextBox x:Name="PageNumberBox"
+                   Width="54"
+                   Height="32"
+                   VerticalContentAlignment="Center"
+                   HorizontalContentAlignment="Center"
+                   KeyDown="PageNumberBox_KeyDown"/>
+          <Button Click="GoToPage_Click" Content="Đi" MinWidth="42"/>
+
+          <Separator Margin="8,4" Width="1"/>
+
           <CheckBox x:Name="AutoNextCheckBox"
-                    Content="Tự động qua chương"
+                    Content="Tự qua chương"
                     IsChecked="True"
                     VerticalAlignment="Center"
-                    Margin="12,0,8,0"
-                    FontWeight="SemiBold"/>
-          <Button x:Name="ExportButton" Click="Export_Click" Content="Xuất MP3"/>
+                    Margin="4,0,8,0"/>
+
+          <Button x:Name="FocusModeButton"
+                  Click="FocusMode_Click"
+                  Content="Tập trung"/>
+
+          <Button x:Name="ExportButton"
+                  Click="Export_Click"
+                  Content="Xuất MP3"/>
         </StackPanel>
 
-        <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+        <StackPanel Orientation="Horizontal"
+                    DockPanel.Dock="Right"
+                    HorizontalAlignment="Right">
           <TextBlock x:Name="BookTitleText"
                      Text="Kéo EPUB vào đây để mở"
                      FontWeight="SemiBold"
-                     FontSize="16"
+                     FontSize="15"
                      VerticalAlignment="Center"
                      Margin="12,0"/>
         </StackPanel>
       </DockPanel>
     </Border>
 
-    <Grid Grid.Row="1">
+    <Grid x:Name="ReaderLayoutGrid" Grid.Row="1">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="320"/>
+        <ColumnDefinition x:Name="LeftColumn" Width="320"/>
         <ColumnDefinition Width="*"/>
-        <ColumnDefinition Width="310"/>
+        <ColumnDefinition x:Name="RightColumn" Width="310"/>
       </Grid.ColumnDefinitions>
 
-      <Border Grid.Column="0" Background="White" BorderBrush="#E5E5E5" BorderThickness="0,0,1,0" Padding="8">
-        <TabControl x:Name="LeftTabs" BorderThickness="0" Background="Transparent">
+      <Border x:Name="LeftPane"
+              Grid.Column="0"
+              Background="White"
+              BorderBrush="#E5E5E5"
+              BorderThickness="0,0,1,0"
+              Padding="8">
+        <TabControl x:Name="LeftTabs"
+                    BorderThickness="0"
+                    Background="Transparent">
           <TabItem Header="Thư viện">
             <DockPanel Margin="4,8,4,4">
-              <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                <Button Click="ContinueBook_Click" Content="Đọc tiếp" MinWidth="88"/>
-                <Button Click="RemoveFromLibrary_Click" Content="Bỏ khỏi thư viện" MinWidth="118"/>
+              <StackPanel DockPanel.Dock="Bottom"
+                          Orientation="Horizontal"
+                          Margin="0,8,0,0">
+                <Button Click="ContinueBook_Click"
+                        Content="Đọc tiếp"
+                        MinWidth="88"/>
+                <Button Click="RemoveFromLibrary_Click"
+                        Content="Bỏ khỏi thư viện"
+                        MinWidth="118"/>
               </StackPanel>
 
               <TextBlock DockPanel.Dock="Top"
@@ -73,7 +112,10 @@
                        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
-                    <Border Padding="8" Margin="0,0,0,6" Background="#F7F7F8" CornerRadius="8">
+                    <Border Padding="8"
+                            Margin="0,0,0,6"
+                            Background="#F7F7F8"
+                            CornerRadius="8">
                       <StackPanel>
                         <TextBlock Text="{Binding Title}"
                                    FontWeight="SemiBold"
@@ -117,12 +159,19 @@
         </TabControl>
       </Border>
 
-      <Grid Grid.Column="1">
-        <TabControl x:Name="BookTabs"
-                    Margin="12"
-                    Background="Transparent"
-                    BorderThickness="0"
-                    SelectionChanged="BookTabs_SelectionChanged"/>
+      <Grid Grid.Column="1" Background="#ECECEF">
+        <Border Margin="8"
+                Background="White"
+                BorderBrush="#DDDDDF"
+                BorderThickness="1"
+                CornerRadius="10">
+          <TabControl x:Name="BookTabs"
+                      Margin="0"
+                      Background="Transparent"
+                      BorderThickness="0"
+                      SelectionChanged="BookTabs_SelectionChanged"/>
+        </Border>
+
         <TextBlock x:Name="EmptyHint"
                    Text="Kéo một hoặc nhiều file EPUB vào cửa sổ&#x0a;hoặc bấm “Mở EPUB”"
                    HorizontalAlignment="Center"
@@ -133,15 +182,28 @@
                    IsHitTestVisible="False"/>
       </Grid>
 
-      <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
+      <ScrollViewer x:Name="RightPane"
+                    Grid.Column="2"
+                    Background="White"
+                    VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="14">
-          <TextBlock Text="Giọng đọc" FontWeight="Bold" FontSize="18"/>
-          <ComboBox x:Name="VoiceCombo" SelectionChanged="VoiceCombo_SelectionChanged"/>
-          <TextBlock x:Name="VoiceSourceText" Foreground="#666" TextWrapping="Wrap"/>
+          <TextBlock Text="GIỌNG ĐỌC"
+                     FontWeight="Bold"
+                     Foreground="#555"/>
+          <ComboBox x:Name="VoiceCombo"
+                    SelectionChanged="VoiceCombo_SelectionChanged"/>
+          <TextBlock x:Name="VoiceSourceText"
+                     Foreground="#666"
+                     TextWrapping="Wrap"/>
 
-          <StackPanel Orientation="Horizontal" Margin="0,6,0,14">
-            <Button x:Name="DownloadVoiceButton" Click="DownloadVoice_Click" Content="Tải giọng"/>
-            <Button x:Name="RemoveVoiceButton" Click="RemoveVoice_Click" Content="Xóa model"/>
+          <StackPanel Orientation="Horizontal"
+                      Margin="0,6,0,14">
+            <Button x:Name="DownloadVoiceButton"
+                    Click="DownloadVoice_Click"
+                    Content="Tải giọng"/>
+            <Button x:Name="RemoveVoiceButton"
+                    Click="RemoveVoice_Click"
+                    Content="Xóa model"/>
           </StackPanel>
 
           <TextBlock Text="Tốc độ đọc" FontWeight="SemiBold"/>
@@ -161,9 +223,28 @@
 
           <Separator Margin="0,4,0,12"/>
 
-          <TextBlock Text="Font &amp; hiển thị" FontWeight="Bold" FontSize="18"/>
-          <TextBlock Text="Font chữ" Margin="0,10,0,0"/>
-          <ComboBox x:Name="FontCombo" SelectionChanged="FontCombo_SelectionChanged"/>
+          <TextBlock Text="HIỂN THỊ"
+                     FontWeight="Bold"
+                     Foreground="#555"/>
+
+          <TextBlock Text="Thu phóng vùng đọc" Margin="0,10,0,0"/>
+          <DockPanel Margin="0,4,0,10">
+            <TextBlock x:Name="ReaderZoomText"
+                       DockPanel.Dock="Right"
+                       Width="54"
+                       Text="100%"
+                       VerticalAlignment="Center"/>
+            <Slider x:Name="ReaderZoomSlider"
+                    Minimum="50"
+                    Maximum="200"
+                    Value="100"
+                    TickFrequency="10"
+                    ValueChanged="ReaderZoomSlider_ValueChanged"/>
+          </DockPanel>
+
+          <TextBlock Text="Font chữ"/>
+          <ComboBox x:Name="FontCombo"
+                    SelectionChanged="FontCombo_SelectionChanged"/>
           <Button Click="ImportFont_Click"
                   Content="Nạp font .TTF / .OTF"
                   HorizontalAlignment="Left"/>
@@ -199,34 +280,42 @@
           </DockPanel>
 
           <TextBlock Text="Nền đọc"/>
-          <ComboBox x:Name="ThemeCombo" SelectionChanged="ThemeCombo_SelectionChanged">
+          <ComboBox x:Name="ThemeCombo"
+                    SelectionChanged="ThemeCombo_SelectionChanged">
             <ComboBoxItem Content="Sáng"/>
             <ComboBoxItem Content="Tối"/>
             <ComboBoxItem Content="Sepia"/>
           </ComboBox>
 
           <TextBlock Text="Chế độ hiển thị"/>
-          <ComboBox x:Name="ViewModeCombo" SelectionChanged="ViewModeCombo_SelectionChanged">
+          <ComboBox x:Name="ViewModeCombo"
+                    SelectionChanged="ViewModeCombo_SelectionChanged">
             <ComboBoxItem Content="Cuộn"/>
             <ComboBoxItem Content="1 trang"/>
             <ComboBoxItem Content="2 trang"/>
           </ComboBox>
 
-          <TextBlock Text="Thiết lập font/hiển thị được nhớ riêng theo từng EPUB."
+          <TextBlock Text="Ctrl + lăn chuột để zoom nhanh. Khi ở cuối chương, lăn tiếp xuống sẽ chuyển sang chương kế."
                      Foreground="#777"
                      TextWrapping="Wrap"
-                     Margin="0,8,0,12"/>
+                     Margin="0,10,0,12"/>
         </StackPanel>
       </ScrollViewer>
     </Grid>
 
-    <Border Grid.Row="2" Background="White" BorderBrush="#E5E5E5" BorderThickness="0,1,0,0" Padding="10,6">
+    <Border Grid.Row="2"
+            Background="White"
+            BorderBrush="#E5E5E5"
+            BorderThickness="0,1,0,0"
+            Padding="10,6">
       <Grid>
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="*"/>
           <ColumnDefinition Width="280"/>
         </Grid.ColumnDefinitions>
-        <TextBlock x:Name="StatusText" Text="Sẵn sàng" VerticalAlignment="Center"/>
+        <TextBlock x:Name="StatusText"
+                   Text="Sẵn sàng"
+                   VerticalAlignment="Center"/>
         <ProgressBar x:Name="Progress"
                      Grid.Column="1"
                      Minimum="0"
