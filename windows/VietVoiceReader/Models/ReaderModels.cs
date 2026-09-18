@@ -35,6 +35,7 @@ public sealed class BookDisplaySettings
     public double LineHeight { get; set; } = 32;
     public string Theme { get; set; } = "Sáng";
     public string ViewMode { get; set; } = "Cuộn";
+    public double ZoomPercent { get; set; } = 100;
 }
 
 
