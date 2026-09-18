@@ -843,6 +843,7 @@ public partial class MainWindow : Window
         int session = ++playbackSessionId;
 
         PlayButton.IsEnabled = false;
+        MiniPlayButton.IsEnabled = false;
         PrevChapterButton.IsEnabled = true;
         NextChapterButton.IsEnabled = true;
 
@@ -860,9 +861,21 @@ public partial class MainWindow : Window
 
             int currentUnitIndex = 0;
 
+            if (startChapterIndex == state.ChapterIndex
+                && state.LastSentenceIndex > 0)
+            {
+                int resumeUnit =
+                    units.FindIndex(x =>
+                        x.ChapterIndex == startChapterIndex
+                        && x.SegmentIndex >= state.LastSentenceIndex);
+
+                if (resumeUnit >= 0)
+                    currentUnitIndex = resumeUnit;
+            }
+
             string? currentWav =
                 await SynthesizeUnitAsync(
-                    units[0],
+                    units[currentUnitIndex],
                     voice,
                     session,
                     token);
@@ -957,6 +970,7 @@ public partial class MainWindow : Window
                 isPlaybackActive = false;
                 activePlaybackBookPath = null;
                 PlayButton.IsEnabled = true;
+                MiniPlayButton.IsEnabled = true;
             }
         }
     }
@@ -1285,6 +1299,7 @@ public partial class MainWindow : Window
         DisposeCurrentOutput();
 
         PlayButton.IsEnabled = true;
+        MiniPlayButton.IsEnabled = true;
     }
 
     private void DisposeCurrentOutput()
