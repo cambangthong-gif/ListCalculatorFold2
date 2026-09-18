@@ -9,6 +9,10 @@ $nl = [Environment]::NewLine
 
 $c = $c.Replace('ALAD Windows v5.7 Stable Long Session', 'ALAD Windows v6.2 Safe Browser Sync')
 
+if ($c -notmatch 'using System\.Net;') {
+    $c = $c.Replace('using System.Net.WebSockets;', 'using System.Net;' + $nl + 'using System.Net.WebSockets;')
+}
+
 # Browser helper item: still captures browser/system audio through the proven v5.7 path.
 $processMarker = 'internal sealed class ProcessItem'
 $browserItem = @'
