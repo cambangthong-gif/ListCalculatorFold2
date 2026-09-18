@@ -581,6 +581,39 @@ class AudioDubbingForegroundService : Service() {
         }
     }
 
+    private fun feedGeminiContinuousAudio(pcmData: ByteArray) {
+        if (pcmData.isEmpty()) return
+        synchronized(geminiInputChunk) {
+            var offset = 0
+            while (offset < pcmData.size) {
+                val space = geminiInputChunk.size - geminiInputChunkSize
+                val count = minOf(space, pcmData.size - offset)
+                System.arraycopy(
+                    pcmData,
+                    offset,
+                    geminiInputChunk,
+                    geminiInputChunkSize,
+                    count
+                )
+                geminiInputChunkSize += count
+                offset += count
+
+                if (geminiInputChunkSize == geminiInputChunk.size) {
+                    webSocketManager?.sendAudioData(geminiInputChunk.copyOf())
+                    geminiInputChunkSize = 0
+                }
+            }
+        }
+    }
+
+    private fun flushGeminiInputChunk() {
+        synchronized(geminiInputChunk) {
+            if (geminiInputChunkSize <= 0) return
+            webSocketManager?.sendAudioData(geminiInputChunk.copyOf(geminiInputChunkSize))
+            geminiInputChunkSize = 0
+        }
+    }
+
     private fun calculateNormalizedLevel(pcmData: ByteArray): Float {
         if (pcmData.size < 2) return 0f
         var sum = 0.0
@@ -775,11 +808,19 @@ class AudioDubbingForegroundService : Service() {
     private fun enableAutoSyncAndCenter() {
         if (!isRunning.value) return
         serviceScope.launch {
-            autoSyncActive.value = true
             syncOffsetMs.value = 0
-            audioPlayerManager?.setAutoSyncEnabled(true)
             audioPlayerManager?.setManualSyncMs(0)
-            repository?.updateAutoSync(true)
+
+            if (activeVoiceSource == "gemini") {
+                // Stable Live deliberately avoids dynamic clock chasing.
+                autoSyncActive.value = false
+                audioPlayerManager?.setAutoSyncEnabled(false)
+                repository?.updateAutoSync(false)
+            } else {
+                autoSyncActive.value = true
+                audioPlayerManager?.setAutoSyncEnabled(true)
+                repository?.updateAutoSync(true)
+            }
             repository?.updateManualSyncMs(0)
         }
     }
@@ -788,6 +829,7 @@ class AudioDubbingForegroundService : Service() {
         isRunning.value = false
         audioCaptureManager?.stopCapture()
         audioCaptureManager = null
+        synchronized(geminiInputChunk) { geminiInputChunkSize = 0 }
         audioPlayerManager?.stop()
         audioPlayerManager = null
         deviceTtsManager?.stop()
