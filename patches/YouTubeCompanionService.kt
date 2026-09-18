@@ -15,7 +15,8 @@ class YouTubeCompanionService : NotificationListenerService() {
 
     companion object {
         val listenerConnected = MutableStateFlow(false)
-        val youtubeActive = MutableStateFlow(false)
+        val mediaActive = MutableStateFlow(false)
+        val activePackage = MutableStateFlow("")
         val isPlaying = MutableStateFlow(false)
         val playbackPositionMs = MutableStateFlow(0L)
         val playbackSpeed = MutableStateFlow(1f)
@@ -69,9 +70,9 @@ class YouTubeCompanionService : NotificationListenerService() {
         override fun onSessionDestroyed() {
             activeController?.unregisterCallback(this)
             activeController = null
-            youtubeActive.value = false
+            mediaActive.value = false
             isPlaying.value = false
-            statusText.value = "YouTube session ended"
+            statusText.value = "Media session ended"
         }
     }
 
@@ -107,7 +108,7 @@ class YouTubeCompanionService : NotificationListenerService() {
 
     override fun onListenerDisconnected() {
         listenerConnected.value = false
-        youtubeActive.value = false
+        mediaActive.value = false
         isPlaying.value = false
         statusText.value = "Notification access off"
         activeController?.unregisterCallback(controllerCallback)
@@ -120,34 +121,35 @@ class YouTubeCompanionService : NotificationListenerService() {
     }
 
     private fun selectYouTubeController(controllers: List<MediaController>) {
-        val youtube = controllers.firstOrNull {
-            it.packageName == "com.google.android.youtube" ||
-                it.packageName.startsWith("com.google.android.youtube.")
-        }
+        val candidates = controllers.filter { it.packageName != packageName }
+        val selected = candidates.firstOrNull {
+            val st = it.playbackState?.state
+            st == PlaybackState.STATE_PLAYING || st == PlaybackState.STATE_BUFFERING
+        } ?: candidates.firstOrNull {
+            it.playbackState?.state == PlaybackState.STATE_PAUSED
+        } ?: candidates.firstOrNull()
 
-        if (youtube === activeController) {
-            handlePlaybackState(youtube?.playbackState)
+        if (selected === activeController) {
+            handlePlaybackState(selected?.playbackState)
             return
         }
 
         activeController?.unregisterCallback(controllerCallback)
-        activeController = youtube
+        activeController = selected
 
-        if (youtube == null) {
-            youtubeActive.value = false
+        if (selected == null) {
+            mediaActive.value = false
+            activePackage.value = ""
             isPlaying.value = false
-            statusText.value = if (sharedVideoUrl.value.isBlank()) {
-                "Share a YouTube video to ALAD"
-            } else {
-                "Waiting for YouTube"
-            }
+            statusText.value = "Waiting for media app"
             return
         }
 
-        youtube.registerCallback(controllerCallback)
-        youtubeActive.value = true
-        statusText.value = "YouTube detected"
-        handlePlaybackState(youtube.playbackState)
+        selected.registerCallback(controllerCallback)
+        mediaActive.value = true
+        activePackage.value = selected.packageName
+        statusText.value = "Media detected · " + selected.packageName
+        handlePlaybackState(selected.playbackState)
     }
 
     private fun handlePlaybackState(state: PlaybackState?) {
@@ -173,7 +175,7 @@ class YouTubeCompanionService : NotificationListenerService() {
             lastReportedPosition > 0L &&
             abs(position - predicted) > 2_000L
 
-        youtubeActive.value = true
+        mediaActive.value = true
         isPlaying.value = playing
         playbackPositionMs.value = position
         playbackSpeed.value = speed
@@ -187,11 +189,11 @@ class YouTubeCompanionService : NotificationListenerService() {
         }
 
         statusText.value = when (event) {
-            "SEEK" -> "YouTube seek · resync"
-            "PAUSE" -> "YouTube paused"
-            "PLAY" -> "YouTube playing"
-            "SPEED" -> "YouTube " + speed + "x"
-            else -> if (playing) "YouTube synced" else "YouTube ready"
+            "SEEK" -> "Media seek · resync"
+            "PAUSE" -> "Media paused"
+            "PLAY" -> "Media playing"
+            "SPEED" -> "Media " + speed + "x"
+            else -> if (playing) "Media synced" else "Media ready"
         }
 
         sendCompanionEvent(event, playing, position, speed)
