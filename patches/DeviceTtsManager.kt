@@ -160,11 +160,9 @@ class DeviceTtsManager(
             if (it.isNotBlank()) queue.addLast(TtsItem(it, now, sourceClockMs))
         }
 
-        // Keep the live edge, but do not discard speech just because the TTS engine
-        // itself took ~1-2 seconds to start. Source-clock lag is a better signal.
-        val maxQueued = if (lowLatencyEnabled) 5 else 8
-        if (catchUpEnabled) while (queue.size > maxQueued) queue.removeFirst()
-        trimStaleQueue()
+        // Completeness-first: never discard translated sentences during normal playback.
+        // Catch-up is handled by speech-rate adaptation; queues are only cleared by an
+        // explicit resync/seek or Stop.
         speakNextIfNeeded()
     }
 
@@ -188,29 +186,8 @@ class DeviceTtsManager(
     }
 
     @Synchronized
-    private fun trimStaleQueue() {
-        if (!catchUpEnabled || queue.size <= 1) return
-        val now = SystemClock.elapsedRealtime()
-        val clockNow = sourceClockProvider?.invoke() ?: -1L
-        val staleLimit = if (lowLatencyEnabled) 3_200L else 4_800L
-
-        while (queue.size > 1) {
-            val first = queue.firstOrNull() ?: break
-            val wallAge = now - first.queuedAtMs
-            val sourceLag = if (clockNow >= 0L && first.sourceClockMs >= 0L) {
-                (clockNow - first.sourceClockMs).coerceAtLeast(0L)
-            } else {
-                wallAge
-            }
-            if (sourceLag <= staleLimit) break
-            queue.removeFirst()
-        }
-    }
-
-    @Synchronized
     private fun speakNextIfNeeded() {
         if (!ready || stopped || externallyPaused || speaking || queue.isEmpty()) return
-        trimStaleQueue()
         val engine = tts ?: return
         val item = queue.removeFirst()
         val now = SystemClock.elapsedRealtime()
