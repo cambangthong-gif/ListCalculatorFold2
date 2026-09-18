@@ -36,7 +36,11 @@ public sealed class BookDisplaySettings
     public string Theme { get; set; } = "Sáng";
     public string ViewMode { get; set; } = "Cuộn";
     public double ZoomPercent { get; set; } = 100;
-    public double ReaderWidth { get; set; } = 800;
+    // Percentage of the available reading canvas. Values >100 from older
+    // builds are migrated to 100% when the book is opened.
+    public double ReaderWidth { get; set; } = 100;
+    public double HorizontalPageMargin { get; set; } = 44;
+    public string TextAlignmentMode { get; set; } = "Căn đều";
 }
 
 
