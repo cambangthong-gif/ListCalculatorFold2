@@ -182,8 +182,7 @@ $logNew = @'
     {
         if (!string.IsNullOrWhiteSpace(text))
         {
-            transcript.AppendText($"[Hệ thống] {text}
-");
+            transcript.AppendText($"[Hệ thống] {text}\\r\\n");
             if (transcript.TextLength > 12000) transcript.Text = transcript.Text[^8000..];
         }
 
