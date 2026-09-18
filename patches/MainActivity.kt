@@ -50,7 +50,7 @@ class MainActivity : ComponentActivity() {
     ) { permissions ->
         val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true
         if (audioGranted) {
-            launchScreenCapture()
+            ensureMediaCompanionAccessAndLaunch()
         } else {
             Toast.makeText(this, "Audio permission is required", Toast.LENGTH_SHORT).show()
             mainViewModel.updateStatus("Disconnected")
@@ -61,8 +61,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         
         val repository = UserPreferencesRepository(applicationContext)
-        YouTubeCompanionService.restoreSharedVideo(this)
-        handleShareIntent(intent)
         
         setContent {
             com.alad.app.ui.theme.ALADTheme {
@@ -99,47 +97,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        handleShareIntent(intent)
-    }
-
-    private fun handleShareIntent(incoming: Intent?) {
-        if (incoming?.action != Intent.ACTION_SEND || incoming.type != "text/plain") return
-        val sharedText = incoming.getStringExtra(Intent.EXTRA_TEXT).orEmpty()
-        val url = Regex("""https?://(?:www\.)?(?:youtube\.com/\S+|youtu\.be/\S+)""")
-            .find(sharedText)
-            ?.value
-            ?.trim()
-            .orEmpty()
-
-        if (url.isBlank()) {
-            Toast.makeText(this, "Không tìm thấy link YouTube trong nội dung chia sẻ.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        YouTubeCompanionService.setSharedVideo(this, url)
-
-        if (!YouTubeCompanionService.hasNotificationAccess(this)) {
-            Toast.makeText(
-                this,
-                "Bật quyền Truy cập thông báo cho ALAD để bám Play/Pause/Seek của YouTube.",
-                Toast.LENGTH_LONG
-            ).show()
-            try {
-                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-            } catch (_: Throwable) {
-            }
-        } else {
-            Toast.makeText(
-                this,
-                "YouTube Companion đã liên kết. Nhấn Start ALAD rồi quay lại YouTube.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
     private fun checkPermissionsAndConnect() {
         val permissionsToRequest = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -151,10 +108,26 @@ class MainActivity : ComponentActivity() {
         }
 
         if (missingPermissions.isEmpty()) {
-            launchScreenCapture()
+            ensureMediaCompanionAccessAndLaunch()
         } else {
             permissionLauncher.launch(missingPermissions.toTypedArray())
         }
+    }
+
+    private fun ensureMediaCompanionAccessAndLaunch() {
+        if (!YouTubeCompanionService.hasNotificationAccess(this)) {
+            Toast.makeText(
+                this,
+                "Bật Truy cập thông báo cho ALAD một lần để bám Play/Pause/Seek của app đang phát media.",
+                Toast.LENGTH_LONG
+            ).show()
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+            } catch (_: Throwable) {
+            }
+            return
+        }
+        launchScreenCapture()
     }
 
     private fun launchScreenCapture() {
