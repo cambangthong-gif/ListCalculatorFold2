@@ -170,6 +170,7 @@ fun OverlayContent(
     val autoSync by AudioDubbingForegroundService.autoSyncActive.collectAsState()
     val queueLatency by AudioDubbingForegroundService.queueLatencyMs.collectAsState()
     val smartPosition by AudioDubbingForegroundService.smartSyncPositionMs.collectAsState()
+    val audioClockLag by AudioDubbingForegroundService.audioClockLagMs.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "widget_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -301,7 +302,7 @@ fun OverlayContent(
                         "SMART " + (totalSeconds / 60L) + ":" +
                             "%02d".format(totalSeconds % 60L)
                     } else {
-                        "LIVE"
+                        "CLK " + audioClockLag + "ms"
                     }
                     Text(
                         text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\nAUTO · q${queueLatency}ms · " + smartLabel,
