@@ -91,7 +91,7 @@ $trimOld = @'
 '@
 $trimNew = @'
                     byte[] trash = ArrayPool<byte>.Shared.Rent(dropBytes);
-                    try { outputBuffer.Read(trash, 0, dropBytes); }
+                    try { outputBuffer.Read(trash.AsSpan(0, dropBytes)); }
                     finally { ArrayPool<byte>.Shared.Return(trash); }
 '@
 $c = $c.Replace($trimOld, $trimNew)
@@ -279,7 +279,7 @@ internal sealed class AdaptiveJitterWaveProvider : IWaveProvider
         }
 
         int before = source.BufferedBytes;
-        int read = source.Read(buffer, offset, count);
+        int read = source.Read(buffer.AsSpan(offset, count));
         if (read < count)
         {
             Array.Clear(buffer, offset + read, count - read);
