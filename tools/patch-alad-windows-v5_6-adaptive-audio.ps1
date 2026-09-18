@@ -130,13 +130,8 @@ $c = $c.Replace($customNeedle, $customReplacement)
 
 # Live Translate is continuous-stream translation, not a conversational barge-in flow.
 # Only clear client playback on interruption for the 3.8 agent-style engine.
-$interruptOld = @'
-            if ((sc.TryGetProperty("interrupted", out var interrupted) && interrupted.ValueKind == JsonValueKind.True))
-            {
-                clearPlayback();
-            }
-'@
-$interruptNew = @'
+$interruptPattern = '(?s)            if \\(\\(sc\\.TryGetProperty\\("interrupted", out var interrupted\\) && interrupted\\.ValueKind == JsonValueKind\\.True\\)\\)\\s*\\{\\s*clearPlayback\\(\\);\\s*\\}'
+$interruptReplacement = @'
             if ((sc.TryGetProperty("interrupted", out var interrupted) && interrupted.ValueKind == JsonValueKind.True))
             {
                 if (mode == LiveMode.CustomVoice)
@@ -145,8 +140,9 @@ $interruptNew = @'
                     status("Live Translate tiếp tục luồng · bỏ qua tín hiệu interruption");
             }
 '@
-if (-not $c.Contains($interruptOld)) { throw 'interrupted handler marker missing' }
-$c = $c.Replace($interruptOld, $interruptNew)
+$c2 = [regex]::Replace($c, $interruptPattern, $interruptReplacement.TrimEnd(), 1)
+if ($c2 -eq $c) { throw 'interrupted handler regex failed' }
+$c = $c2
 
 # Reconnect proactively on GoAway while session-resumption handle is still available.
 $goOld = @'
