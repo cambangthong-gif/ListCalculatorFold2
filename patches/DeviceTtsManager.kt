@@ -16,7 +16,11 @@ class DeviceTtsManager(
     private val context: Context,
     private val onSpeakingChanged: (Boolean) -> Unit = {}
 ) {
-    private data class TtsItem(val text: String, val queuedAtMs: Long)
+    private data class TtsItem(
+        val text: String,
+        val queuedAtMs: Long,
+        val sourceClockMs: Long
+    )
 
     private var tts: TextToSpeech? = null
     private var ready = false
@@ -35,6 +39,7 @@ class DeviceTtsManager(
     private var maxCatchUpSpeed = 1.15f
     private var speaking = false
     @Volatile private var externallyPaused = false
+    @Volatile private var sourceClockProvider: (() -> Long)? = null
 
     private var audioManager: AudioManager? = null
     private var focusRequest: AudioFocusRequest? = null
@@ -141,18 +146,23 @@ class DeviceTtsManager(
         })
     }
 
+    fun setSourceClockProvider(provider: (() -> Long)?) {
+        sourceClockProvider = provider
+    }
+
     @Synchronized
-    fun enqueueText(text: String) {
+    fun enqueueText(text: String, sourceClockMs: Long = -1L) {
         if (stopped) return
         val cleaned = text.replace(Regex("\\s+"), " ").trim()
         if (cleaned.isBlank()) return
         val now = SystemClock.elapsedRealtime()
         splitForSpeech(cleaned).forEach {
-            if (it.isNotBlank()) queue.addLast(TtsItem(it, now))
+            if (it.isNotBlank()) queue.addLast(TtsItem(it, now, sourceClockMs))
         }
 
-        // Keep the live edge. Old TTS is worse than skipping a stale phrase.
-        val maxQueued = if (lowLatencyEnabled) 4 else 7
+        // Keep the live edge, but do not discard speech just because the TTS engine
+        // itself took ~1-2 seconds to start. Source-clock lag is a better signal.
+        val maxQueued = if (lowLatencyEnabled) 5 else 8
         if (catchUpEnabled) while (queue.size > maxQueued) queue.removeFirst()
         trimStaleQueue()
         speakNextIfNeeded()
@@ -181,8 +191,18 @@ class DeviceTtsManager(
     private fun trimStaleQueue() {
         if (!catchUpEnabled || queue.size <= 1) return
         val now = SystemClock.elapsedRealtime()
-        val staleLimit = if (lowLatencyEnabled) 1_600L else 2_600L
-        while (queue.size > 1 && now - (queue.firstOrNull()?.queuedAtMs ?: now) > staleLimit) {
+        val clockNow = sourceClockProvider?.invoke() ?: -1L
+        val staleLimit = if (lowLatencyEnabled) 3_200L else 4_800L
+
+        while (queue.size > 1) {
+            val first = queue.firstOrNull() ?: break
+            val wallAge = now - first.queuedAtMs
+            val sourceLag = if (clockNow >= 0L && first.sourceClockMs >= 0L) {
+                (clockNow - first.sourceClockMs).coerceAtLeast(0L)
+            } else {
+                wallAge
+            }
+            if (sourceLag <= staleLimit) break
             queue.removeFirst()
         }
     }
@@ -193,12 +213,20 @@ class DeviceTtsManager(
         trimStaleQueue()
         val engine = tts ?: return
         val item = queue.removeFirst()
-        val ageMs = (SystemClock.elapsedRealtime() - item.queuedAtMs).coerceAtLeast(0L)
+        val now = SystemClock.elapsedRealtime()
+        val ageMs = (now - item.queuedAtMs).coerceAtLeast(0L)
+        val clockNow = sourceClockProvider?.invoke() ?: -1L
+        val sourceLagMs = if (clockNow >= 0L && item.sourceClockMs >= 0L) {
+            (clockNow - item.sourceClockMs).coerceAtLeast(0L)
+        } else {
+            ageMs
+        }
+        val effectiveLag = maxOf(ageMs, sourceLagMs)
 
         val backlogFactor = if (catchUpEnabled) when {
-            ageMs >= 1_400L -> maxCatchUpSpeed
-            ageMs >= 850L -> 1.18f.coerceAtMost(maxCatchUpSpeed)
-            ageMs >= 400L || queue.size >= 2 -> 1.10f.coerceAtMost(maxCatchUpSpeed)
+            effectiveLag >= 1_900L -> maxCatchUpSpeed
+            effectiveLag >= 1_200L -> 1.18f.coerceAtMost(maxCatchUpSpeed)
+            effectiveLag >= 650L || queue.size >= 2 -> 1.10f.coerceAtMost(maxCatchUpSpeed)
             queue.isNotEmpty() -> 1.05f.coerceAtMost(maxCatchUpSpeed)
             else -> 1.0f
         } else 1.0f
@@ -268,5 +296,6 @@ class DeviceTtsManager(
         externallyPaused = false
         stopped = true; ready = false; queue.clear(); speaking = false; releaseFocus(); onSpeakingChanged(false)
         tts?.stop(); tts?.shutdown(); tts = null; audioManager = null
+        sourceClockProvider = null
     }
 }
