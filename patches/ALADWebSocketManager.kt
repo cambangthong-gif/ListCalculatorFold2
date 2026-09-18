@@ -2,6 +2,7 @@ package com.alad.app.core.network
 
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Base64
 import android.util.Log
 import okhttp3.OkHttpClient
@@ -27,15 +28,25 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         private const val GEMINI_WS_URL =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
-        // Keep only a short slice of source audio while reconnecting. Replaying a long
-        // stale buffer makes the translated voice fall further behind the video.
-        private const val MAX_PENDING_AUDIO_CHUNKS = 10
+        // Keep only the recent live edge during a reconnect/handoff.
+        private const val MAX_PENDING_AUDIO_CHUNKS = 32
+        private const val MAX_PENDING_AUDIO_AGE_MS = 1_500L
 
-        // Fast reconnect profile for live dubbing: 0.25s, 0.5s, 1s, 2s, then 4s max.
+        // Fast reconnect profile for unexpected failures.
         private const val FIRST_RECONNECT_DELAY_MS = 250L
         private const val MAX_RECONNECT_DELAY_MS = 4_000L
-        private const val GO_AWAY_RECONNECT_DELAY_MS = 100L
+
+        // Gemini Live periodically rolls the WebSocket. Keep the old connection alive
+        // until shortly before its advertised deadline, then resume the same session.
+        private const val GO_AWAY_SAFETY_MARGIN_MS = 750L
+        private const val MIN_GO_AWAY_SWITCH_DELAY_MS = 150L
+        private const val DEFAULT_GO_AWAY_SWITCH_DELAY_MS = 1_000L
     }
+
+    private data class PendingAudio(
+        val base64: String,
+        val enqueuedAtMs: Long
+    )
 
     private val reconnectHandler = Handler(Looper.getMainLooper())
 
@@ -49,7 +60,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var currentTargetLang = ""
     private var currentVoiceName = "Kore"
     private var sessionHandle: String? = null
-    private val pendingAudio = ArrayDeque<String>()
+    private val pendingAudio = ArrayDeque<PendingAudio>()
+    private var goAwayRunnable: Runnable? = null
 
     @Synchronized
     fun connect(
@@ -68,6 +80,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         isSetupComplete = false
         pendingAudio.clear()
 
+        cancelGoAwayRolloverLocked()
         reconnectHandler.removeCallbacksAndMessages(null)
         socketGeneration++
         webSocket?.cancel()
@@ -127,9 +140,22 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
                     val goAway = json.optJSONObject("goAway") ?: json.optJSONObject("go_away")
                     if (goAway != null) {
-                        isSetupComplete = false
-                        onStatusChanged?.invoke("Server handoff · reconnecting")
-                        scheduleReconnect("server goAway", GO_AWAY_RECONNECT_DELAY_MS)
+                        // GoAway is advance notice. Do not kill a healthy socket immediately:
+                        // keep streaming until shortly before timeLeft expires, then resume.
+                        val rawTimeLeft = when {
+                            goAway.has("timeLeft") -> goAway.opt("timeLeft")
+                            goAway.has("time_left") -> goAway.opt("time_left")
+                            else -> null
+                        }
+                        val timeLeftMs = parseDurationMs(rawTimeLeft)
+                        val switchDelayMs = if (timeLeftMs != null) {
+                            (timeLeftMs - GO_AWAY_SAFETY_MARGIN_MS)
+                                .coerceAtLeast(MIN_GO_AWAY_SWITCH_DELAY_MS)
+                        } else {
+                            DEFAULT_GO_AWAY_SWITCH_DELAY_MS
+                        }
+                        onStatusChanged?.invoke("Seamless handoff in " + switchDelayMs + "ms")
+                        scheduleGoAwayRollover(switchDelayMs)
                         return
                     }
 
@@ -207,13 +233,19 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             override fun onClosed(ws: WebSocket, code: Int, reason: String) {
                 if (!isCurrent(generation)) return
                 isSetupComplete = false
-                if (!manualDisconnect) scheduleReconnect("closed $code ${reason.take(80)}")
+                if (!manualDisconnect) {
+                    synchronized(this@ALADWebSocketManager) { cancelGoAwayRolloverLocked() }
+                    scheduleReconnect("closed $code ${reason.take(80)}", FIRST_RECONNECT_DELAY_MS)
+                }
             }
 
             override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
                 if (!isCurrent(generation)) return
                 isSetupComplete = false
-                if (!manualDisconnect) scheduleReconnect(t.message ?: "network failure")
+                if (!manualDisconnect) {
+                    synchronized(this@ALADWebSocketManager) { cancelGoAwayRolloverLocked() }
+                    scheduleReconnect(t.message ?: "network failure", FIRST_RECONNECT_DELAY_MS)
+                }
             }
         })
     }
@@ -291,22 +323,44 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
     @Synchronized
     private fun enqueuePending(base64Audio: String) {
-        pendingAudio.addLast(base64Audio)
-        while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) pendingAudio.removeFirst()
+        val now = SystemClock.elapsedRealtime()
+        pendingAudio.addLast(PendingAudio(base64Audio, now))
+        trimPendingLocked(now)
+    }
+
+    @Synchronized
+    private fun trimPendingLocked(now: Long = SystemClock.elapsedRealtime()) {
+        while (
+            pendingAudio.isNotEmpty() &&
+            now - pendingAudio.first().enqueuedAtMs > MAX_PENDING_AUDIO_AGE_MS
+        ) {
+            pendingAudio.removeFirst()
+        }
+        while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) {
+            pendingAudio.removeFirst()
+        }
     }
 
     private fun flushPendingAudio() {
+        val now = SystemClock.elapsedRealtime()
         val snapshot = synchronized(this) {
+            trimPendingLocked(now)
             val copy = pendingAudio.toList()
             pendingAudio.clear()
             copy
         }
         for (i in snapshot.indices) {
-            if (!sendAudioNow(snapshot[i])) {
+            if (now - snapshot[i].enqueuedAtMs > MAX_PENDING_AUDIO_AGE_MS) continue
+            if (!sendAudioNow(snapshot[i].base64)) {
                 isSetupComplete = false
                 synchronized(this) {
-                    for (j in i until snapshot.size) pendingAudio.addLast(snapshot[j])
-                    while (pendingAudio.size > MAX_PENDING_AUDIO_CHUNKS) pendingAudio.removeFirst()
+                    val retryNow = SystemClock.elapsedRealtime()
+                    for (j in i until snapshot.size) {
+                        if (retryNow - snapshot[j].enqueuedAtMs <= MAX_PENDING_AUDIO_AGE_MS) {
+                            pendingAudio.addLast(snapshot[j])
+                        }
+                    }
+                    trimPendingLocked(retryNow)
                 }
                 scheduleReconnect("pending audio flush failed")
                 return
@@ -315,8 +369,62 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     }
 
     @Synchronized
+    private fun scheduleGoAwayRollover(delayMs: Long) {
+        if (manualDisconnect || currentApiKey.isBlank() || goAwayRunnable != null) return
+        val safeDelay = delayMs.coerceAtLeast(MIN_GO_AWAY_SWITCH_DELAY_MS)
+        val runnable = Runnable {
+            synchronized(this) {
+                goAwayRunnable = null
+                if (manualDisconnect || currentApiKey.isBlank()) return@synchronized
+                isSetupComplete = false
+                reconnectAttempt = 1
+
+                val old = webSocket
+                socketGeneration++
+                webSocket = null
+                old?.cancel()
+                openSocket()
+            }
+        }
+        goAwayRunnable = runnable
+        reconnectHandler.postDelayed(runnable, safeDelay)
+    }
+
+    @Synchronized
+    private fun cancelGoAwayRolloverLocked() {
+        goAwayRunnable?.let(reconnectHandler::removeCallbacks)
+        goAwayRunnable = null
+    }
+
+    private fun parseDurationMs(value: Any?): Long? {
+        return try {
+            when (value) {
+                is String -> {
+                    val v = value.trim().lowercase()
+                    when {
+                        v.endsWith("ms") -> v.removeSuffix("ms").toDoubleOrNull()?.toLong()
+                        v.endsWith("s") -> v.removeSuffix("s").toDoubleOrNull()
+                            ?.let { (it * 1000.0).toLong() }
+                        else -> v.toDoubleOrNull()?.toLong()
+                    }
+                }
+                is JSONObject -> {
+                    val seconds = value.optLong("seconds", 0L)
+                    val nanos = value.optLong("nanos", 0L)
+                    seconds * 1000L + nanos / 1_000_000L
+                }
+                is Number -> value.toLong()
+                else -> null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    @Synchronized
     private fun scheduleReconnect(reason: String, forcedDelayMs: Long? = null) {
         if (manualDisconnect || reconnectScheduled || currentApiKey.isBlank()) return
+        cancelGoAwayRolloverLocked()
         reconnectScheduled = true
         reconnectAttempt++
 
@@ -346,6 +454,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         reconnectAttempt = 0
         sessionHandle = null
         pendingAudio.clear()
+        cancelGoAwayRolloverLocked()
         reconnectHandler.removeCallbacksAndMessages(null)
         socketGeneration++
         webSocket?.close(1000, "User requested stop")
