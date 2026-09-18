@@ -24,6 +24,8 @@ class AudioPlayerManager(private val context: Context) {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
+        private const val STABLE_PREBUFFER_MS = 110
+        private const val STABLE_PREBUFFER_MAX_WAIT_MS = 90L
     }
 
     private data class AudioChunk(
@@ -46,6 +48,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var maxCatchUpSpeed = 1.15f
     @Volatile private var externallyPaused = false
     @Volatile private var sourceClockProvider: (() -> Long)? = null
+    @Volatile private var stableLiveMode = false
 
     private var audioTrack: AudioTrack? = null
     private var audioManager: AudioManager? = null
@@ -54,6 +57,7 @@ class AudioPlayerManager(private val context: Context) {
     private var workerThread: Thread? = null
     private var lastSpeechWriteMs = 0L
     private var currentPlaybackSpeed = 1.0f
+    private var needsStablePrebuffer = true
 
     fun start() {
         if (running.getAndSet(true)) return
@@ -63,7 +67,13 @@ class AudioPlayerManager(private val context: Context) {
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
         val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        val desiredBuffer = if (lowLatency) minBuffer else minBuffer * 2
+        val desiredBuffer = if (stableLiveMode) {
+            maxOf(minBuffer * 2, BYTES_PER_MS * 140)
+        } else if (lowLatency) {
+            minBuffer
+        } else {
+            minBuffer * 2
+        }
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
@@ -111,6 +121,17 @@ class AudioPlayerManager(private val context: Context) {
 
     fun setSourceClockProvider(provider: (() -> Long)?) {
         sourceClockProvider = provider
+    }
+
+    fun setStableLiveMode(enabled: Boolean) {
+        stableLiveMode = enabled
+        needsStablePrebuffer = true
+        if (enabled) {
+            autoSync = false
+            catchUp = false
+            sourceClockProvider = null
+            applyPlaybackSpeed(1.0f)
+        }
     }
 
     fun playAudioData(data: ByteArray, sourceClockMs: Long = -1L) {
@@ -178,8 +199,26 @@ class AudioPlayerManager(private val context: Context) {
                     continue
                 }
                 if (autoSync) rebalanceBacklog()
+
+                if (stableLiveMode && needsStablePrebuffer && queue.peekFirst() != null) {
+                    val startWait = SystemClock.elapsedRealtime()
+                    while (
+                        running.get() &&
+                        !externallyPaused &&
+                        queuedDurationMs() < STABLE_PREBUFFER_MS &&
+                        SystemClock.elapsedRealtime() - startWait < STABLE_PREBUFFER_MAX_WAIT_MS
+                    ) {
+                        Thread.sleep(8)
+                    }
+                    needsStablePrebuffer = false
+                }
+
                 val chunk = queue.poll(180, TimeUnit.MILLISECONDS)
-                if (chunk == null) { onPlaybackIdle(); continue }
+                if (chunk == null) {
+                    if (stableLiveMode) needsStablePrebuffer = true
+                    onPlaybackIdle()
+                    continue
+                }
                 queuedBytes.addAndGet(-chunk.data.size.toLong())
                 val delay = manualSyncMs.coerceAtLeast(0)
                 if (delay > 0) {
@@ -310,6 +349,8 @@ class AudioPlayerManager(private val context: Context) {
         if (!running.getAndSet(false)) return
         workerThread?.interrupt(); workerThread = null
         externallyPaused = false
+        stableLiveMode = false
+        needsStablePrebuffer = true
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
         synchronized(trackLock) {
             try { audioTrack?.pause(); audioTrack?.flush(); audioTrack?.stop() } catch (_: Throwable) {}
