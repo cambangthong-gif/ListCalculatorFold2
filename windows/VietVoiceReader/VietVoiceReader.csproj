@@ -10,6 +10,16 @@
     <AssemblyName>VietVoiceReader</AssemblyName>
     <RootNamespace>VietVoiceReader</RootNamespace>
     <RuntimeIdentifiers>win-arm64;win-x64</RuntimeIdentifiers>
+
+    <!-- Clean portable package: one EXE in the app root. Managed and native
+         dependencies are bundled and native payloads self-extract at runtime. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
   <ItemGroup>
