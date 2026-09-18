@@ -106,6 +106,7 @@ public partial class MainWindow : Window
 
         UpdateVoiceStatus();
         RefreshLibrary();
+        BookTabs.SizeChanged += (_, _) => UpdateAllReaderFrameWidths();
         Loaded += Window_Loaded;
     }
 
@@ -233,6 +234,15 @@ public partial class MainWindow : Window
             var loadedBook = await EpubService.LoadAsync(filePath);
             var settings = settingsStore.Get(filePath);
 
+            // v1.9: ReaderWidth is now a percentage of the available canvas.
+            if (settings.ReaderWidth > 100 || settings.ReaderWidth < 35)
+                settings.ReaderWidth = 100;
+            settings.ZoomPercent = 100;
+            settings.HorizontalPageMargin =
+                Math.Clamp(settings.HorizontalPageMargin, 8, 120);
+            if (string.IsNullOrWhiteSpace(settings.TextAlignmentMode))
+                settings.TextAlignmentMode = "Căn đều";
+
             int resumeIndex = 0;
             if (resumeProgress && previous != null)
             {
@@ -249,11 +259,11 @@ public partial class MainWindow : Window
                 IsFindEnabled = true,
                 Margin = new Thickness(8),
                 Background = Brushes.Transparent,
-                MinZoom = 50,
-                MaxZoom = 200,
-                ZoomIncrement = 10,
-                Zoom = Math.Clamp(settings.ZoomPercent, 50, 200),
-                MaxWidth = Math.Clamp(settings.ReaderWidth, 520, 1200),
+                MinZoom = 100,
+                MaxZoom = 100,
+                ZoomIncrement = 1,
+                Zoom = 100,
+                MaxWidth = double.PositiveInfinity,
                 HorizontalAlignment = HorizontalAlignment.Center
             };
 
@@ -281,6 +291,11 @@ public partial class MainWindow : Window
             reader.PreviewMouseLeftButtonUp += (_, e) => Reader_PreviewMouseLeftButtonUp(state, e);
             reader.PreviewTouchDown += (_, e) => Reader_PreviewTouchDown(state, e);
             reader.PreviewTouchUp += (_, e) => Reader_PreviewTouchUp(state, e);
+            reader.Loaded += (_, _) =>
+            {
+                ApplyReaderFrameWidth(state);
+                HideFlowReaderChrome(state.Reader);
+            };
 
             tabItem.Tag = state;
             tabItem.Content = reader;
@@ -591,13 +606,31 @@ public partial class MainWindow : Window
     {
         var settings = state.Settings;
 
+        var alignment =
+            string.Equals(
+                settings.TextAlignmentMode,
+                "Căn trái",
+                StringComparison.OrdinalIgnoreCase)
+                ? TextAlignment.Left
+                : TextAlignment.Justify;
+
+        var horizontalMargin =
+            Math.Clamp(
+                settings.HorizontalPageMargin,
+                8,
+                120);
+
         var doc = new FlowDocument
         {
-            PagePadding = new Thickness(42, 34, 42, 56),
+            PagePadding = new Thickness(
+                horizontalMargin,
+                34,
+                horizontalMargin,
+                56),
             FontFamily = new FontFamily(settings.FontFamily),
             FontSize = settings.FontSize,
             LineHeight = settings.LineHeight,
-            TextAlignment = TextAlignment.Justify,
+            TextAlignment = alignment,
             ColumnWidth = double.PositiveInfinity
         };
 
@@ -619,7 +652,7 @@ public partial class MainWindow : Window
                     0,
                     0,
                     settings.FontSize * 0.8),
-                TextAlignment = TextAlignment.Justify
+                TextAlignment = alignment
             };
 
             var sentences = SplitParagraphForFastTts(block);
@@ -638,7 +671,8 @@ public partial class MainWindow : Window
         }
 
         state.Reader.Document = doc;
-        state.Reader.Zoom = Math.Clamp(settings.ZoomPercent, 50, 200);
+        state.Reader.Zoom = 100;
+        ApplyReaderFrameWidth(state);
         ApplyThemeToReader(state);
 
         Dispatcher.BeginInvoke(() =>
@@ -2146,23 +2180,12 @@ public partial class MainWindow : Window
         object sender,
         RoutedPropertyChangedEventArgs<double> e)
     {
+        // Kept only for XAML compatibility. Font zoom is intentionally disabled.
         if (ReaderZoomText != null)
-            ReaderZoomText.Text = $"{e.NewValue:0}%";
+            ReaderZoomText.Text = "100%";
 
-        if (suppressSettingsEvents
-            || activeTab == null)
-            return;
-
-        activeTab.Settings.ZoomPercent =
-            Math.Clamp(e.NewValue, 50, 200);
-
-        activeTab.Reader.Zoom =
-            activeTab.Settings.ZoomPercent;
-
-        currentSettings =
-            activeTab.Settings;
-
-        SaveCurrentSettings();
+        if (activeTab != null)
+            activeTab.Reader.Zoom = 100;
     }
 
     private void ReaderWidthSlider_ValueChanged(
@@ -2171,7 +2194,7 @@ public partial class MainWindow : Window
     {
         if (ReaderWidthText != null)
             ReaderWidthText.Text =
-                $"{e.NewValue:0} px";
+                $"{e.NewValue:0}%";
 
         if (suppressSettingsEvents
             || activeTab == null)
@@ -2180,16 +2203,84 @@ public partial class MainWindow : Window
         activeTab.Settings.ReaderWidth =
             Math.Clamp(
                 e.NewValue,
-                520,
-                1200);
+                35,
+                100);
 
-        activeTab.Reader.MaxWidth =
-            activeTab.Settings.ReaderWidth;
+        ApplyReaderFrameWidth(
+            activeTab);
 
         currentSettings =
             activeTab.Settings;
 
         SaveCurrentSettings();
+    }
+
+    private void ReaderWidthFit_Click(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (activeTab == null)
+            return;
+
+        activeTab.Settings.ReaderWidth = 100;
+
+        suppressSettingsEvents = true;
+        try
+        {
+            ReaderWidthSlider.Value = 100;
+            ReaderWidthText.Text = "100%";
+        }
+        finally
+        {
+            suppressSettingsEvents = false;
+        }
+
+        ApplyReaderFrameWidth(activeTab);
+        SaveCurrentSettings();
+    }
+
+    private void PageMarginSlider_ValueChanged(
+        object sender,
+        RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (PageMarginText != null)
+            PageMarginText.Text =
+                $"{e.NewValue:0} px";
+
+        if (suppressSettingsEvents
+            || activeTab == null)
+            return;
+
+        activeTab.Settings.HorizontalPageMargin =
+            Math.Clamp(
+                e.NewValue,
+                8,
+                120);
+
+        currentSettings =
+            activeTab.Settings;
+
+        RefreshCurrentChapterAndSave();
+    }
+
+    private void TextAlignmentCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (suppressSettingsEvents
+            || activeTab == null
+            || TextAlignmentCombo.SelectedItem
+                is not ComboBoxItem item)
+            return;
+
+        activeTab.Settings.TextAlignmentMode =
+            item.Content?.ToString()
+            ?? "Căn đều";
+
+        currentSettings =
+            activeTab.Settings;
+
+        RefreshCurrentChapterAndSave();
     }
 
     private void GoToPage_Click(
@@ -2289,6 +2380,9 @@ public partial class MainWindow : Window
             RightColumn.Width =
                 new GridLength(0);
         }
+
+        Dispatcher.BeginInvoke(
+            UpdateAllReaderFrameWidths);
     }
 
     private void ToggleSettingsPane_Click(
@@ -2317,6 +2411,9 @@ public partial class MainWindow : Window
             LeftColumn.Width =
                 new GridLength(0);
         }
+
+        Dispatcher.BeginInvoke(
+            UpdateAllReaderFrameWidths);
     }
 
     private void FocusMode_Click(
@@ -2361,13 +2458,13 @@ public partial class MainWindow : Window
         {
             double next =
                 Math.Clamp(
-                    state.Settings.ZoomPercent
-                    + (e.Delta > 0 ? 10 : -10),
-                    50,
-                    200);
+                    state.Settings.ReaderWidth
+                    + (e.Delta > 0 ? 5 : -5),
+                    35,
+                    100);
 
-            state.Settings.ZoomPercent = next;
-            state.Reader.Zoom = next;
+            state.Settings.ReaderWidth = next;
+            ApplyReaderFrameWidth(state);
             settingsStore.Save(
                 state.Book.SourcePath,
                 state.Settings);
@@ -2379,11 +2476,8 @@ public partial class MainWindow : Window
                 suppressSettingsEvents = true;
                 try
                 {
-                    ReaderZoomSlider.Value =
-                        next;
-
-                    ReaderZoomText.Text =
-                        $"{next:0}%";
+                    ReaderWidthSlider.Value = next;
+                    ReaderWidthText.Text = $"{next:0}%";
                 }
                 finally
                 {
@@ -3324,29 +3418,36 @@ public partial class MainWindow : Window
             LineHeightSlider.Value =
                 state.Settings.LineHeight;
 
-            ReaderZoomSlider.Value =
-                Math.Clamp(
-                    state.Settings.ZoomPercent,
-                    50,
-                    200);
+            ReaderZoomSlider.Value = 100;
+            ReaderZoomText.Text = "100%";
+            state.Reader.Zoom = 100;
 
-            ReaderZoomText.Text =
-                $"{ReaderZoomSlider.Value:0}%";
-
-            state.Reader.Zoom =
-                ReaderZoomSlider.Value;
-
-            ReaderWidthSlider.Value =
+            state.Settings.ReaderWidth =
                 Math.Clamp(
                     state.Settings.ReaderWidth,
-                    520,
-                    1200);
+                    35,
+                    100);
+
+            ReaderWidthSlider.Value =
+                state.Settings.ReaderWidth;
 
             ReaderWidthText.Text =
-                $"{ReaderWidthSlider.Value:0} px";
+                $"{ReaderWidthSlider.Value:0}%";
 
-            state.Reader.MaxWidth =
-                ReaderWidthSlider.Value;
+            PageMarginSlider.Value =
+                Math.Clamp(
+                    state.Settings.HorizontalPageMargin,
+                    8,
+                    120);
+
+            PageMarginText.Text =
+                $"{PageMarginSlider.Value:0} px";
+
+            SelectComboByText(
+                TextAlignmentCombo,
+                state.Settings.TextAlignmentMode);
+
+            ApplyReaderFrameWidth(state);
 
             var fonts =
                 (FontCombo.ItemsSource
@@ -3484,6 +3585,80 @@ public partial class MainWindow : Window
         settingsStore.Save(
             state.Book.SourcePath,
             state.Settings);
+    }
+
+    private void ApplyReaderFrameWidth(
+        OpenBookTab state)
+    {
+        double available =
+            BookTabs.ActualWidth;
+
+        if (available <= 0)
+            available =
+                Math.Max(
+                    420,
+                    ActualWidth
+                    - LeftColumn.ActualWidth
+                    - RightColumn.ActualWidth);
+
+        double percent =
+            Math.Clamp(
+                state.Settings.ReaderWidth,
+                35,
+                100);
+
+        double target =
+            Math.Max(
+                420,
+                (available - 12)
+                * percent
+                / 100.0);
+
+        state.Reader.MaxWidth =
+            target;
+
+        state.Reader.HorizontalAlignment =
+            HorizontalAlignment.Center;
+    }
+
+    private void UpdateAllReaderFrameWidths()
+    {
+        foreach (var state
+                 in openBooks.Values)
+        {
+            ApplyReaderFrameWidth(state);
+        }
+    }
+
+    private static void HideFlowReaderChrome(
+        FlowDocumentReader reader)
+    {
+        reader.Zoom = 100;
+
+        reader.Dispatcher.BeginInvoke(() =>
+        {
+            foreach (var toolbar
+                     in FindVisualChildren<ToolBar>(
+                         reader))
+            {
+                toolbar.Visibility =
+                    Visibility.Collapsed;
+                toolbar.Height = 0;
+            }
+
+            foreach (var slider
+                     in FindVisualChildren<Slider>(
+                         reader))
+            {
+                // FlowDocumentReader's built-in zoom slider is no longer used.
+                if (!ReferenceEquals(
+                        slider,
+                        null))
+                {
+                    slider.IsEnabled = false;
+                }
+            }
+        });
     }
 
     // ---------------------------------------------------------------------
