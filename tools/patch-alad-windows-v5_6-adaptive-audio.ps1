@@ -109,9 +109,12 @@ $c = $c.Replace(
 
 # 3.8 dubbing is a continuous interpreter use-case: source speech must not barge-in and cut generated dubbing.
 # Current API supports NO_INTERRUPTION in realtimeInputConfig.
-$customPattern = '(?s)(        else\s*\{\s*setup = new\s*\{\s*model = "models/gemini-3\.8-live",\s*generationConfig = new\s*\{.*?\r?\n                \},)(\s*systemInstruction = new)'
+$customNeedle = @'
+                outputAudioTranscription = new { },
+                systemInstruction = new
+'@
 $customReplacement = @'
-$1
+                outputAudioTranscription = new { },
                 realtimeInputConfig = new
                 {
                     automaticActivityDetection = new
@@ -124,11 +127,10 @@ $1
                     },
                     activityHandling = "NO_INTERRUPTION"
                 },
-$2
+                systemInstruction = new
 '@
-$c2 = [regex]::Replace($c, $customPattern, $customReplacement, 1)
-if ($c2 -eq $c) { throw 'Gemini 3.8 realtimeInputConfig insertion failed' }
-$c = $c2
+if (-not $c.Contains($customNeedle)) { throw 'Gemini 3.8 realtimeInputConfig insertion marker missing' }
+$c = $c.Replace($customNeedle, $customReplacement)
 
 # Live Translate is continuous-stream translation, not a conversational barge-in flow.
 # Only clear client playback on interruption for the 3.8 agent-style engine.
