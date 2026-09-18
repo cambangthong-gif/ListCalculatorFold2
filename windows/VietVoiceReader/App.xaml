@@ -4,14 +4,22 @@
              StartupUri="MainWindow.xaml">
   <Application.Resources>
     <SolidColorBrush x:Key="AccentBrush" Color="#4F6BED"/>
+
     <Style TargetType="Button">
-      <Setter Property="Padding" Value="14,8"/>
-      <Setter Property="Margin" Value="4"/>
-      <Setter Property="MinHeight" Value="36"/>
+      <Setter Property="Padding" Value="8,3"/>
+      <Setter Property="Margin" Value="1"/>
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="MinWidth" Value="28"/>
     </Style>
+
     <Style TargetType="ComboBox">
-      <Setter Property="MinHeight" Value="34"/>
-      <Setter Property="Margin" Value="0,4,0,8"/>
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="Margin" Value="1"/>
+    </Style>
+
+    <Style TargetType="TextBox">
+      <Setter Property="MinHeight" Value="28"/>
+      <Setter Property="Margin" Value="1"/>
     </Style>
   </Application.Resources>
 </Application>
