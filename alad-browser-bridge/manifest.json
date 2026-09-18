@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "ALAD Browser Bridge",
+  "version": "1.0.0",
+  "description": "Đồng bộ phụ đề và trạng thái trình phát YouTube với ALAD Windows v6.",
+  "permissions": ["tabs"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.youtube.com/*", "https://m.youtube.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "ALAD Browser Bridge"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src ws://127.0.0.1:37921"
+  }
+}
