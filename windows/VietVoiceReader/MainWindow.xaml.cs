@@ -1696,7 +1696,8 @@ public partial class MainWindow : Window
 
     private void MoveToChapterFromReading(
         OpenBookTab state,
-        int chapterIndex)
+        int chapterIndex,
+        bool toEnd = false)
     {
         chapterIndex =
             Math.Clamp(
@@ -1706,6 +1707,9 @@ public partial class MainWindow : Window
 
         state.ChapterIndex =
             chapterIndex;
+        state.LastSentenceIndex = 0;
+        state.ScrollRatio =
+            toEnd ? 1 : 0;
 
         if (BookTabs.SelectedItem
             != state.Tab)
@@ -1735,14 +1739,29 @@ public partial class MainWindow : Window
             }
 
             ShowCurrentChapter(state);
+
+            if (toEnd)
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    var scroll =
+                        FindScrollableViewer(
+                            state.Reader);
+
+                    scroll?.ScrollToEnd();
+                });
+            }
         }
 
         libraryStore.UpdateProgress(
             state.Book,
-            chapterIndex);
+            chapterIndex,
+            state.LastSentenceIndex,
+            state.ScrollRatio);
 
         RefreshLibrary(
             state.Book.SourcePath);
+        UpdateBookProgressUi(state);
 
         StatusText.Text =
             $"Chương {chapterIndex + 1}/{state.Book.Chapters.Count}: "
