@@ -41,8 +41,13 @@ class AudioDubbingForegroundService : Service() {
         const val ACTION_SYNC_MINUS = "ACTION_SYNC_MINUS"
         const val ACTION_SYNC_PLUS = "ACTION_SYNC_PLUS"
         const val ACTION_SYNC_AUTO = "ACTION_SYNC_AUTO"
+        const val ACTION_COMPANION_STATE = "ACTION_COMPANION_STATE"
         const val EXTRA_RESULT_CODE = "EXTRA_RESULT_CODE"
         const val EXTRA_RESULT_DATA = "EXTRA_RESULT_DATA"
+        const val EXTRA_COMPANION_EVENT = "EXTRA_COMPANION_EVENT"
+        const val EXTRA_COMPANION_PLAYING = "EXTRA_COMPANION_PLAYING"
+        const val EXTRA_COMPANION_POSITION_MS = "EXTRA_COMPANION_POSITION_MS"
+        const val EXTRA_COMPANION_SPEED = "EXTRA_COMPANION_SPEED"
 
         val isRunning = MutableStateFlow(false)
         val audioAmplitude = MutableStateFlow(0f)
@@ -96,6 +101,7 @@ class AudioDubbingForegroundService : Service() {
             ACTION_SYNC_MINUS -> adjustSync(-100)
             ACTION_SYNC_PLUS -> adjustSync(100)
             ACTION_SYNC_AUTO -> enableAutoSyncAndCenter()
+            ACTION_COMPANION_STATE -> handleCompanionState(intent)
             ACTION_STOP -> {
                 stopDubbing()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -328,6 +334,50 @@ class AudioDubbingForegroundService : Service() {
         transcriptBuffer.clear()
         if (resetSnapshot) lastTranscriptSnapshot = ""
         if (text.isNotBlank()) deviceTtsManager?.enqueueText(text)
+    }
+
+    private fun handleCompanionState(intent: Intent) {
+        if (!isRunning.value) return
+        val event = intent.getStringExtra(EXTRA_COMPANION_EVENT).orEmpty()
+        val playing = intent.getBooleanExtra(EXTRA_COMPANION_PLAYING, true)
+
+        when (event) {
+            "PAUSE" -> {
+                audioPlayerManager?.setExternalPaused(true)
+                deviceTtsManager?.clearBacklog()
+                synchronized(transcriptBuffer) {
+                    transcriptBuffer.clear()
+                    lastTranscriptSnapshot = ""
+                }
+                queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
+            }
+            "PLAY" -> {
+                audioPlayerManager?.setExternalPaused(false)
+            }
+            "SEEK" -> {
+                audioPlayerManager?.clearForExternalSeek()
+                audioPlayerManager?.setExternalPaused(!playing)
+                deviceTtsManager?.clearBacklog()
+                synchronized(transcriptBuffer) {
+                    transcriptBuffer.clear()
+                    lastTranscriptSnapshot = ""
+                }
+                synchronized(this) {
+                    vadPreRoll.clear()
+                    vadSpeechActive = false
+                    vadHangoverChunks = 0
+                }
+                queueLatencyMs.value = 0
+            }
+            "SPEED" -> {
+                // The live source itself is already captured at YouTube's playback speed.
+                // Keep the dubbing queue near the live edge; no destructive flush needed.
+                audioPlayerManager?.setExternalPaused(!playing)
+            }
+            else -> {
+                audioPlayerManager?.setExternalPaused(!playing)
+            }
+        }
     }
 
     private fun adjustSync(deltaMs: Int) {
