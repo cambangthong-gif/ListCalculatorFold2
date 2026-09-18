@@ -18,10 +18,12 @@ import com.alad.app.core.audio.AudioCaptureManager
 import com.alad.app.core.audio.AudioPlayerManager
 import com.alad.app.core.audio.DeviceTtsManager
 import com.alad.app.core.network.ALADWebSocketManager
+import com.alad.app.core.sync.SmartSyncManager
 import com.alad.app.data.repository.UserPreferencesRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -44,6 +46,7 @@ class AudioDubbingForegroundService : Service() {
         const val ACTION_SYNC_PLUS = "ACTION_SYNC_PLUS"
         const val ACTION_SYNC_AUTO = "ACTION_SYNC_AUTO"
         const val ACTION_COMPANION_STATE = "ACTION_COMPANION_STATE"
+        const val ACTION_SMART_SYNC_PREPARE = "ACTION_SMART_SYNC_PREPARE"
         const val EXTRA_RESULT_CODE = "EXTRA_RESULT_CODE"
         const val EXTRA_RESULT_DATA = "EXTRA_RESULT_DATA"
         const val EXTRA_COMPANION_EVENT = "EXTRA_COMPANION_EVENT"
@@ -56,6 +59,8 @@ class AudioDubbingForegroundService : Service() {
         val syncOffsetMs = MutableStateFlow(0)
         val autoSyncActive = MutableStateFlow(true)
         val queueLatencyMs = MutableStateFlow(0)
+        val smartSyncStatus = MutableStateFlow("Live Sync")
+        val smartSyncPositionMs = MutableStateFlow(-1L)
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
@@ -66,6 +71,10 @@ class AudioDubbingForegroundService : Service() {
     private var webSocketManager: ALADWebSocketManager? = null
     private var sessionSettingsJob: Job? = null
     private var repository: UserPreferencesRepository? = null
+    private var smartSyncManager: SmartSyncManager? = null
+    private var smartSyncJob: Job? = null
+    private var lastSmartCueStartMs = Long.MIN_VALUE
+    private var smartSubtitlePlaybackActive = false
     private var playbackAudioManager: AudioManager? = null
     private var sourceMediaPlaying = true
 
@@ -81,6 +90,9 @@ class AudioDubbingForegroundService : Service() {
             }
             if (mediaActive == sourceMediaPlaying) return
             sourceMediaPlaying = mediaActive
+
+            smartSyncManager?.setPlaying(mediaActive)
+            smartSyncPositionMs.value = smartSyncManager?.estimatePosition() ?: -1L
 
             if (!isRunning.value) return
             if (mediaActive) {
@@ -133,6 +145,7 @@ class AudioDubbingForegroundService : Service() {
             ACTION_SYNC_PLUS -> adjustSync(100)
             ACTION_SYNC_AUTO -> enableAutoSyncAndCenter()
             ACTION_COMPANION_STATE -> handleCompanionState(intent)
+            ACTION_SMART_SYNC_PREPARE -> prepareSmartSync()
             ACTION_STOP -> {
                 stopDubbing()
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -180,6 +193,8 @@ class AudioDubbingForegroundService : Service() {
                 .retryOnConnectionFailure(true)
                 .build()
             webSocketManager = ALADWebSocketManager(wsClient)
+            smartSyncManager = SmartSyncManager(applicationContext, wsClient)
+            prepareSmartSync()
 
             if (voiceSource == "device_tts") {
                 deviceTtsManager = DeviceTtsManager(applicationContext).also { manager ->
@@ -229,8 +244,14 @@ class AudioDubbingForegroundService : Service() {
                 }
             }
 
+            webSocketManager?.onInputTranscription = { text, isFinal ->
+                if (isFinal) handleSmartInputTranscript(text)
+            }
+
             webSocketManager?.onOutputTranscription = { text ->
-                if (activeVoiceSource == "device_tts") processTranscriptFragment(text)
+                if (activeVoiceSource == "device_tts" && !smartSubtitlePlaybackActive) {
+                    processTranscriptFragment(text)
+                }
             }
             webSocketManager?.onTurnComplete = {
                 if (activeVoiceSource == "device_tts") flushTranscriptBuffer(resetSnapshot = true)
@@ -244,6 +265,7 @@ class AudioDubbingForegroundService : Service() {
             }
 
             webSocketManager?.connect(apiKey, "", targetLang, voiceName)
+            startSmartSyncScheduler()
 
             sessionSettingsJob?.cancel()
             sessionSettingsJob = serviceScope.launch {
@@ -282,6 +304,103 @@ class AudioDubbingForegroundService : Service() {
                     val current = audioAmplitude.value
                     audioAmplitude.value = current * 0.5f + normalized * 0.5f
                 }
+            }
+        }
+    }
+
+    private fun prepareSmartSync() {
+        val manager = smartSyncManager ?: return
+        serviceScope.launch {
+            val targetLang = repository?.targetLangFlow?.first() ?: "vi"
+            smartSubtitlePlaybackActive = false
+            lastSmartCueStartMs = Long.MIN_VALUE
+            val ready = manager.prepareSharedVideo(targetLang)
+            smartSyncStatus.value = SmartSyncManager.status
+            smartSyncPositionMs.value = manager.estimatePosition()
+            if (ready) {
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    android.widget.Toast.makeText(
+                        applicationContext,
+                        if (manager.hasTargetTimeline) {
+                            "Smart Sync sẵn sàng: đã có subtitle + timeline."
+                        } else {
+                            "Smart Sync sẵn sàng: dùng subtitle để tự bám vị trí."
+                        },
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun startSmartSyncScheduler() {
+        smartSyncJob?.cancel()
+        smartSyncJob = serviceScope.launch {
+            while (isRunning.value) {
+                val manager = smartSyncManager
+                if (manager != null) {
+                    smartSyncStatus.value = SmartSyncManager.status
+                    smartSyncPositionMs.value = manager.estimatePosition()
+
+                    if (
+                        activeVoiceSource == "device_tts" &&
+                        smartSubtitlePlaybackActive &&
+                        manager.hasTargetTimeline
+                    ) {
+                        val cue = manager.targetCueToSpeak(lastSmartCueStartMs)
+                        if (cue != null) {
+                            lastSmartCueStartMs = cue.startMs
+                            deviceTtsManager?.enqueueText(cue.text)
+                        }
+                    }
+                }
+                delay(80L)
+            }
+        }
+    }
+
+    private fun handleSmartInputTranscript(text: String) {
+        val manager = smartSyncManager ?: return
+        val match = manager.matchInputTranscript(text) ?: return
+        smartSyncStatus.value = SmartSyncManager.status
+        smartSyncPositionMs.value = match.positionMs
+
+        if (
+            activeVoiceSource == "device_tts" &&
+            manager.hasTargetTimeline &&
+            !smartSubtitlePlaybackActive
+        ) {
+            smartSubtitlePlaybackActive = true
+            deviceTtsManager?.clearBacklog()
+            synchronized(transcriptBuffer) {
+                transcriptBuffer.clear()
+                lastTranscriptSnapshot = ""
+            }
+            lastSmartCueStartMs = Long.MIN_VALUE
+        }
+
+        if (match.jumpDetected) {
+            audioPlayerManager?.clearForExternalSeek()
+            deviceTtsManager?.clearBacklog()
+            synchronized(transcriptBuffer) {
+                transcriptBuffer.clear()
+                lastTranscriptSnapshot = ""
+            }
+            synchronized(this) {
+                vadPreRoll.clear()
+                vadSpeechActive = false
+                vadHangoverChunks = 0
+            }
+            lastSmartCueStartMs = Long.MIN_VALUE
+            manager.resetAfterSeek()
+            queueLatencyMs.value = 0
+
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                android.widget.Toast.makeText(
+                    applicationContext,
+                    "Smart Sync: đã bám lại vị trí mới.",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
             }
         }
     }
@@ -468,6 +587,13 @@ class AudioDubbingForegroundService : Service() {
         queueLatencyMs.value = 0
         sessionSettingsJob?.cancel()
         sessionSettingsJob = null
+        smartSyncJob?.cancel()
+        smartSyncJob = null
+        smartSyncManager = null
+        smartSubtitlePlaybackActive = false
+        lastSmartCueStartMs = Long.MIN_VALUE
+        smartSyncStatus.value = "Live Sync"
+        smartSyncPositionMs.value = -1L
         try {
             playbackAudioManager?.unregisterAudioPlaybackCallback(playbackCallback)
         } catch (_: Throwable) {
