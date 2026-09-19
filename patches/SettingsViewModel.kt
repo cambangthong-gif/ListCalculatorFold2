@@ -39,6 +39,12 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     val lowLatency: StateFlow<Boolean> = _lowLatency.asStateFlow()
     private val _maxCatchUpSpeed = MutableStateFlow(1.15f)
     val maxCatchUpSpeed: StateFlow<Float> = _maxCatchUpSpeed.asStateFlow()
+    private val _geminiSyncMode = MutableStateFlow("balanced")
+    val geminiSyncMode: StateFlow<String> = _geminiSyncMode.asStateFlow()
+    private val _geminiMicroCatchUp = MutableStateFlow(true)
+    val geminiMicroCatchUp: StateFlow<Boolean> = _geminiMicroCatchUp.asStateFlow()
+    private val _geminiTailFinish = MutableStateFlow(true)
+    val geminiTailFinish: StateFlow<Boolean> = _geminiTailFinish.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -56,6 +62,9 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             _catchUp.value = repository.catchUpFlow.first()
             _lowLatency.value = repository.lowLatencyFlow.first()
             _maxCatchUpSpeed.value = repository.maxCatchUpSpeedFlow.first()
+            _geminiSyncMode.value = repository.geminiSyncModeFlow.first()
+            _geminiMicroCatchUp.value = repository.geminiMicroCatchUpFlow.first()
+            _geminiTailFinish.value = repository.geminiTailFinishFlow.first()
         }
     }
 
@@ -78,6 +87,9 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     fun updateCatchUp(v: Boolean) { _catchUp.value = v }
     fun updateLowLatency(v: Boolean) { _lowLatency.value = v }
     fun updateMaxCatchUpSpeed(v: Float) { _maxCatchUpSpeed.value = v.coerceIn(1.0f, 1.30f) }
+    fun updateGeminiSyncMode(v: String) { _geminiSyncMode.value = v }
+    fun updateGeminiMicroCatchUp(v: Boolean) { _geminiMicroCatchUp.value = v }
+    fun updateGeminiTailFinish(v: Boolean) { _geminiTailFinish.value = v }
 
     fun saveSettings() {
         viewModelScope.launch {
@@ -95,6 +107,9 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             repository.updateCatchUp(_catchUp.value)
             repository.updateLowLatency(_lowLatency.value)
             repository.updateMaxCatchUpSpeed(_maxCatchUpSpeed.value)
+            repository.updateGeminiSyncMode(_geminiSyncMode.value)
+            repository.updateGeminiMicroCatchUp(_geminiMicroCatchUp.value)
+            repository.updateGeminiTailFinish(_geminiTailFinish.value)
         }
     }
 }
