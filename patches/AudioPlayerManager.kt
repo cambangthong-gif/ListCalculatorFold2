@@ -49,6 +49,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var externallyPaused = false
     @Volatile private var sourceClockProvider: (() -> Long)? = null
     @Volatile private var stableLiveMode = false
+    @Volatile private var balancedMicroCatchUp = false
 
     private var audioTrack: AudioTrack? = null
     private var audioManager: AudioManager? = null
@@ -123,15 +124,25 @@ class AudioPlayerManager(private val context: Context) {
         sourceClockProvider = provider
     }
 
-    fun setStableLiveMode(enabled: Boolean) {
+    fun setStableLiveMode(enabled: Boolean, microCatchUp: Boolean = false) {
         stableLiveMode = enabled
+        balancedMicroCatchUp = enabled && microCatchUp
         needsStablePrebuffer = true
         if (enabled) {
             autoSync = false
-            catchUp = false
+            catchUp = microCatchUp
+            if (microCatchUp) {
+                maxCatchUpSpeed = minOf(maxCatchUpSpeed.coerceAtLeast(1.03f), 1.08f)
+            }
             sourceClockProvider = null
             applyPlaybackSpeed(1.0f)
         }
+    }
+
+    fun setBalancedMicroCatchUp(enabled: Boolean) {
+        balancedMicroCatchUp = stableLiveMode && enabled
+        catchUp = balancedMicroCatchUp
+        if (!balancedMicroCatchUp) applyPlaybackSpeed(1.0f)
     }
 
     fun playAudioData(data: ByteArray, sourceClockMs: Long = -1L) {
@@ -180,14 +191,19 @@ class AudioPlayerManager(private val context: Context) {
     }
 
     fun nudgeSync(deltaMs: Int): Int {
-        manualSyncMs = (manualSyncMs + deltaMs).coerceIn(-2000, 5000)
-        if (deltaMs < 0) {
+        manualSyncMs = (manualSyncMs + deltaMs).coerceIn(-1200, 2500)
+
+        if (deltaMs < 0 && !stableLiveMode) {
+            // Legacy/manual mode may still choose a destructive nudge.
             dropAudioMs(abs(deltaMs))
             synchronized(trackLock) {
                 try { audioTrack?.pause(); audioTrack?.flush(); audioTrack?.play() }
                 catch (t: Throwable) { Log.w(TAG, "Could not flush AudioTrack", t) }
             }
         }
+
+        // Balanced Stable Live never drops translated content. A negative offset
+        // simply raises the micro catch-up pressure until the queue closes the gap.
         return manualSyncMs
     }
 
@@ -250,8 +266,24 @@ class AudioPlayerManager(private val context: Context) {
     }
 
     private fun updateCatchUpSpeed() {
-        if (!catchUp) { applyPlaybackSpeed(1.0f); return }
+        if (!catchUp) {
+            applyPlaybackSpeed(1.0f)
+            return
+        }
+
         val queueLag = queuedDurationMs().toLong()
+        if (stableLiveMode && balancedMicroCatchUp) {
+            val pressure = queueLag + (-manualSyncMs).coerceAtLeast(0)
+            val target = when {
+                pressure < 220L -> 1.00f
+                pressure < 420L -> 1.03f
+                pressure < 700L -> 1.05f
+                else -> 1.08f
+            }
+            applyPlaybackSpeed(target)
+            return
+        }
+
         val sourceLag = headSourceLagMs()
         val effectiveLag = maxOf(queueLag, sourceLag)
         val targetLag = if (lowLatency) 500L else 800L
@@ -350,6 +382,7 @@ class AudioPlayerManager(private val context: Context) {
         workerThread?.interrupt(); workerThread = null
         externallyPaused = false
         stableLiveMode = false
+        balancedMicroCatchUp = false
         needsStablePrebuffer = true
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
         synchronized(trackLock) {
