@@ -299,7 +299,11 @@ fun OverlayContent(
                     contentAlignment = Alignment.Center
                 ) {
                     val smartLabel = when {
-                        syncStatus.startsWith("STABLE") -> "STABLE · q" + queueLatency + "ms"
+                        syncStatus.startsWith("STABLE") ||
+                        syncStatus.startsWith("HYBRID") ||
+                        syncStatus.startsWith("BALANCED") ||
+                        syncStatus.startsWith("TAIL") ||
+                        syncStatus == "PAUSED" -> syncStatus + " · q" + queueLatency + "ms"
                         smartPosition >= 0L -> {
                             val totalSeconds = smartPosition / 1000L
                             "SMART " + (totalSeconds / 60L) + ":" +
