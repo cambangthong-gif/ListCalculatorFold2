@@ -45,6 +45,10 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     val geminiMicroCatchUp: StateFlow<Boolean> = _geminiMicroCatchUp.asStateFlow()
     private val _geminiTailFinish = MutableStateFlow(true)
     val geminiTailFinish: StateFlow<Boolean> = _geminiTailFinish.asStateFlow()
+    private val _geminiInterruptionMode = MutableStateFlow("no_interruption")
+    val geminiInterruptionMode: StateFlow<String> = _geminiInterruptionMode.asStateFlow()
+    private val _geminiAdaptiveVad = MutableStateFlow(true)
+    val geminiAdaptiveVad: StateFlow<Boolean> = _geminiAdaptiveVad.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -65,6 +69,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             _geminiSyncMode.value = repository.geminiSyncModeFlow.first()
             _geminiMicroCatchUp.value = repository.geminiMicroCatchUpFlow.first()
             _geminiTailFinish.value = repository.geminiTailFinishFlow.first()
+            _geminiInterruptionMode.value = repository.geminiInterruptionModeFlow.first()
+            _geminiAdaptiveVad.value = repository.geminiAdaptiveVadFlow.first()
         }
     }
 
@@ -90,6 +96,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     fun updateGeminiSyncMode(v: String) { _geminiSyncMode.value = v }
     fun updateGeminiMicroCatchUp(v: Boolean) { _geminiMicroCatchUp.value = v }
     fun updateGeminiTailFinish(v: Boolean) { _geminiTailFinish.value = v }
+    fun updateGeminiInterruptionMode(v: String) { _geminiInterruptionMode.value = v }
+    fun updateGeminiAdaptiveVad(v: Boolean) { _geminiAdaptiveVad.value = v }
 
     fun saveSettings() {
         viewModelScope.launch {
@@ -110,6 +118,8 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
             repository.updateGeminiSyncMode(_geminiSyncMode.value)
             repository.updateGeminiMicroCatchUp(_geminiMicroCatchUp.value)
             repository.updateGeminiTailFinish(_geminiTailFinish.value)
+            repository.updateGeminiInterruptionMode(_geminiInterruptionMode.value)
+            repository.updateGeminiAdaptiveVad(_geminiAdaptiveVad.value)
         }
     }
 }
