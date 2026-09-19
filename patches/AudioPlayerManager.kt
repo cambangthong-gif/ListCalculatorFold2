@@ -19,10 +19,10 @@ import kotlin.math.min
 class AudioPlayerManager(private val context: Context) {
     companion object {
         private const val TAG = "AudioPlayerManager"
-        private const val SAMPLE_RATE = 24000
+        private const val SOURCE_SAMPLE_RATE = 24_000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_OUT_MONO
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
-        private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
+        private const val BYTES_PER_MS = SOURCE_SAMPLE_RATE * 2 / 1000
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
         private const val ULTRA_PREBUFFER_MS = 25
         private const val ULTRA_PREBUFFER_MAX_WAIT_MS = 15L
@@ -65,42 +65,83 @@ class AudioPlayerManager(private val context: Context) {
     private var currentPlaybackSpeed = 1.0f
     private var needsStablePrebuffer = true
 
+    @Volatile private var nativeSampleRate = 48_000
+    @Volatile private var nativeFramesPerBurst = 256
+    @Volatile private var currentTrackBufferFrames = 0
+    @Volatile private var lastKnownUnderruns = 0
+    private var trackMinFrames = 0
+    private var trackCapacityFrames = 0
+    private var lastBufferAdjustMs = 0L
+    private var underrunStableSinceMs = 0L
+
+    private var resamplePrevSample = 0
+    private var hasResamplePrev = false
+    private var resamplePosition = 0.0
+
     fun start() {
         if (running.getAndSet(true)) return
         audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val manager = audioManager ?: return
+
+        nativeSampleRate = manager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+            ?.toIntOrNull()
+            ?.takeIf { it in 24_000..192_000 }
+            ?: 48_000
+        nativeFramesPerBurst = manager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+            ?.toIntOrNull()
+            ?.takeIf { it > 0 }
+            ?: 256
+
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .build()
-        val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
-        val desiredBuffer = if (stableLiveMode) {
-            when (stableProfile) {
-                "stable" -> maxOf(minBuffer * 2, BYTES_PER_MS * 140)
-                "ultra_fast" -> maxOf(minBuffer, BYTES_PER_MS * 50)
-                else -> maxOf(minBuffer, BYTES_PER_MS * 70)
-            }
-        } else if (lowLatency) {
-            minBuffer
-        } else {
-            minBuffer * 2
-        }
+
+        val minBufferBytes = AudioTrack.getMinBufferSize(
+            nativeSampleRate,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT
+        ).coerceAtLeast(nativeFramesPerBurst * 2)
+        trackMinFrames = (minBufferBytes / 2).coerceAtLeast(nativeFramesPerBurst)
+        trackCapacityFrames = maxOf(trackMinFrames * 2, nativeFramesPerBurst * 8)
+
         audioTrack = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
                 AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE)
+                    .setSampleRate(nativeSampleRate)
                     .setChannelMask(CHANNEL_CONFIG)
                     .setEncoding(AUDIO_FORMAT)
                     .build()
             )
-            .setBufferSizeInBytes(desiredBuffer)
+            .setBufferSizeInBytes(trackCapacityFrames * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
             .build()
-            .also { it.setVolume(aiVolume); it.play() }
+            .also { track ->
+                val requestedFrames = initialTargetBufferFrames()
+                val applied = try {
+                    track.setBufferSizeInFrames(requestedFrames)
+                } catch (_: Throwable) {
+                    requestedFrames
+                }
+                currentTrackBufferFrames =
+                    if (applied > 0) applied else requestedFrames
+                lastKnownUnderruns = try { track.underrunCount } catch (_: Throwable) { 0 }
+                lastBufferAdjustMs = SystemClock.elapsedRealtime()
+                underrunStableSinceMs = lastBufferAdjustMs
+                track.setVolume(aiVolume)
+                track.play()
+            }
+
+        resetResampler()
 
         if (dubMode == "voice_over") desiredFocusGain()?.let(::ensureFocus)
-        workerThread = Thread({ playbackLoop() }, "ALAD-AudioPlayer").apply { isDaemon = true; start() }
+        workerThread = Thread({ playbackLoop() }, "ALAD-AudioPlayer").apply {
+            isDaemon = true
+            try { priority = Thread.MAX_PRIORITY } catch (_: Throwable) {}
+            start()
+        }
     }
 
     fun configure(
@@ -192,6 +233,7 @@ class AudioPlayerManager(private val context: Context) {
     fun clearForExternalSeek() {
         queue.clear()
         queuedBytes.set(0)
+        resetResampler()
         synchronized(trackLock) {
             try {
                 val track = audioTrack ?: return@synchronized
@@ -267,15 +309,22 @@ class AudioPlayerManager(private val context: Context) {
                 }
                 updateCatchUpSpeed()
                 acquireFocusForSpeech()
+                val outputData = resampleToNative(chunk.data)
                 synchronized(trackLock) {
                     val track = audioTrack
                     if (track != null && running.get()) {
                         var offset = 0
-                        while (offset < chunk.data.size && running.get()) {
-                            val wrote = track.write(chunk.data, offset, chunk.data.size - offset, AudioTrack.WRITE_BLOCKING)
+                        while (offset < outputData.size && running.get()) {
+                            val wrote = track.write(
+                                outputData,
+                                offset,
+                                outputData.size - offset,
+                                AudioTrack.WRITE_BLOCKING
+                            )
                             if (wrote <= 0) break
                             offset += wrote
                         }
+                        adaptNativeBuffer(track)
                     }
                 }
                 lastSpeechWriteMs = SystemClock.elapsedRealtime()
@@ -399,7 +448,114 @@ class AudioPlayerManager(private val context: Context) {
             queuedBytes.addAndGet(-removed.data.size.toLong())
         }
     }
-    fun queuedDurationMs(): Int = (queuedBytes.get().coerceAtLeast(0L) / BYTES_PER_MS).toInt()
+    fun queuedDurationMs(): Int =
+        (queuedBytes.get().coerceAtLeast(0L) / BYTES_PER_MS).toInt()
+
+    fun nativeOutputRateHz(): Int = nativeSampleRate
+    fun nativeBurstFrames(): Int = nativeFramesPerBurst
+    fun outputBufferMs(): Int =
+        if (nativeSampleRate <= 0) 0
+        else (currentTrackBufferFrames * 1000L / nativeSampleRate).toInt()
+    fun underrunCount(): Int = lastKnownUnderruns
+
+    private fun initialTargetBufferFrames(): Int {
+        val burstTarget = when (stableProfile) {
+            "stable" -> nativeFramesPerBurst * 4
+            "ultra_fast", "continuous" -> nativeFramesPerBurst * 2
+            else -> nativeFramesPerBurst * 3
+        }
+        return maxOf(trackMinFrames, burstTarget).coerceAtMost(trackCapacityFrames)
+    }
+
+    private fun adaptNativeBuffer(track: AudioTrack) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastBufferAdjustMs < 500L) return
+
+        val underruns = try { track.underrunCount } catch (_: Throwable) { lastKnownUnderruns }
+        if (underruns > lastKnownUnderruns) {
+            val target = (currentTrackBufferFrames + nativeFramesPerBurst)
+                .coerceAtMost(trackCapacityFrames)
+            if (target > currentTrackBufferFrames) {
+                val applied = try { track.setBufferSizeInFrames(target) } catch (_: Throwable) { target }
+                if (applied > 0) currentTrackBufferFrames = applied
+            }
+            underrunStableSinceMs = now
+        } else if (
+            now - underrunStableSinceMs >= 5_000L &&
+            currentTrackBufferFrames > initialTargetBufferFrames()
+        ) {
+            val target = (currentTrackBufferFrames - nativeFramesPerBurst)
+                .coerceAtLeast(initialTargetBufferFrames())
+            val applied = try { track.setBufferSizeInFrames(target) } catch (_: Throwable) { target }
+            if (applied > 0) currentTrackBufferFrames = applied
+            underrunStableSinceMs = now
+        }
+
+        lastKnownUnderruns = underruns
+        lastBufferAdjustMs = now
+    }
+
+    private fun resetResampler() {
+        hasResamplePrev = false
+        resamplePrevSample = 0
+        resamplePosition = 0.0
+    }
+
+    private fun resampleToNative(data: ByteArray): ByteArray {
+        if (data.isEmpty() || nativeSampleRate == SOURCE_SAMPLE_RATE) return data
+        val sampleCount = data.size / 2
+        if (sampleCount <= 0) return data
+
+        val extra = if (hasResamplePrev) 1 else 0
+        val samples = IntArray(sampleCount + extra)
+        var dst = 0
+        if (hasResamplePrev) {
+            samples[0] = resamplePrevSample
+            dst = 1
+        }
+
+        var src = 0
+        while (src + 1 < data.size && dst < samples.size) {
+            samples[dst++] =
+                ((data[src].toInt() and 0xFF) or (data[src + 1].toInt() shl 8))
+                    .toShort()
+                    .toInt()
+            src += 2
+        }
+        if (dst < 2) {
+            if (dst == 1) {
+                resamplePrevSample = samples[0]
+                hasResamplePrev = true
+            }
+            return ByteArray(0)
+        }
+
+        val step = SOURCE_SAMPLE_RATE.toDouble() / nativeSampleRate.toDouble()
+        val output = ArrayList<Short>((dst / step).toInt() + 4)
+        var pos = resamplePosition
+        val lastIndex = dst - 1
+        while (pos < lastIndex) {
+            val i = pos.toInt().coerceIn(0, lastIndex - 1)
+            val frac = pos - i
+            val a = samples[i].toDouble()
+            val b = samples[i + 1].toDouble()
+            output.add((a + (b - a) * frac).toInt().coerceIn(-32768, 32767).toShort())
+            pos += step
+        }
+
+        resamplePosition = pos - lastIndex
+        resamplePrevSample = samples[lastIndex]
+        hasResamplePrev = true
+
+        val bytes = ByteArray(output.size * 2)
+        var o = 0
+        for (sample in output) {
+            val v = sample.toInt()
+            bytes[o++] = (v and 0xFF).toByte()
+            bytes[o++] = ((v shr 8) and 0xFF).toByte()
+        }
+        return bytes
+    }
 
     fun stop() {
         if (!running.getAndSet(false)) return
@@ -410,6 +566,7 @@ class AudioPlayerManager(private val context: Context) {
         balancedMicroCatchUp = false
         needsStablePrebuffer = true
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
+        resetResampler()
         synchronized(trackLock) {
             try { audioTrack?.pause(); audioTrack?.flush(); audioTrack?.stop() } catch (_: Throwable) {}
             audioTrack?.release(); audioTrack = null
