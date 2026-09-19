@@ -54,6 +54,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     @Volatile private var isSetupComplete = false
     @Volatile private var manualDisconnect = false
     @Volatile private var reconnectScheduled = false
+    @Volatile private var lastServerMessageMs = 0L
+    @Volatile private var lastAudioSendMs = 0L
 
     private var reconnectAttempt = 0
     private var socketGeneration = 0L
@@ -137,6 +139,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
             override fun onMessage(ws: WebSocket, text: String) {
                 if (!isCurrent(generation)) return
+                lastServerMessageMs = SystemClock.elapsedRealtime()
 
                 try {
                     val json = JSONObject(text)
@@ -248,6 +251,10 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         val errMessage = json.optJSONObject("error")
                             ?.optString("message", "Unknown error") ?: "Unknown error"
                         onStatusChanged?.invoke("Error: $errMessage")
+                        forceReconnect(
+                            resetSession = true,
+                            reason = "server error"
+                        )
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing Gemini message", e)
@@ -372,6 +379,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     }
 
     private fun sendAudioNow(base64Audio: String): Boolean {
+        lastAudioSendMs = SystemClock.elapsedRealtime()
         val inputPayload = JSONObject().apply {
             put("realtimeInput", JSONObject().apply {
                 put("audio", JSONObject().apply {
@@ -508,6 +516,45 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         }, delayMs)
     }
 
+    fun isReady(): Boolean = isSetupComplete
+
+    fun serverSilenceMs(): Long {
+        val last = lastServerMessageMs
+        return if (last <= 0L) Long.MAX_VALUE
+        else (SystemClock.elapsedRealtime() - last).coerceAtLeast(0L)
+    }
+
+    fun audioSendSilenceMs(): Long {
+        val last = lastAudioSendMs
+        return if (last <= 0L) Long.MAX_VALUE
+        else (SystemClock.elapsedRealtime() - last).coerceAtLeast(0L)
+    }
+
+    @Synchronized
+    fun forceReconnect(
+        resetSession: Boolean = false,
+        reason: String = "watchdog"
+    ) {
+        if (manualDisconnect || currentApiKey.isBlank()) return
+        cancelGoAwayRolloverLocked()
+        reconnectHandler.removeCallbacksAndMessages(null)
+        reconnectScheduled = false
+        isSetupComplete = false
+        if (resetSession) sessionHandle = null
+
+        val old = webSocket
+        socketGeneration++
+        webSocket = null
+        try { old?.cancel() } catch (_: Throwable) {}
+
+        reconnectAttempt = 1
+        onStatusChanged?.invoke(
+            if (resetSession) "Self-heal hard reconnect"
+            else "Self-heal reconnect"
+        )
+        openSocket()
+    }
+
     @Synchronized
     fun disconnect() {
         manualDisconnect = true
@@ -516,6 +563,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         reconnectAttempt = 0
         sessionHandle = null
         pendingAudio.clear()
+        lastServerMessageMs = 0L
+        lastAudioSendMs = 0L
         cancelGoAwayRolloverLocked()
         reconnectHandler.removeCallbacksAndMessages(null)
         socketGeneration++
