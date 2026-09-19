@@ -276,12 +276,12 @@ class AudioPlayerManager(private val context: Context) {
                     val startWait = SystemClock.elapsedRealtime()
                     val targetPrebuffer = when (stableProfile) {
                         "stable" -> STABLE_PREBUFFER_MS
-                        "ultra_fast" -> ULTRA_PREBUFFER_MS
+                        "ultra_fast", "continuous" -> ULTRA_PREBUFFER_MS
                         else -> FAST_PREBUFFER_MS
                     }
                     val maxWait = when (stableProfile) {
                         "stable" -> STABLE_PREBUFFER_MAX_WAIT_MS
-                        "ultra_fast" -> ULTRA_PREBUFFER_MAX_WAIT_MS
+                        "ultra_fast", "continuous" -> ULTRA_PREBUFFER_MAX_WAIT_MS
                         else -> FAST_PREBUFFER_MAX_WAIT_MS
                     }
                     while (
