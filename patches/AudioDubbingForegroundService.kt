@@ -65,6 +65,10 @@ class AudioDubbingForegroundService : Service() {
         val smartSyncPositionMs = MutableStateFlow(-1L)
         val audioClockMs = MutableStateFlow(0L)
         val audioClockLagMs = MutableStateFlow(0L)
+        val captureBlockMs = MutableStateFlow(0L)
+        val nativeOutputRateHz = MutableStateFlow(0)
+        val outputBufferMs = MutableStateFlow(0)
+        val outputUnderruns = MutableStateFlow(0)
     }
 
     private val serviceScope = CoroutineScope(Dispatchers.IO + Job())
@@ -144,7 +148,9 @@ class AudioDubbingForegroundService : Service() {
                         // Preserve the old Tail Finish behavior without a fixed hard cut:
                         // finalize the current server turn, then keep draining until Gemini
                         // has gone quiet and the local queue is empty (or a safe max timeout).
-                        delay(650L)
+                        val sourceStopDelay =
+                            if (activeGeminiSyncMode == "continuous") 1_050L else 650L
+                        delay(sourceStopDelay)
                         if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                             flushGeminiInputChunk()
                             webSocketManager?.sendAudioStreamEnd()
@@ -448,8 +454,12 @@ class AudioDubbingForegroundService : Service() {
                 if (activeVoiceSource == "gemini") {
                     lastGeminiAudioReceivedMs = SystemClock.elapsedRealtime()
                     audioPlayerManager?.playAudioData(audioChunk)
-                    queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
+                    val player = audioPlayerManager
+                    queueLatencyMs.value = player?.queuedDurationMs() ?: 0
                     audioClockLagMs.value = queueLatencyMs.value.toLong()
+                    nativeOutputRateHz.value = player?.nativeOutputRateHz() ?: 0
+                    outputBufferMs.value = player?.outputBufferMs() ?: 0
+                    outputUnderruns.value = player?.underrunCount() ?: 0
                 }
             }
 
@@ -515,7 +525,7 @@ class AudioDubbingForegroundService : Service() {
                 enableTranscription = voiceSource == "device_tts",
                 vadSilenceMs = when {
                     voiceSource != "gemini" -> 550
-                    geminiSyncMode == "stable" -> 800
+                    geminiSyncMode == "stable" || geminiSyncMode == "continuous" -> 800
                     geminiSyncMode == "ultra_fast" -> 500
                     else -> 550
                 },
@@ -560,7 +570,8 @@ class AudioDubbingForegroundService : Service() {
                                 enableTranscription = activeVoiceSource == "device_tts",
                                 vadSilenceMs = when {
                                     activeVoiceSource != "gemini" -> 550
-                                    activeGeminiSyncMode == "stable" -> 800
+                                    activeGeminiSyncMode == "stable" ||
+                                        activeGeminiSyncMode == "continuous" -> 800
                                     activeGeminiSyncMode == "ultra_fast" -> 500
                                     else -> 550
                                 },
@@ -583,9 +594,15 @@ class AudioDubbingForegroundService : Service() {
                 audioCaptureManager?.startCapture(projection, appUid) { pcmData ->
                     val normalized = calculateNormalizedLevel(pcmData)
 
+                    captureBlockMs.value =
+                        audioCaptureManager?.lastReadDurationMs() ?: 0L
+
                     if (activeVoiceSource == "gemini") {
                         feedGeminiContinuousAudio(pcmData)
-                        if (activeGeminiSyncMode != "stable") {
+                        if (
+                            activeGeminiSyncMode != "stable" &&
+                            activeGeminiSyncMode != "continuous"
+                        ) {
                             updateHybridGeminiVad(normalized)
                         }
                     } else {
@@ -804,6 +821,7 @@ class AudioDubbingForegroundService : Service() {
     }
 
     private fun geminiProfileLabel(): String = when (activeGeminiSyncMode) {
+        "continuous" -> "CONTINUOUS"
         "stable" -> "STABLE"
         "ultra_fast" -> "ULTRA FAST"
         "hybrid_fast" -> "HYBRID FAST"
@@ -1054,6 +1072,10 @@ class AudioDubbingForegroundService : Service() {
         }
         audioAmplitude.value = 0f
         queueLatencyMs.value = 0
+        captureBlockMs.value = 0L
+        nativeOutputRateHz.value = 0
+        outputBufferMs.value = 0
+        outputUnderruns.value = 0
         sessionSettingsJob?.cancel()
         sessionSettingsJob = null
         smartSyncJob?.cancel()
