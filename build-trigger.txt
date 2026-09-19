@@ -1,1 +1,1 @@
-ALAD v3.9.2 Audio Clock rebuild after playback detector compile fix 2026-09-18
+ALAD v4.2 Balanced rebuild with selectable Gemini sync profiles 2026-09-19
