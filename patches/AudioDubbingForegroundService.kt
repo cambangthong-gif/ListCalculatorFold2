@@ -91,8 +91,8 @@ class AudioDubbingForegroundService : Service() {
     private var playbackAudioManager: AudioManager? = null
     private var sourceMediaPlaying = true
 
-    // Stable Live input path for Gemini: 100 ms PCM16 mono @ 16 kHz = 3,200 bytes.
-    private val geminiInputChunk = ByteArray(3_200)
+    // Low-latency Live input path: 30 ms PCM16 mono @ 16 kHz = 960 bytes.
+    private val geminiInputChunk = ByteArray(960)
     private var geminiInputChunkSize = 0
 
     // Hybrid VAD: server handles speech-start robustly; client only nudges end-of-turn
@@ -102,10 +102,13 @@ class AudioDubbingForegroundService : Service() {
     private var hybridSpeechStartMs = 0L
     private var hybridNoiseFloor = 0.0025f
     private var lastHybridStreamEndMs = 0L
+    private var hybridPauseEmaMs = 0f
     @Volatile private var lastGeminiAudioReceivedMs = 0L
     @Volatile private var activeGeminiSyncMode = "balanced"
     @Volatile private var geminiMicroCatchUpEnabled = true
     @Volatile private var geminiTailFinishEnabled = true
+    @Volatile private var geminiInterruptionMode = "no_interruption"
+    @Volatile private var geminiAdaptiveVadEnabled = true
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
@@ -312,12 +315,15 @@ class AudioDubbingForegroundService : Service() {
         activeGeminiSyncMode = "balanced"
         geminiMicroCatchUpEnabled = true
         geminiTailFinishEnabled = true
+        geminiInterruptionMode = "no_interruption"
+        geminiAdaptiveVadEnabled = true
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
             hybridSpeechStartMs = 0L
             hybridNoiseFloor = 0.0025f
             lastHybridStreamEndMs = 0L
+            hybridPauseEmaMs = 0f
         }
         audioClockSync.reset()
         audioClockMs.value = 0L
@@ -357,10 +363,14 @@ class AudioDubbingForegroundService : Service() {
             val geminiSyncMode = prefs.geminiSyncModeFlow.first()
             val geminiMicroCatchUp = prefs.geminiMicroCatchUpFlow.first()
             val geminiTailFinish = prefs.geminiTailFinishFlow.first()
+            val geminiInterruption = prefs.geminiInterruptionModeFlow.first()
+            val geminiAdaptiveVad = prefs.geminiAdaptiveVadFlow.first()
 
             activeGeminiSyncMode = geminiSyncMode
             geminiMicroCatchUpEnabled = geminiMicroCatchUp
             geminiTailFinishEnabled = geminiTailFinish
+            geminiInterruptionMode = geminiInterruption
+            geminiAdaptiveVadEnabled = geminiAdaptiveVad
 
             activeVoiceSource = voiceSource
             syncOffsetMs.value = manualSync
@@ -483,11 +493,18 @@ class AudioDubbingForegroundService : Service() {
                 }
             }
             webSocketManager?.onInterrupted = {
-                synchronized(transcriptBuffer) {
-                    transcriptBuffer.clear()
-                    lastTranscriptSnapshot = ""
+                if (activeVoiceSource == "gemini") {
+                    if (geminiInterruptionMode == "interrupt") {
+                        audioPlayerManager?.clearForExternalSeek()
+                        queueLatencyMs.value = 0
+                    }
+                } else {
+                    synchronized(transcriptBuffer) {
+                        transcriptBuffer.clear()
+                        lastTranscriptSnapshot = ""
+                    }
+                    deviceTtsManager?.clearBacklog()
                 }
-                deviceTtsManager?.clearBacklog()
             }
 
             webSocketManager?.connect(
@@ -501,6 +518,13 @@ class AudioDubbingForegroundService : Service() {
                     geminiSyncMode == "stable" -> 800
                     geminiSyncMode == "ultra_fast" -> 500
                     else -> 550
+                },
+                activityHandling = if (
+                    voiceSource == "gemini" && geminiInterruption == "interrupt"
+                ) {
+                    "START_OF_ACTIVITY_INTERRUPTS"
+                } else {
+                    "NO_INTERRUPTION"
                 }
             )
             if (voiceSource == "device_tts") startSmartSyncScheduler()
@@ -539,6 +563,14 @@ class AudioDubbingForegroundService : Service() {
                                     activeGeminiSyncMode == "stable" -> 800
                                     activeGeminiSyncMode == "ultra_fast" -> 500
                                     else -> 550
+                                },
+                                activityHandling = if (
+                                    activeVoiceSource == "gemini" &&
+                                    geminiInterruptionMode == "interrupt"
+                                ) {
+                                    "START_OF_ACTIVITY_INTERRUPTS"
+                                } else {
+                                    "NO_INTERRUPTION"
                                 }
                             )
                         }
@@ -722,6 +754,16 @@ class AudioDubbingForegroundService : Service() {
         }
 
         if (level >= holdThreshold) {
+            if (hybridSilenceStartMs > 0L && geminiAdaptiveVadEnabled) {
+                val shortPause = now - hybridSilenceStartMs
+                if (shortPause in 60L..700L) {
+                    hybridPauseEmaMs = if (hybridPauseEmaMs <= 0f) {
+                        shortPause.toFloat()
+                    } else {
+                        hybridPauseEmaMs * 0.75f + shortPause.toFloat() * 0.25f
+                    }
+                }
+            }
             hybridSilenceStartMs = 0L
             return
         }
@@ -733,9 +775,18 @@ class AudioDubbingForegroundService : Service() {
 
         val silenceMs = now - hybridSilenceStartMs
         val speechAgeMs = now - hybridSpeechStartMs
-        val endSilenceMs = if (activeGeminiSyncMode == "ultra_fast") 320L else 500L
-        val minSpeechMs = if (activeGeminiSyncMode == "ultra_fast") 220L else 280L
-        val endCooldownMs = if (activeGeminiSyncMode == "ultra_fast") 450L else 650L
+
+        val baseEndSilenceMs = if (activeGeminiSyncMode == "ultra_fast") 320L else 500L
+        val endSilenceMs = if (!geminiAdaptiveVadEnabled || hybridPauseEmaMs <= 0f) {
+            baseEndSilenceMs
+        } else if (activeGeminiSyncMode == "ultra_fast") {
+            (hybridPauseEmaMs.toLong() + 90L).coerceIn(280L, 460L)
+        } else {
+            (hybridPauseEmaMs.toLong() + 120L).coerceIn(380L, 620L)
+        }
+
+        val minSpeechMs = if (activeGeminiSyncMode == "ultra_fast") 200L else 260L
+        val endCooldownMs = if (activeGeminiSyncMode == "ultra_fast") 420L else 600L
 
         if (
             silenceMs >= endSilenceMs &&
@@ -975,12 +1026,15 @@ class AudioDubbingForegroundService : Service() {
         audioCaptureManager?.stopCapture()
         audioCaptureManager = null
         synchronized(geminiInputChunk) { geminiInputChunkSize = 0 }
+        geminiInterruptionMode = "no_interruption"
+        geminiAdaptiveVadEnabled = true
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
             hybridSpeechStartMs = 0L
             hybridNoiseFloor = 0.0025f
             lastHybridStreamEndMs = 0L
+            hybridPauseEmaMs = 0f
         }
         audioPlayerManager?.stop()
         audioPlayerManager = null
