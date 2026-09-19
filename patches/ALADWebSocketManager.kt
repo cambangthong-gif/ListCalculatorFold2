@@ -30,7 +30,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
 
         // Keep only the recent live edge during a reconnect/handoff.
-        private const val MAX_PENDING_AUDIO_CHUNKS = 32
+        private const val MAX_PENDING_AUDIO_CHUNKS = 56
         private const val MAX_PENDING_AUDIO_AGE_MS = 1_500L
 
         // Fast reconnect profile for unexpected failures.
