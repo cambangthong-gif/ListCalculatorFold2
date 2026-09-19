@@ -1,1 +1,1 @@
-ALAD v4.2 Balanced rebuild with selectable Gemini sync profiles 2026-09-19
+ALAD v4.5 Continuous Native final rebuild true-30ms native audio continuous profile 2026-09-19
