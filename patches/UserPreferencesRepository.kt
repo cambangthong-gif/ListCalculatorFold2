@@ -33,6 +33,9 @@ class UserPreferencesRepository(private val context: Context) {
         val CATCH_UP = booleanPreferencesKey("catch_up")
         val LOW_LATENCY = booleanPreferencesKey("low_latency")
         val MAX_CATCH_UP_SPEED = floatPreferencesKey("max_catch_up_speed")
+        val GEMINI_SYNC_MODE = stringPreferencesKey("gemini_sync_mode")
+        val GEMINI_MICRO_CATCH_UP = booleanPreferencesKey("gemini_micro_catch_up")
+        val GEMINI_TAIL_FINISH = booleanPreferencesKey("gemini_tail_finish")
     }
 
     val wsUrlFlow: Flow<String> = context.dataStore.data.map { it[WS_URL] ?: "ws://192.168.1.100:8000/ws/dub" }
@@ -52,6 +55,11 @@ class UserPreferencesRepository(private val context: Context) {
     val catchUpFlow: Flow<Boolean> = context.dataStore.data.map { it[CATCH_UP] ?: true }
     val lowLatencyFlow: Flow<Boolean> = context.dataStore.data.map { it[LOW_LATENCY] ?: true }
     val maxCatchUpSpeedFlow: Flow<Float> = context.dataStore.data.map { (it[MAX_CATCH_UP_SPEED] ?: 1.15f).coerceIn(1.0f, 1.30f) }
+    val geminiSyncModeFlow: Flow<String> = context.dataStore.data.map {
+        it[GEMINI_SYNC_MODE]?.takeIf { v -> v in setOf("stable", "hybrid_fast", "balanced") } ?: "balanced"
+    }
+    val geminiMicroCatchUpFlow: Flow<Boolean> = context.dataStore.data.map { it[GEMINI_MICRO_CATCH_UP] ?: true }
+    val geminiTailFinishFlow: Flow<Boolean> = context.dataStore.data.map { it[GEMINI_TAIL_FINISH] ?: true }
 
     suspend fun updateWsUrl(v: String) { context.dataStore.edit { it[WS_URL] = v } }
     suspend fun updateApiKey(v: String) { context.dataStore.edit { it[API_KEY] = v } }
@@ -70,4 +78,10 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun updateCatchUp(v: Boolean) { context.dataStore.edit { it[CATCH_UP] = v } }
     suspend fun updateLowLatency(v: Boolean) { context.dataStore.edit { it[LOW_LATENCY] = v } }
     suspend fun updateMaxCatchUpSpeed(v: Float) { context.dataStore.edit { it[MAX_CATCH_UP_SPEED] = v.coerceIn(1.0f, 1.30f) } }
+    suspend fun updateGeminiSyncMode(v: String) {
+        val safe = v.takeIf { it in setOf("stable", "hybrid_fast", "balanced") } ?: "balanced"
+        context.dataStore.edit { it[GEMINI_SYNC_MODE] = safe }
+    }
+    suspend fun updateGeminiMicroCatchUp(v: Boolean) { context.dataStore.edit { it[GEMINI_MICRO_CATCH_UP] = v } }
+    suspend fun updateGeminiTailFinish(v: Boolean) { context.dataStore.edit { it[GEMINI_TAIL_FINISH] = v } }
 }
