@@ -496,7 +496,12 @@ class AudioDubbingForegroundService : Service() {
                 targetLang,
                 voiceName,
                 enableTranscription = voiceSource == "device_tts",
-                vadSilenceMs = if (voiceSource == "gemini" && geminiSyncMode == "stable") 800 else 550
+                vadSilenceMs = when {
+                    voiceSource != "gemini" -> 550
+                    geminiSyncMode == "stable" -> 800
+                    geminiSyncMode == "ultra_fast" -> 500
+                    else -> 550
+                }
             )
             if (voiceSource == "device_tts") startSmartSyncScheduler()
 
@@ -529,10 +534,12 @@ class AudioDubbingForegroundService : Service() {
                                 newLang,
                                 newVoice,
                                 enableTranscription = activeVoiceSource == "device_tts",
-                                vadSilenceMs = if (
-                                    activeVoiceSource == "gemini" &&
-                                    activeGeminiSyncMode == "stable"
-                                ) 800 else 550
+                                vadSilenceMs = when {
+                                    activeVoiceSource != "gemini" -> 550
+                                    activeGeminiSyncMode == "stable" -> 800
+                                    activeGeminiSyncMode == "ultra_fast" -> 500
+                                    else -> 550
+                                }
                             )
                         }
                     }
@@ -726,10 +733,14 @@ class AudioDubbingForegroundService : Service() {
 
         val silenceMs = now - hybridSilenceStartMs
         val speechAgeMs = now - hybridSpeechStartMs
+        val endSilenceMs = if (activeGeminiSyncMode == "ultra_fast") 320L else 500L
+        val minSpeechMs = if (activeGeminiSyncMode == "ultra_fast") 220L else 280L
+        val endCooldownMs = if (activeGeminiSyncMode == "ultra_fast") 450L else 650L
+
         if (
-            silenceMs >= 500L &&
-            speechAgeMs >= 280L &&
-            now - lastHybridStreamEndMs >= 650L
+            silenceMs >= endSilenceMs &&
+            speechAgeMs >= minSpeechMs &&
+            now - lastHybridStreamEndMs >= endCooldownMs
         ) {
             flushGeminiInputChunk()
             webSocketManager?.sendAudioStreamEnd()
@@ -737,12 +748,13 @@ class AudioDubbingForegroundService : Service() {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
             hybridSpeechStartMs = 0L
-            smartSyncStatus.value = "HYBRID FAST"
+            smartSyncStatus.value = geminiProfileLabel()
         }
     }
 
     private fun geminiProfileLabel(): String = when (activeGeminiSyncMode) {
         "stable" -> "STABLE"
+        "ultra_fast" -> "ULTRA FAST"
         "hybrid_fast" -> "HYBRID FAST"
         else -> if (geminiMicroCatchUpEnabled) "BALANCED" else "BALANCED FIXED"
     }
