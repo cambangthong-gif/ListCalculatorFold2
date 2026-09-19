@@ -102,6 +102,7 @@ class AudioDubbingForegroundService : Service() {
     private var hybridSpeechStartMs = 0L
     private var hybridNoiseFloor = 0.0025f
     private var lastHybridStreamEndMs = 0L
+    @Volatile private var lastGeminiAudioReceivedMs = 0L
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
@@ -131,19 +132,41 @@ class AudioDubbingForegroundService : Service() {
             if (activeVoiceSource == "gemini") {
                 if (mediaActive) {
                     audioPlayerManager?.setExternalPaused(false)
-                    smartSyncStatus.value = "STABLE LIVE"
+                    smartSyncStatus.value = "STABLE BALANCED"
                 } else {
                     mediaStopJob = serviceScope.launch {
-                        // Let server-side VAD observe the pause; after >1s explicitly flush
-                        // cached audio as recommended by Gemini Live.
-                        delay(1_050L)
+                        // Preserve the old Tail Finish behavior without a fixed hard cut:
+                        // finalize the current server turn, then keep draining until Gemini
+                        // has gone quiet and the local queue is empty (or a safe max timeout).
+                        delay(650L)
                         if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                             flushGeminiInputChunk()
                             webSocketManager?.sendAudioStreamEnd()
                             smartSyncStatus.value = "STABLE TAIL"
 
-                            // Do not chop the final translated sentence.
-                            delay(3_200L)
+                            val tailStarted = SystemClock.elapsedRealtime()
+                            while (!sourceMediaPlaying && activeVoiceSource == "gemini") {
+                                val now = SystemClock.elapsedRealtime()
+                                val elapsed = now - tailStarted
+                                val queueMs = audioPlayerManager?.queuedDurationMs() ?: 0
+                                queueLatencyMs.value = queueMs
+
+                                val receivedTailAudio = lastGeminiAudioReceivedMs >= tailStarted
+                                val quietFor = if (lastGeminiAudioReceivedMs > 0L) {
+                                    now - lastGeminiAudioReceivedMs
+                                } else {
+                                    Long.MAX_VALUE
+                                }
+
+                                if (
+                                    (receivedTailAudio && quietFor >= 750L && queueMs <= 60) ||
+                                    elapsed >= 6_500L
+                                ) {
+                                    break
+                                }
+                                delay(120L)
+                            }
+
                             if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                                 audioPlayerManager?.setExternalPaused(true)
                                 smartSyncStatus.value = "STABLE PAUSED"
@@ -273,6 +296,7 @@ class AudioDubbingForegroundService : Service() {
         isRunning.value = true
         sourceMediaPlaying = true
         synchronized(geminiInputChunk) { geminiInputChunkSize = 0 }
+        lastGeminiAudioReceivedMs = 0L
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
@@ -317,8 +341,8 @@ class AudioDubbingForegroundService : Service() {
             val maxCatchUpSpeed = prefs.maxCatchUpSpeedFlow.first()
 
             activeVoiceSource = voiceSource
-            syncOffsetMs.value = if (voiceSource == "gemini") 0 else manualSync
-            autoSyncActive.value = if (voiceSource == "gemini") false else autoSync
+            syncOffsetMs.value = manualSync
+            autoSyncActive.value = if (voiceSource == "gemini") catchUp else autoSync
 
             val wsClient = OkHttpClient.Builder()
                 .pingInterval(15, TimeUnit.SECONDS)
@@ -329,7 +353,7 @@ class AudioDubbingForegroundService : Service() {
             if (voiceSource == "device_tts") {
                 prepareSmartSync()
             } else {
-                smartSyncStatus.value = "STABLE LIVE"
+                smartSyncStatus.value = "STABLE BALANCED"
                 smartSyncPositionMs.value = -1L
                 audioClockLagMs.value = 0L
             }
@@ -354,16 +378,16 @@ class AudioDubbingForegroundService : Service() {
                     player.configure(
                         mode = dubMode,
                         volume = volumeRatio,
-                        syncMs = 0,
+                        syncMs = manualSync,
                         autoSyncEnabled = false,
-                        catchUpEnabled = false,
+                        catchUpEnabled = catchUp,
                         lowLatencyEnabled = true,
-                        maxSpeed = 1.0f
+                        maxSpeed = 1.08f
                     )
-                    player.setStableLiveMode(true)
+                    player.setStableLiveMode(true, microCatchUp = catchUp)
                     player.start()
                 }
-                autoSyncActive.value = false
+                autoSyncActive.value = catchUp
             }
 
             webSocketManager?.onStatusChanged = { status ->
@@ -380,6 +404,7 @@ class AudioDubbingForegroundService : Service() {
 
             webSocketManager?.onBinaryMessageReceived = { audioChunk ->
                 if (activeVoiceSource == "gemini") {
+                    lastGeminiAudioReceivedMs = SystemClock.elapsedRealtime()
                     audioPlayerManager?.playAudioData(audioChunk)
                     queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
                     audioClockLagMs.value = queueLatencyMs.value.toLong()
@@ -816,16 +841,14 @@ class AudioDubbingForegroundService : Service() {
 
         when (event) {
             "PAUSE" -> {
+                // Preserve queued translated content on pause; resume from the same place.
                 audioPlayerManager?.setExternalPaused(true)
-                deviceTtsManager?.clearBacklog()
-                synchronized(transcriptBuffer) {
-                    transcriptBuffer.clear()
-                    lastTranscriptSnapshot = ""
-                }
+                deviceTtsManager?.setExternalPaused(true)
                 queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
             }
             "PLAY" -> {
                 audioPlayerManager?.setExternalPaused(false)
+                deviceTtsManager?.setExternalPaused(false)
             }
             "SEEK" -> {
                 audioPlayerManager?.clearForExternalSeek()
@@ -875,10 +898,12 @@ class AudioDubbingForegroundService : Service() {
             audioPlayerManager?.setManualSyncMs(0)
 
             if (activeVoiceSource == "gemini") {
-                // Stable Live deliberately avoids dynamic clock chasing.
-                autoSyncActive.value = false
+                // Balanced Auto = micro catch-up only (1.03x–1.08x), never clock chasing
+                // and never dropping translated audio.
+                autoSyncActive.value = true
                 audioPlayerManager?.setAutoSyncEnabled(false)
-                repository?.updateAutoSync(false)
+                audioPlayerManager?.setBalancedMicroCatchUp(true)
+                repository?.updateAutoSync(true)
             } else {
                 autoSyncActive.value = true
                 audioPlayerManager?.setAutoSyncEnabled(true)
