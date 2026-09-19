@@ -68,19 +68,10 @@ if (-not $c.Contains($uiNeedle)) { throw 'audio UI marker missing' }
 $c = $c.Replace($uiNeedle, $uiReplacement.TrimEnd())
 
 # Add subtitle mode before Browser Sync and keep process-index restoration aligned.
-$refreshNeedle = @'
-        source.Items.Clear();
-        source.Items.Add(new BrowserSyncItem());
-        source.Items.Add("Toàn hệ thống — trừ ALAD để tránh vọng tiếng");
-'@
-$refreshReplacement = @'
-        source.Items.Clear();
-        source.Items.Add(new SubtitleDubbingItem());
-        source.Items.Add(new BrowserSyncItem());
-        source.Items.Add("Toàn hệ thống — trừ ALAD để tránh vọng tiếng");
-'@
-if (-not $c.Contains($refreshNeedle)) { throw 'v6.2 source list marker missing' }
-$c = $c.Replace($refreshNeedle, $refreshReplacement)
+$refreshNeedle = '        source.Items.Add(new BrowserSyncItem());'
+$refreshReplacement = '        source.Items.Add(new SubtitleDubbingItem());' + $nl + '        source.Items.Add(new BrowserSyncItem());'
+if (-not $c.Contains($refreshNeedle)) { throw 'v6.2 browser source marker missing' }
+$c = $c.Replace($refreshNeedle, $refreshReplacement, 1)
 $c = $c.Replace('            for (int i = 2; i < source.Items.Count; i++)', '            for (int i = 3; i < source.Items.Count; i++)')
 
 # Selecting Subtitle Dubbing automatically picks Gemini 3.8 for text->speech dubbing.
