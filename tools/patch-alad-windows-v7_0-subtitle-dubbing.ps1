@@ -50,10 +50,7 @@ if (-not $c.Contains($fieldMarker)) { throw 'browserRate field marker missing' }
 $c = $c.Replace($fieldMarker, $fieldAdd.TrimEnd())
 
 # Add subtitle source option to compact UI.
-$uiNeedle = @'
-        AddField(audio, "Kiểu lồng tiếng", mixMode, 3);
-        AddRow(audio, new Label
-'@
+$uiNeedle = '        AddField(audio, "Kiểu lồng tiếng", mixMode, 3);'
 $uiReplacement = @'
         AddField(audio, "Kiểu lồng tiếng", mixMode, 3);
 
@@ -66,11 +63,9 @@ $uiReplacement = @'
         subtitleSource.SelectedIndex = 0;
         StyleCombo(subtitleSource);
         AddField(audio, "Nguồn phụ đề · dùng khi chọn Subtitle Dubbing", subtitleSource, 3);
-
-        AddRow(audio, new Label
 '@
 if (-not $c.Contains($uiNeedle)) { throw 'audio UI marker missing' }
-$c = $c.Replace($uiNeedle, $uiReplacement)
+$c = $c.Replace($uiNeedle, $uiReplacement.TrimEnd())
 
 # Add subtitle mode before Browser Sync and keep process-index restoration aligned.
 $refreshNeedle = @'
