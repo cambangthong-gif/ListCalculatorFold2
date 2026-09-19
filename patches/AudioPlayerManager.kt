@@ -230,6 +230,23 @@ class AudioPlayerManager(private val context: Context) {
         }
     }
 
+    fun ensurePlaybackAlive(forceResume: Boolean = false): Boolean {
+        synchronized(trackLock) {
+            val track = audioTrack ?: return false
+            return try {
+                if (track.state != AudioTrack.STATE_INITIALIZED) return false
+                if (forceResume) externallyPaused = false
+                if (!externallyPaused && track.playState != AudioTrack.PLAYSTATE_PLAYING) {
+                    track.play()
+                }
+                track.playState == AudioTrack.PLAYSTATE_PLAYING
+            } catch (t: Throwable) {
+                Log.w(TAG, "Could not recover AudioTrack playback", t)
+                false
+            }
+        }
+    }
+
     fun clearForExternalSeek() {
         queue.clear()
         queuedBytes.set(0)
