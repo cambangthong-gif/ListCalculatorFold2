@@ -303,6 +303,7 @@ fun OverlayContent(
                     contentAlignment = Alignment.Center
                 ) {
                     val smartLabel = when {
+                        syncStatus.startsWith("SELF-HEAL") ||
                         syncStatus.startsWith("CONTINUOUS") ||
                         syncStatus.startsWith("STABLE") ||
                         syncStatus.startsWith("HYBRID") ||
