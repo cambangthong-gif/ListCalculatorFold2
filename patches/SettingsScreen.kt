@@ -93,6 +93,7 @@ private val voiceSources = listOf(
 )
 
 private val geminiSyncModes = listOf(
+    Choice("continuous", "Continuous · dịch liên tục, khuyên dùng"),
     Choice("stable", "Stable · mượt, ít can thiệp"),
     Choice("ultra_fast", "Ultra Fast · phản hồi sớm nhất"),
     Choice("hybrid_fast", "Hybrid Fast · ưu tiên độ trễ thấp"),
@@ -420,6 +421,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                         )
                         Text(
                             when (geminiSyncMode) {
+                                "continuous" -> "Continuous: PCM 30ms liên tục, không chốt từng câu bằng audioStreamEnd; chỉ flush khi nguồn thật sự pause/hết."
                                 "stable" -> "Stable: server VAD ~800ms, buffer ~110ms, không Hybrid end-turn, không tăng tốc."
                                 "ultra_fast" -> "Ultra Fast: client chốt lượt khoảng 320ms im lặng, buffer ~25ms. Nhanh nhất nhưng câu có thể bị chia ngắn hơn."
                                 "hybrid_fast" -> "Hybrid Fast: chốt câu khoảng 500ms im lặng, buffer ~45ms, không tăng tốc."
