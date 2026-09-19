@@ -114,6 +114,14 @@ class AudioDubbingForegroundService : Service() {
     @Volatile private var geminiInterruptionMode = "no_interruption"
     @Volatile private var geminiAdaptiveVadEnabled = true
 
+    private var geminiWatchdogJob: Job? = null
+    @Volatile private var geminiSessionStartedMs = 0L
+    @Volatile private var lastMeaningfulSourceMs = 0L
+    @Volatile private var lastSelfHealKickMs = 0L
+    @Volatile private var lastSelfHealReconnectMs = 0L
+    @Volatile private var geminiEverProducedAudio = false
+    @Volatile private var initialNoOutputRecoveryUsed = false
+
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
             // ALAD's own dubbed output uses USAGE_ASSISTANT, so it is naturally
@@ -323,6 +331,12 @@ class AudioDubbingForegroundService : Service() {
         geminiTailFinishEnabled = true
         geminiInterruptionMode = "no_interruption"
         geminiAdaptiveVadEnabled = true
+        geminiSessionStartedMs = SystemClock.elapsedRealtime()
+        lastMeaningfulSourceMs = 0L
+        lastSelfHealKickMs = 0L
+        lastSelfHealReconnectMs = 0L
+        geminiEverProducedAudio = false
+        initialNoOutputRecoveryUsed = false
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
@@ -453,6 +467,8 @@ class AudioDubbingForegroundService : Service() {
             webSocketManager?.onBinaryMessageReceived = { audioChunk ->
                 if (activeVoiceSource == "gemini") {
                     lastGeminiAudioReceivedMs = SystemClock.elapsedRealtime()
+                    geminiEverProducedAudio = true
+                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
                     audioPlayerManager?.playAudioData(audioChunk)
                     val player = audioPlayerManager
                     queueLatencyMs.value = player?.queuedDurationMs() ?: 0
@@ -598,6 +614,9 @@ class AudioDubbingForegroundService : Service() {
                         audioCaptureManager?.lastReadDurationMs() ?: 0L
 
                     if (activeVoiceSource == "gemini") {
+                        if (normalized >= 0.006f) {
+                            lastMeaningfulSourceMs = SystemClock.elapsedRealtime()
+                        }
                         feedGeminiContinuousAudio(pcmData)
                         if (
                             activeGeminiSyncMode != "stable" &&
@@ -616,6 +635,102 @@ class AudioDubbingForegroundService : Service() {
 
                     val current = audioAmplitude.value
                     audioAmplitude.value = current * 0.5f + normalized * 0.5f
+                }
+            }
+
+            if (voiceSource == "gemini") {
+                startGeminiWatchdog()
+            }
+        }
+    }
+
+    private fun startGeminiWatchdog() {
+        geminiWatchdogJob?.cancel()
+        geminiWatchdogJob = serviceScope.launch {
+            while (isRunning.value) {
+                delay(750L)
+                if (activeVoiceSource != "gemini") continue
+
+                val now = SystemClock.elapsedRealtime()
+                val recentSource =
+                    lastMeaningfulSourceMs > 0L &&
+                    now - lastMeaningfulSourceMs <= 1_800L
+                if (!recentSource) continue
+
+                val ws = webSocketManager ?: continue
+                val referenceOutputMs =
+                    if (lastGeminiAudioReceivedMs > 0L) {
+                        lastGeminiAudioReceivedMs
+                    } else {
+                        geminiSessionStartedMs
+                    }
+                val outputSilenceMs = (now - referenceOutputMs).coerceAtLeast(0L)
+                val serverSilentWhileSending =
+                    ws.audioSendSilenceMs() <= 1_500L &&
+                    ws.serverSilenceMs() >= 7_000L
+
+                val hybridTurnFinished =
+                    activeGeminiSyncMode != "continuous" &&
+                    activeGeminiSyncMode != "stable" &&
+                    !hybridSpeechActive &&
+                    lastHybridStreamEndMs > 0L &&
+                    now - lastHybridStreamEndMs <= 3_000L
+
+                val initialNoOutputStall =
+                    !geminiEverProducedAudio &&
+                    !initialNoOutputRecoveryUsed &&
+                    outputSilenceMs >= 12_000L
+
+                val shouldRecover =
+                    serverSilentWhileSending ||
+                    hybridTurnFinished ||
+                    initialNoOutputStall
+
+                if (!shouldRecover) continue
+
+                val outputArrivedAfterKick =
+                    lastSelfHealKickMs > 0L &&
+                    lastGeminiAudioReceivedMs >= lastSelfHealKickMs
+
+                if (
+                    outputSilenceMs >= 5_000L &&
+                    (
+                        lastSelfHealKickMs == 0L ||
+                        outputArrivedAfterKick ||
+                        now - lastSelfHealKickMs >= 8_000L
+                    )
+                ) {
+                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                    flushGeminiInputChunk()
+                    ws.sendAudioStreamEnd()
+                    lastSelfHealKickMs = now
+                    smartSyncStatus.value = "SELF-HEAL KICK"
+                    continue
+                }
+
+                if (
+                    lastSelfHealKickMs > 0L &&
+                    lastGeminiAudioReceivedMs < lastSelfHealKickMs &&
+                    now - lastSelfHealKickMs >= 2_500L &&
+                    now - lastSelfHealReconnectMs >= 6_000L
+                ) {
+                    if (!geminiEverProducedAudio) {
+                        initialNoOutputRecoveryUsed = true
+                    }
+                    lastSelfHealReconnectMs = now
+                    geminiSessionStartedMs = now
+                    synchronized(this@AudioDubbingForegroundService) {
+                        hybridSpeechActive = false
+                        hybridSilenceStartMs = 0L
+                        hybridSpeechStartMs = 0L
+                        lastHybridStreamEndMs = 0L
+                    }
+                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                    smartSyncStatus.value = "SELF-HEAL RECONNECT"
+                    ws.forceReconnect(
+                        resetSession = true,
+                        reason = "no translated audio"
+                    )
                 }
             }
         }
@@ -1076,6 +1191,14 @@ class AudioDubbingForegroundService : Service() {
         nativeOutputRateHz.value = 0
         outputBufferMs.value = 0
         outputUnderruns.value = 0
+        geminiWatchdogJob?.cancel()
+        geminiWatchdogJob = null
+        geminiSessionStartedMs = 0L
+        lastMeaningfulSourceMs = 0L
+        lastSelfHealKickMs = 0L
+        lastSelfHealReconnectMs = 0L
+        geminiEverProducedAudio = false
+        initialNoOutputRecoveryUsed = false
         sessionSettingsJob?.cancel()
         sessionSettingsJob = null
         smartSyncJob?.cancel()
