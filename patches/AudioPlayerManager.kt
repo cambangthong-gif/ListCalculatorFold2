@@ -24,8 +24,10 @@ class AudioPlayerManager(private val context: Context) {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
-        private const val STABLE_PREBUFFER_MS = 45
-        private const val STABLE_PREBUFFER_MAX_WAIT_MS = 35L
+        private const val FAST_PREBUFFER_MS = 45
+        private const val FAST_PREBUFFER_MAX_WAIT_MS = 35L
+        private const val STABLE_PREBUFFER_MS = 110
+        private const val STABLE_PREBUFFER_MAX_WAIT_MS = 90L
     }
 
     private data class AudioChunk(
@@ -49,6 +51,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var externallyPaused = false
     @Volatile private var sourceClockProvider: (() -> Long)? = null
     @Volatile private var stableLiveMode = false
+    @Volatile private var stableProfile = "balanced"
     @Volatile private var balancedMicroCatchUp = false
 
     private var audioTrack: AudioTrack? = null
@@ -69,7 +72,11 @@ class AudioPlayerManager(private val context: Context) {
             .build()
         val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val desiredBuffer = if (stableLiveMode) {
-            maxOf(minBuffer, BYTES_PER_MS * 70)
+            if (stableProfile == "stable") {
+                maxOf(minBuffer * 2, BYTES_PER_MS * 140)
+            } else {
+                maxOf(minBuffer, BYTES_PER_MS * 70)
+            }
         } else if (lowLatency) {
             minBuffer
         } else {
@@ -124,9 +131,14 @@ class AudioPlayerManager(private val context: Context) {
         sourceClockProvider = provider
     }
 
-    fun setStableLiveMode(enabled: Boolean, microCatchUp: Boolean = false) {
+    fun setStableLiveMode(
+        enabled: Boolean,
+        profile: String = "balanced",
+        microCatchUp: Boolean = false
+    ) {
         stableLiveMode = enabled
-        balancedMicroCatchUp = enabled && microCatchUp
+        stableProfile = profile
+        balancedMicroCatchUp = enabled && profile == "balanced" && microCatchUp
         needsStablePrebuffer = true
         if (enabled) {
             autoSync = false
@@ -218,11 +230,21 @@ class AudioPlayerManager(private val context: Context) {
 
                 if (stableLiveMode && needsStablePrebuffer && queue.peekFirst() != null) {
                     val startWait = SystemClock.elapsedRealtime()
+                    val targetPrebuffer = if (stableProfile == "stable") {
+                        STABLE_PREBUFFER_MS
+                    } else {
+                        FAST_PREBUFFER_MS
+                    }
+                    val maxWait = if (stableProfile == "stable") {
+                        STABLE_PREBUFFER_MAX_WAIT_MS
+                    } else {
+                        FAST_PREBUFFER_MAX_WAIT_MS
+                    }
                     while (
                         running.get() &&
                         !externallyPaused &&
-                        queuedDurationMs() < STABLE_PREBUFFER_MS &&
-                        SystemClock.elapsedRealtime() - startWait < STABLE_PREBUFFER_MAX_WAIT_MS
+                        queuedDurationMs() < targetPrebuffer &&
+                        SystemClock.elapsedRealtime() - startWait < maxWait
                     ) {
                         Thread.sleep(8)
                     }
@@ -382,6 +404,7 @@ class AudioPlayerManager(private val context: Context) {
         workerThread?.interrupt(); workerThread = null
         externallyPaused = false
         stableLiveMode = false
+        stableProfile = "balanced"
         balancedMicroCatchUp = false
         needsStablePrebuffer = true
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
