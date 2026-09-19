@@ -92,6 +92,12 @@ private val voiceSources = listOf(
     Choice("device_tts", "TTS thiết bị")
 )
 
+private val geminiSyncModes = listOf(
+    Choice("stable", "Stable · mượt, ít can thiệp"),
+    Choice("hybrid_fast", "Hybrid Fast · ưu tiên độ trễ thấp"),
+    Choice("balanced", "Balanced · nhanh + giữ chất bản cũ")
+)
+
 private val voices = listOf(
     Choice("Kore", "Kore · chắc, rõ"),
     Choice("Puck", "Puck · trẻ, sinh động"),
@@ -122,6 +128,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
     val catchUp by viewModel.catchUp.collectAsState()
     val lowLatency by viewModel.lowLatency.collectAsState()
     val maxCatchUpSpeed by viewModel.maxCatchUpSpeed.collectAsState()
+    val geminiSyncMode by viewModel.geminiSyncMode.collectAsState()
+    val geminiMicroCatchUp by viewModel.geminiMicroCatchUp.collectAsState()
+    val geminiTailFinish by viewModel.geminiTailFinish.collectAsState()
 
     var ttsEngines by remember { mutableStateOf<List<TtsCatalog.EngineItem>>(emptyList()) }
     var ttsVoices by remember { mutableStateOf<List<TtsCatalog.VoiceItem>>(emptyList()) }
@@ -374,46 +383,89 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                 SettingsGlassSection("Đồng bộ tiếng - hình") {
                     SettingLabel("Bù trễ thủ công ${if (manualSyncMs >= 0) "+" else ""}${manualSyncMs} ms")
                     Slider(
-                        value = manualSyncMs.toFloat(),
+                        value = manualSyncMs.toFloat().coerceIn(
+                            if (voiceSource == "gemini") -1200f else -2000f,
+                            if (voiceSource == "gemini") 2500f else 5000f
+                        ),
                         onValueChange = { viewModel.updateManualSyncMs((it / 100f).roundToInt() * 100) },
-                        valueRange = -2000f..5000f,
-                        steps = 69
+                        valueRange = if (voiceSource == "gemini") -1200f..2500f else -2000f..5000f,
+                        steps = if (voiceSource == "gemini") 36 else 69
                     )
                     Text(
-                        "Số dương làm tiếng lồng trễ thêm. Catch-up ưu tiên giữ lời đọc gần video.",
+                        if (voiceSource == "gemini") {
+                            "Số dương làm tiếng lồng trễ thêm; số âm tạo áp lực bắt kịp nhẹ, không xóa câu."
+                        } else {
+                            "Số dương làm tiếng lồng trễ thêm. Catch-up ưu tiên giữ lời đọc gần video."
+                        },
                         color = TextSecondary,
                         fontSize = 12.sp,
                         lineHeight = 18.sp
                     )
 
-                    ToggleRow(
-                        title = "Auto Sync",
-                        subtitle = "Tự điều chỉnh khi hàng đợi audio/TTS bắt đầu tích trễ.",
-                        checked = autoSync,
-                        onCheckedChange = viewModel::updateAutoSync
-                    )
-                    ToggleRow(
-                        title = "Catch-up",
-                        subtitle = "Tăng tốc hoặc bỏ câu TTS quá cũ khi bị tụt xa video.",
-                        checked = catchUp,
-                        onCheckedChange = viewModel::updateCatchUp
-                    )
-                    ToggleRow(
-                        title = "Low Latency",
-                        subtitle = "Giữ buffer ngắn, ưu tiên khớp hình hơn độ mượt.",
-                        checked = lowLatency,
-                        onCheckedChange = viewModel::updateLowLatency
-                    )
-
-                    if (catchUp) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        SettingLabel("Tốc độ catch-up tối đa ${String.format("%.2f", maxCatchUpSpeed)}×")
-                        Slider(
-                            value = maxCatchUpSpeed,
-                            onValueChange = viewModel::updateMaxCatchUpSpeed,
-                            valueRange = 1.05f..1.25f,
-                            steps = 3
+                    if (voiceSource == "gemini") {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SettingLabel("Chế độ đồng bộ Gemini")
+                        ChoiceDropdown(
+                            selectedValue = geminiSyncMode,
+                            choices = geminiSyncModes,
+                            onSelected = viewModel::updateGeminiSyncMode
                         )
+                        Text(
+                            when (geminiSyncMode) {
+                                "stable" -> "Stable: server VAD ~800ms, buffer ~110ms, không Hybrid end-turn, không tăng tốc."
+                                "hybrid_fast" -> "Hybrid Fast: chốt câu khoảng 500ms im lặng, buffer ~45ms, không tăng tốc."
+                                else -> "Balanced: Hybrid Fast + micro catch-up nhẹ 1.03–1.08×, không drop nội dung."
+                            },
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp
+                        )
+
+                        if (geminiSyncMode == "balanced") {
+                            ToggleRow(
+                                title = "Micro catch-up",
+                                subtitle = "Khi queue tích trễ, chỉ tăng rất nhẹ 1.03–1.08×; không bỏ câu.",
+                                checked = geminiMicroCatchUp,
+                                onCheckedChange = viewModel::updateGeminiMicroCatchUp
+                            )
+                        }
+
+                        ToggleRow(
+                            title = "Tail Finish",
+                            subtitle = "Khi video dừng/hết, cho tiếng dịch cuối chạy nốt thay vì cắt ngay.",
+                            checked = geminiTailFinish,
+                            onCheckedChange = viewModel::updateGeminiTailFinish
+                        )
+                    } else {
+                        ToggleRow(
+                            title = "Auto Sync",
+                            subtitle = "Tự điều chỉnh khi hàng đợi audio/TTS bắt đầu tích trễ.",
+                            checked = autoSync,
+                            onCheckedChange = viewModel::updateAutoSync
+                        )
+                        ToggleRow(
+                            title = "Catch-up",
+                            subtitle = "Tăng tốc TTS khi bị tụt xa video.",
+                            checked = catchUp,
+                            onCheckedChange = viewModel::updateCatchUp
+                        )
+                        ToggleRow(
+                            title = "Low Latency",
+                            subtitle = "Giữ buffer ngắn, ưu tiên khớp hình hơn độ mượt.",
+                            checked = lowLatency,
+                            onCheckedChange = viewModel::updateLowLatency
+                        )
+
+                        if (catchUp) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            SettingLabel("Tốc độ catch-up tối đa ${String.format("%.2f", maxCatchUpSpeed)}×")
+                            Slider(
+                                value = maxCatchUpSpeed,
+                                onValueChange = viewModel::updateMaxCatchUpSpeed,
+                                valueRange = 1.05f..1.25f,
+                                steps = 3
+                            )
+                        }
                     }
                 }
 
