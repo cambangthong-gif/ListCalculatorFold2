@@ -62,6 +62,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var currentVoiceName = "Kore"
     private var currentEnableTranscription = true
     private var currentVadSilenceMs = 550
+    private var currentActivityHandling = "NO_INTERRUPTION"
     private var sessionHandle: String? = null
     private val pendingAudio = ArrayDeque<PendingAudio>()
     private var goAwayRunnable: Runnable? = null
@@ -73,13 +74,20 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         targetLang: String,
         voiceName: String = "Kore",
         enableTranscription: Boolean = true,
-        vadSilenceMs: Int = 550
+        vadSilenceMs: Int = 550,
+        activityHandling: String = "NO_INTERRUPTION"
     ) {
         currentApiKey = apiKey
         currentTargetLang = targetLang
         currentVoiceName = voiceName.ifBlank { "Kore" }
         currentEnableTranscription = enableTranscription
-        currentVadSilenceMs = vadSilenceMs.coerceIn(500, 900)
+        currentVadSilenceMs = vadSilenceMs.coerceIn(300, 900)
+        currentActivityHandling =
+            if (activityHandling == "START_OF_ACTIVITY_INTERRUPTS") {
+                "START_OF_ACTIVITY_INTERRUPTS"
+            } else {
+                "NO_INTERRUPTION"
+            }
         manualDisconnect = false
         reconnectScheduled = false
         reconnectAttempt = 0
@@ -122,7 +130,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     voiceName = currentVoiceName,
                     resumeHandle = sessionHandle,
                     enableTranscription = currentEnableTranscription,
-                    vadSilenceMs = currentVadSilenceMs
+                    vadSilenceMs = currentVadSilenceMs,
+                    activityHandling = currentActivityHandling
                 )
             }
 
@@ -284,7 +293,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         voiceName: String,
         resumeHandle: String?,
         enableTranscription: Boolean,
-        vadSilenceMs: Int
+        vadSilenceMs: Int,
+        activityHandling: String
     ) {
         val targetLangCode = targetLang.split("-")[0]
 
@@ -308,6 +318,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     })
                 })
                 put("realtimeInputConfig", JSONObject().apply {
+                    put("activityHandling", activityHandling)
                     put("automaticActivityDetection", JSONObject().apply {
                         put("disabled", false)
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
