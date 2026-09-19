@@ -94,15 +94,10 @@ if (-not $c.Contains($bindMarker)) { throw 'BindEvents refresh marker missing' }
 $c = $c.Replace($bindMarker, $bindReplacement.TrimEnd())
 
 # Set mode before Gemini connects and force CustomVoice only for subtitle-text dubbing.
-$geminiNeedle = @'
-            gemini = new LiveGeminiClient(LogStatus, OnGeminiAudio, OnTranscript, ClearOutputBuffer);
-            await gemini.ConnectAsync(
-                apiKey.Text.Trim(),
-                TargetLanguageCode(),
-                SelectedLiveMode(),
-                voice.SelectedItem?.ToString() ?? "Kore",
-                runCts.Token);
-'@
+$geminiStart = $c.IndexOf('            gemini = new LiveGeminiClient(')
+$geminiEnd = $c.IndexOf('            uint targetPid;', $geminiStart)
+if ($geminiStart -lt 0 -or $geminiEnd -lt 0) { throw 'Gemini connect anchors missing' }
+
 $geminiReplacement = @'
             subtitleDubbingMode = source.SelectedItem is SubtitleDubbingItem;
             browserSyncMode = source.SelectedItem is BrowserSyncItem || subtitleDubbingMode;
@@ -117,9 +112,9 @@ $geminiReplacement = @'
                 effectiveMode,
                 voice.SelectedItem?.ToString() ?? "Kore",
                 runCts.Token);
+
 '@
-if (-not $c.Contains($geminiNeedle)) { throw 'Gemini connect marker missing' }
-$c = $c.Replace($geminiNeedle, $geminiReplacement)
+$c = $c.Substring(0, $geminiStart) + $geminiReplacement + $c.Substring($geminiEnd)
 
 # v6.2 later reassigns browserSyncMode. Preserve subtitle mode there.
 $c = $c.Replace(
