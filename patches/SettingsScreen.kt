@@ -99,6 +99,11 @@ private val geminiSyncModes = listOf(
     Choice("balanced", "Balanced · nhanh + giữ chất bản cũ")
 )
 
+private val geminiInterruptionModes = listOf(
+    Choice("no_interruption", "Không ngắt câu dịch · khuyên dùng"),
+    Choice("interrupt", "Cho phép nguồn mới ngắt câu dịch")
+)
+
 private val voices = listOf(
     Choice("Kore", "Kore · chắc, rõ"),
     Choice("Puck", "Puck · trẻ, sinh động"),
@@ -132,6 +137,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
     val geminiSyncMode by viewModel.geminiSyncMode.collectAsState()
     val geminiMicroCatchUp by viewModel.geminiMicroCatchUp.collectAsState()
     val geminiTailFinish by viewModel.geminiTailFinish.collectAsState()
+    val geminiInterruptionMode by viewModel.geminiInterruptionMode.collectAsState()
+    val geminiAdaptiveVad by viewModel.geminiAdaptiveVad.collectAsState()
 
     var ttsEngines by remember { mutableStateOf<List<TtsCatalog.EngineItem>>(emptyList()) }
     var ttsVoices by remember { mutableStateOf<List<TtsCatalog.VoiceItem>>(emptyList()) }
@@ -422,6 +429,33 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                             fontSize = 12.sp,
                             lineHeight = 18.sp
                         )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        SettingLabel("Xử lý gián đoạn khi nguồn nói tiếp")
+                        ChoiceDropdown(
+                            selectedValue = geminiInterruptionMode,
+                            choices = geminiInterruptionModes,
+                            onSelected = viewModel::updateGeminiInterruptionMode
+                        )
+                        Text(
+                            if (geminiInterruptionMode == "no_interruption") {
+                                "Giữ nguyên câu dịch đang phát dù nguồn đã nói câu kế tiếp; giảm hụt nội dung."
+                            } else {
+                                "Ưu tiên bám live: câu dịch hiện tại có thể bị cắt khi phát hiện lời nói mới."
+                            },
+                            color = TextSecondary,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp
+                        )
+
+                        if (geminiSyncMode != "stable") {
+                            ToggleRow(
+                                title = "Adaptive VAD",
+                                subtitle = "Tự học nhịp nghỉ ngắn của người nói để chốt câu sớm khi nói nhanh và chờ lâu hơn khi nói chậm.",
+                                checked = geminiAdaptiveVad,
+                                onCheckedChange = viewModel::updateGeminiAdaptiveVad
+                            )
+                        }
 
                         if (geminiSyncMode == "balanced") {
                             ToggleRow(
