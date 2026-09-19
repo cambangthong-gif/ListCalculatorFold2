@@ -172,6 +172,10 @@ fun OverlayContent(
     val smartPosition by AudioDubbingForegroundService.smartSyncPositionMs.collectAsState()
     val audioClockLag by AudioDubbingForegroundService.audioClockLagMs.collectAsState()
     val syncStatus by AudioDubbingForegroundService.smartSyncStatus.collectAsState()
+    val captureBlock by AudioDubbingForegroundService.captureBlockMs.collectAsState()
+    val nativeRate by AudioDubbingForegroundService.nativeOutputRateHz.collectAsState()
+    val outputBuffer by AudioDubbingForegroundService.outputBufferMs.collectAsState()
+    val underruns by AudioDubbingForegroundService.outputUnderruns.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "widget_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -299,6 +303,7 @@ fun OverlayContent(
                     contentAlignment = Alignment.Center
                 ) {
                     val smartLabel = when {
+                        syncStatus.startsWith("CONTINUOUS") ||
                         syncStatus.startsWith("STABLE") ||
                         syncStatus.startsWith("HYBRID") ||
                         syncStatus.startsWith("BALANCED") ||
@@ -313,7 +318,10 @@ fun OverlayContent(
                     }
                     Text(
                         text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\n" +
-                            (if (autoSync) "AUTO" else "FIXED") + " · " + smartLabel,
+                            (if (autoSync) "AUTO" else "FIXED") + " · " + smartLabel +
+                            "\nC" + captureBlock + " · " +
+                            (if (nativeRate > 0) (nativeRate / 1000).toString() + "k" else "--") +
+                            " · b" + outputBuffer + " · u" + underruns,
                         color = if (autoSync) NeonCyan else Color.White,
                         fontSize = 9.sp,
                         lineHeight = 11.sp,
