@@ -103,6 +103,9 @@ class AudioDubbingForegroundService : Service() {
     private var hybridNoiseFloor = 0.0025f
     private var lastHybridStreamEndMs = 0L
     @Volatile private var lastGeminiAudioReceivedMs = 0L
+    @Volatile private var activeGeminiSyncMode = "balanced"
+    @Volatile private var geminiMicroCatchUpEnabled = true
+    @Volatile private var geminiTailFinishEnabled = true
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
@@ -132,7 +135,7 @@ class AudioDubbingForegroundService : Service() {
             if (activeVoiceSource == "gemini") {
                 if (mediaActive) {
                     audioPlayerManager?.setExternalPaused(false)
-                    smartSyncStatus.value = "STABLE BALANCED"
+                    smartSyncStatus.value = geminiProfileLabel()
                 } else {
                     mediaStopJob = serviceScope.launch {
                         // Preserve the old Tail Finish behavior without a fixed hard cut:
@@ -142,8 +145,17 @@ class AudioDubbingForegroundService : Service() {
                         if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                             flushGeminiInputChunk()
                             webSocketManager?.sendAudioStreamEnd()
-                            smartSyncStatus.value = "STABLE TAIL"
 
+                            if (!geminiTailFinishEnabled) {
+                                delay(250L)
+                                if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
+                                    audioPlayerManager?.setExternalPaused(true)
+                                    smartSyncStatus.value = "PAUSED"
+                                }
+                                return@launch
+                            }
+
+                            smartSyncStatus.value = "TAIL FINISH"
                             val tailStarted = SystemClock.elapsedRealtime()
                             while (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                                 val now = SystemClock.elapsedRealtime()
@@ -169,7 +181,7 @@ class AudioDubbingForegroundService : Service() {
 
                             if (!sourceMediaPlaying && activeVoiceSource == "gemini") {
                                 audioPlayerManager?.setExternalPaused(true)
-                                smartSyncStatus.value = "STABLE PAUSED"
+                                smartSyncStatus.value = "TAIL DONE"
                             }
                         }
                     }
@@ -297,6 +309,9 @@ class AudioDubbingForegroundService : Service() {
         sourceMediaPlaying = true
         synchronized(geminiInputChunk) { geminiInputChunkSize = 0 }
         lastGeminiAudioReceivedMs = 0L
+        activeGeminiSyncMode = "balanced"
+        geminiMicroCatchUpEnabled = true
+        geminiTailFinishEnabled = true
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
@@ -339,10 +354,21 @@ class AudioDubbingForegroundService : Service() {
             val catchUp = prefs.catchUpFlow.first()
             val lowLatency = prefs.lowLatencyFlow.first()
             val maxCatchUpSpeed = prefs.maxCatchUpSpeedFlow.first()
+            val geminiSyncMode = prefs.geminiSyncModeFlow.first()
+            val geminiMicroCatchUp = prefs.geminiMicroCatchUpFlow.first()
+            val geminiTailFinish = prefs.geminiTailFinishFlow.first()
+
+            activeGeminiSyncMode = geminiSyncMode
+            geminiMicroCatchUpEnabled = geminiMicroCatchUp
+            geminiTailFinishEnabled = geminiTailFinish
 
             activeVoiceSource = voiceSource
             syncOffsetMs.value = manualSync
-            autoSyncActive.value = if (voiceSource == "gemini") catchUp else autoSync
+            autoSyncActive.value = if (voiceSource == "gemini") {
+                geminiSyncMode == "balanced" && geminiMicroCatchUp
+            } else {
+                autoSync
+            }
 
             val wsClient = OkHttpClient.Builder()
                 .pingInterval(15, TimeUnit.SECONDS)
@@ -353,7 +379,7 @@ class AudioDubbingForegroundService : Service() {
             if (voiceSource == "device_tts") {
                 prepareSmartSync()
             } else {
-                smartSyncStatus.value = "STABLE BALANCED"
+                smartSyncStatus.value = geminiProfileLabel()
                 smartSyncPositionMs.value = -1L
                 audioClockLagMs.value = 0L
             }
@@ -374,20 +400,26 @@ class AudioDubbingForegroundService : Service() {
                     manager.start()
                 }
             } else {
+                val useMicroCatchUp =
+                    geminiSyncMode == "balanced" && geminiMicroCatchUp
                 audioPlayerManager = AudioPlayerManager(applicationContext).also { player ->
                     player.configure(
                         mode = dubMode,
                         volume = volumeRatio,
                         syncMs = manualSync,
                         autoSyncEnabled = false,
-                        catchUpEnabled = catchUp,
-                        lowLatencyEnabled = true,
+                        catchUpEnabled = useMicroCatchUp,
+                        lowLatencyEnabled = geminiSyncMode != "stable",
                         maxSpeed = 1.08f
                     )
-                    player.setStableLiveMode(true, microCatchUp = catchUp)
+                    player.setStableLiveMode(
+                        enabled = true,
+                        profile = geminiSyncMode,
+                        microCatchUp = useMicroCatchUp
+                    )
                     player.start()
                 }
-                autoSyncActive.value = catchUp
+                autoSyncActive.value = useMicroCatchUp
             }
 
             webSocketManager?.onStatusChanged = { status ->
@@ -463,7 +495,8 @@ class AudioDubbingForegroundService : Service() {
                 "",
                 targetLang,
                 voiceName,
-                enableTranscription = voiceSource == "device_tts"
+                enableTranscription = voiceSource == "device_tts",
+                vadSilenceMs = if (voiceSource == "gemini" && geminiSyncMode == "stable") 800 else 550
             )
             if (voiceSource == "device_tts") startSmartSyncScheduler()
 
@@ -495,7 +528,11 @@ class AudioDubbingForegroundService : Service() {
                                 "",
                                 newLang,
                                 newVoice,
-                                enableTranscription = activeVoiceSource == "device_tts"
+                                enableTranscription = activeVoiceSource == "device_tts",
+                                vadSilenceMs = if (
+                                    activeVoiceSource == "gemini" &&
+                                    activeGeminiSyncMode == "stable"
+                                ) 800 else 550
                             )
                         }
                     }
@@ -509,7 +546,9 @@ class AudioDubbingForegroundService : Service() {
 
                     if (activeVoiceSource == "gemini") {
                         feedGeminiContinuousAudio(pcmData)
-                        updateHybridGeminiVad(normalized)
+                        if (activeGeminiSyncMode != "stable") {
+                            updateHybridGeminiVad(normalized)
+                        }
                     } else {
                         val clockUpdate = audioClockSync.onCaptured(pcmData.size)
                         audioClockMs.value = clockUpdate.sourceClockMs
@@ -700,6 +739,12 @@ class AudioDubbingForegroundService : Service() {
             hybridSpeechStartMs = 0L
             smartSyncStatus.value = "HYBRID FAST"
         }
+    }
+
+    private fun geminiProfileLabel(): String = when (activeGeminiSyncMode) {
+        "stable" -> "STABLE"
+        "hybrid_fast" -> "HYBRID FAST"
+        else -> if (geminiMicroCatchUpEnabled) "BALANCED" else "BALANCED FIXED"
     }
 
     private fun calculateNormalizedLevel(pcmData: ByteArray): Float {
@@ -898,12 +943,12 @@ class AudioDubbingForegroundService : Service() {
             audioPlayerManager?.setManualSyncMs(0)
 
             if (activeVoiceSource == "gemini") {
-                // Balanced Auto = micro catch-up only (1.03x–1.08x), never clock chasing
-                // and never dropping translated audio.
-                autoSyncActive.value = true
+                val allowMicro =
+                    activeGeminiSyncMode == "balanced" && geminiMicroCatchUpEnabled
+                autoSyncActive.value = allowMicro
                 audioPlayerManager?.setAutoSyncEnabled(false)
-                audioPlayerManager?.setBalancedMicroCatchUp(true)
-                repository?.updateAutoSync(true)
+                audioPlayerManager?.setBalancedMicroCatchUp(allowMicro)
+                repository?.updateAutoSync(allowMicro)
             } else {
                 autoSyncActive.value = true
                 audioPlayerManager?.setAutoSyncEnabled(true)
