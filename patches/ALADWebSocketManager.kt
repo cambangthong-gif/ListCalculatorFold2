@@ -61,6 +61,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var currentTargetLang = ""
     private var currentVoiceName = "Kore"
     private var currentEnableTranscription = true
+    private var currentVadSilenceMs = 550
     private var sessionHandle: String? = null
     private val pendingAudio = ArrayDeque<PendingAudio>()
     private var goAwayRunnable: Runnable? = null
@@ -71,12 +72,14 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         sourceLang: String,
         targetLang: String,
         voiceName: String = "Kore",
-        enableTranscription: Boolean = true
+        enableTranscription: Boolean = true,
+        vadSilenceMs: Int = 550
     ) {
         currentApiKey = apiKey
         currentTargetLang = targetLang
         currentVoiceName = voiceName.ifBlank { "Kore" }
         currentEnableTranscription = enableTranscription
+        currentVadSilenceMs = vadSilenceMs.coerceIn(500, 900)
         manualDisconnect = false
         reconnectScheduled = false
         reconnectAttempt = 0
@@ -118,7 +121,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     targetLang = currentTargetLang,
                     voiceName = currentVoiceName,
                     resumeHandle = sessionHandle,
-                    enableTranscription = currentEnableTranscription
+                    enableTranscription = currentEnableTranscription,
+                    vadSilenceMs = currentVadSilenceMs
                 )
             }
 
@@ -279,7 +283,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         targetLang: String,
         voiceName: String,
         resumeHandle: String?,
-        enableTranscription: Boolean
+        enableTranscription: Boolean,
+        vadSilenceMs: Int
     ) {
         val targetLangCode = targetLang.split("-")[0]
 
@@ -308,7 +313,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
                         put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
                         put("prefixPaddingMs", 20)
-                        put("silenceDurationMs", 550)
+                        put("silenceDurationMs", vadSilenceMs)
                     })
                 })
                 if (enableTranscription) {
