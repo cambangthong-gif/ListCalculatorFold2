@@ -24,6 +24,8 @@ class AudioPlayerManager(private val context: Context) {
         private const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
         private const val BYTES_PER_MS = SAMPLE_RATE * 2 / 1000
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
+        private const val ULTRA_PREBUFFER_MS = 25
+        private const val ULTRA_PREBUFFER_MAX_WAIT_MS = 15L
         private const val FAST_PREBUFFER_MS = 45
         private const val FAST_PREBUFFER_MAX_WAIT_MS = 35L
         private const val STABLE_PREBUFFER_MS = 110
@@ -72,10 +74,10 @@ class AudioPlayerManager(private val context: Context) {
             .build()
         val minBuffer = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         val desiredBuffer = if (stableLiveMode) {
-            if (stableProfile == "stable") {
-                maxOf(minBuffer * 2, BYTES_PER_MS * 140)
-            } else {
-                maxOf(minBuffer, BYTES_PER_MS * 70)
+            when (stableProfile) {
+                "stable" -> maxOf(minBuffer * 2, BYTES_PER_MS * 140)
+                "ultra_fast" -> maxOf(minBuffer, BYTES_PER_MS * 50)
+                else -> maxOf(minBuffer, BYTES_PER_MS * 70)
             }
         } else if (lowLatency) {
             minBuffer
@@ -230,15 +232,15 @@ class AudioPlayerManager(private val context: Context) {
 
                 if (stableLiveMode && needsStablePrebuffer && queue.peekFirst() != null) {
                     val startWait = SystemClock.elapsedRealtime()
-                    val targetPrebuffer = if (stableProfile == "stable") {
-                        STABLE_PREBUFFER_MS
-                    } else {
-                        FAST_PREBUFFER_MS
+                    val targetPrebuffer = when (stableProfile) {
+                        "stable" -> STABLE_PREBUFFER_MS
+                        "ultra_fast" -> ULTRA_PREBUFFER_MS
+                        else -> FAST_PREBUFFER_MS
                     }
-                    val maxWait = if (stableProfile == "stable") {
-                        STABLE_PREBUFFER_MAX_WAIT_MS
-                    } else {
-                        FAST_PREBUFFER_MAX_WAIT_MS
+                    val maxWait = when (stableProfile) {
+                        "stable" -> STABLE_PREBUFFER_MAX_WAIT_MS
+                        "ultra_fast" -> ULTRA_PREBUFFER_MAX_WAIT_MS
+                        else -> FAST_PREBUFFER_MAX_WAIT_MS
                     }
                     while (
                         running.get() &&
