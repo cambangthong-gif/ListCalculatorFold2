@@ -681,10 +681,16 @@ class AudioDubbingForegroundService : Service() {
                     !initialNoOutputRecoveryUsed &&
                     outputSilenceMs >= 12_000L
 
+                val kickNeedsEscalation =
+                    lastSelfHealKickMs > 0L &&
+                    lastGeminiAudioReceivedMs < lastSelfHealKickMs &&
+                    now - lastSelfHealKickMs >= 2_500L
+
                 val shouldRecover =
                     serverSilentWhileSending ||
                     hybridTurnFinished ||
-                    initialNoOutputStall
+                    initialNoOutputStall ||
+                    kickNeedsEscalation
 
                 if (!shouldRecover) continue
 
