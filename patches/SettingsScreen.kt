@@ -450,7 +450,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                             lineHeight = 18.sp
                         )
 
-                        if (geminiSyncMode != "stable") {
+                        if (
+                            geminiSyncMode != "stable" &&
+                            geminiSyncMode != "continuous"
+                        ) {
                             ToggleRow(
                                 title = "Adaptive VAD",
                                 subtitle = "Tự học nhịp nghỉ ngắn của người nói để chốt câu sớm khi nói nhanh và chờ lâu hơn khi nói chậm.",
