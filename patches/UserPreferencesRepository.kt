@@ -58,7 +58,7 @@ class UserPreferencesRepository(private val context: Context) {
     val lowLatencyFlow: Flow<Boolean> = context.dataStore.data.map { it[LOW_LATENCY] ?: true }
     val maxCatchUpSpeedFlow: Flow<Float> = context.dataStore.data.map { (it[MAX_CATCH_UP_SPEED] ?: 1.15f).coerceIn(1.0f, 1.30f) }
     val geminiSyncModeFlow: Flow<String> = context.dataStore.data.map {
-        it[GEMINI_SYNC_MODE]?.takeIf { v -> v in setOf("stable", "ultra_fast", "hybrid_fast", "balanced") } ?: "balanced"
+        it[GEMINI_SYNC_MODE]?.takeIf { v -> v in setOf("continuous", "stable", "ultra_fast", "hybrid_fast", "balanced") } ?: "balanced"
     }
     val geminiMicroCatchUpFlow: Flow<Boolean> = context.dataStore.data.map { it[GEMINI_MICRO_CATCH_UP] ?: true }
     val geminiTailFinishFlow: Flow<Boolean> = context.dataStore.data.map { it[GEMINI_TAIL_FINISH] ?: true }
@@ -87,7 +87,7 @@ class UserPreferencesRepository(private val context: Context) {
     suspend fun updateMaxCatchUpSpeed(v: Float) { context.dataStore.edit { it[MAX_CATCH_UP_SPEED] = v.coerceIn(1.0f, 1.30f) } }
     suspend fun updateGeminiSyncMode(v: String) {
         val safe = v.takeIf {
-            it in setOf("stable", "ultra_fast", "hybrid_fast", "balanced")
+            it in setOf("continuous", "stable", "ultra_fast", "hybrid_fast", "balanced")
         } ?: "balanced"
         context.dataStore.edit { it[GEMINI_SYNC_MODE] = safe }
     }
