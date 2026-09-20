@@ -793,7 +793,7 @@ jobs:
                   btnPreview.setOnClickListener(v -> preview());
                   btnTest.setOnClickListener(v -> testTts());
                   btnTtsSettings.setOnClickListener(v -> {
-                      try { startActivity(new Intent(Settings.ACTION_TTS_SETTINGS)); }
+                      try { startActivity(new Intent("com.android.settings.TTS_SETTINGS")); }
                       catch (Exception e) { toast("Không mở được cài đặt TTS"); }
                   });
                   updateRefUi();
