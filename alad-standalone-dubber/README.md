@@ -1,4 +1,4 @@
-# ALAD Dub Standalone v1.0
+# ALAD Dub Standalone v1.1
 
 Extension độc lập, không cần ALAD Windows hay localhost bridge.
 
@@ -35,3 +35,10 @@ API key được lưu bằng `chrome.storage.local` nếu bật “Nhớ key”,
 - Video private/unlisted/DRM không đi qua YouTube AI mode.
 - Giọng đọc v1 dùng voice do Windows/Chrome/Edge cung cấp; chưa cache audio TTS thành file.
 - Universal mode phụ thuộc trang có caption/TextTrack mà content script đọc được.
+
+
+## Sửa ở v1.1
+
+- Side Panel tự kiểm tra content script trước khi gửi lệnh.
+- Nếu tab đã mở từ trước lúc cài/update extension, ALAD tự inject `content.js` + `content.css`, không còn lỗi `Receiving end does not exist`.
+- Với các trang `chrome://`, Chrome Web Store và trang nội bộ trình duyệt, Chrome không cho extension inject; hãy mở trang video http/https.
