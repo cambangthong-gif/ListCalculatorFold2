@@ -464,10 +464,21 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                             )
                         }
 
-                        if (geminiSyncMode == "balanced") {
+                        if (
+                            geminiSyncMode == "balanced" ||
+                            geminiSyncMode == "auto"
+                        ) {
                             ToggleRow(
-                                title = "Micro catch-up",
-                                subtitle = "Khi queue tích trễ, chỉ tăng rất nhẹ 1.03–1.08×; không bỏ câu.",
+                                title = if (geminiSyncMode == "auto") {
+                                    "Gentle catch-up"
+                                } else {
+                                    "Micro catch-up"
+                                },
+                                subtitle = if (geminiSyncMode == "auto") {
+                                    "Auto chỉ tăng rất nhẹ tối đa khoảng 1.04× khi queue tích trễ; không bỏ câu."
+                                } else {
+                                    "Khi queue tích trễ, chỉ tăng rất nhẹ 1.03–1.08×; không bỏ câu."
+                                },
                                 checked = geminiMicroCatchUp,
                                 onCheckedChange = viewModel::updateGeminiMicroCatchUp
                             )
