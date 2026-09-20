@@ -356,13 +356,7 @@ $controlsNeedle = '        liveMode.Enabled = !startingOrRunning;'
 $c = $c.Replace($controlsNeedle, $controlsNeedle + $nl + '        subtitleSource.Enabled = !startingOrRunning && source.SelectedItem is SubtitleDubbingItem;')
 
 # Browser bridge state includes captions/video identity.
-$recordOld = @'
-internal sealed record BrowserSyncState(
-    string Type,
-    double CurrentTime,
-    double PlaybackRate,
-    bool Paused);
-'@
+$recordPattern = '(?s)internal sealed record BrowserSyncState\(.*?\);'
 $recordNew = @'
 internal sealed record BrowserSyncState(
     string Type,
@@ -374,8 +368,9 @@ internal sealed record BrowserSyncState(
     string? VideoId,
     string? Title);
 '@
-if (-not $c.Contains($recordOld)) { throw 'BrowserSyncState marker missing' }
-$c = $c.Replace($recordOld, $recordNew)
+$c2 = [regex]::Replace($c, $recordPattern, $recordNew.TrimEnd(), 1)
+if ($c2 -eq $c) { throw 'BrowserSyncState regex failed' }
+$c = $c2
 
 # Parse captions as well as player-state messages.
 $parseOld = @'
