@@ -723,10 +723,50 @@ class AudioDubbingForegroundService : Service() {
                 val now = SystemClock.elapsedRealtime()
                 val recentSource =
                     lastMeaningfulSourceMs > 0L &&
-                    now - lastMeaningfulSourceMs <= 1_800L
-                if (!recentSource) continue
-
+                    now - lastMeaningfulSourceMs <= 2_500L
                 val ws = webSocketManager ?: continue
+
+                // Stage 1: a reconnect that keeps the latest resumption handle.
+                // If that reconnect stays silent, escalate to a clean session only then.
+                if (
+                    selfHealStage == 1 &&
+                    lastGeminiAudioReceivedMs < lastSelfHealReconnectMs &&
+                    now - lastSelfHealReconnectMs >= 3_500L
+                ) {
+                    selfHealStage = 2
+                    lastSelfHealReconnectMs = now
+                    geminiSessionStartedMs = now
+                    if (activeGeminiSyncMode == "auto") {
+                        autoVadBiasMs = (autoVadBiasMs + 80L).coerceAtMost(180L)
+                    }
+                    synchronized(this@AudioDubbingForegroundService) {
+                        hybridSpeechActive = false
+                        hybridSilenceStartMs = 0L
+                        hybridSpeechStartMs = 0L
+                        lastHybridStreamEndMs = 0L
+                    }
+                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                    geminiPipelineState.value = "RECOVERING"
+                    smartSyncStatus.value = "SELF-HEAL HARD RESET"
+                    refreshNotification()
+                    ws.forceReconnect(
+                        resetSession = true,
+                        reason = "resume produced no audio"
+                    )
+                    continue
+                }
+
+                if (
+                    selfHealStage == 2 &&
+                    lastGeminiAudioReceivedMs < lastSelfHealReconnectMs &&
+                    now - lastSelfHealReconnectMs >= 12_000L
+                ) {
+                    // Allow another staged recovery later, but avoid a tight reconnect loop.
+                    selfHealStage = 0
+                }
+
+                if (!recentSource || selfHealStage != 0) continue
+
                 val referenceOutputMs =
                     if (lastGeminiAudioReceivedMs > 0L) {
                         lastGeminiAudioReceivedMs
@@ -738,77 +778,40 @@ class AudioDubbingForegroundService : Service() {
                     ws.audioSendSilenceMs() <= 1_500L &&
                     ws.serverSilenceMs() >= 7_000L
 
-                val hybridTurnFinished =
-                    activeGeminiSyncMode != "continuous" &&
-                    activeGeminiSyncMode != "stable" &&
+                val clientTurnWaiting =
+                    usesClientActivityDetection(activeGeminiSyncMode) &&
                     !hybridSpeechActive &&
                     lastHybridStreamEndMs > 0L &&
-                    now - lastHybridStreamEndMs <= 3_000L
+                    now - lastHybridStreamEndMs <= 5_000L &&
+                    geminiPipelineState.value == "GENERATING" &&
+                    outputSilenceMs >= 5_000L
 
                 val initialNoOutputStall =
                     !geminiEverProducedAudio &&
-                    !initialNoOutputRecoveryUsed &&
-                    outputSilenceMs >= 12_000L
-
-                val kickNeedsEscalation =
-                    lastSelfHealKickMs > 0L &&
-                    lastGeminiAudioReceivedMs < lastSelfHealKickMs &&
-                    now - lastSelfHealKickMs >= 2_500L
-
-                val shouldRecover =
-                    serverSilentWhileSending ||
-                    hybridTurnFinished ||
-                    initialNoOutputStall ||
-                    kickNeedsEscalation
-
-                if (!shouldRecover) continue
-
-                val outputArrivedAfterKick =
-                    lastSelfHealKickMs > 0L &&
-                    lastGeminiAudioReceivedMs >= lastSelfHealKickMs
+                    outputSilenceMs >= 10_000L
 
                 if (
-                    outputSilenceMs >= 5_000L &&
-                    (
-                        lastSelfHealKickMs == 0L ||
-                        outputArrivedAfterKick ||
-                        now - lastSelfHealKickMs >= 8_000L
-                    )
+                    !serverSilentWhileSending &&
+                    !clientTurnWaiting &&
+                    !initialNoOutputStall
                 ) {
-                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
-                    flushGeminiInputChunk()
-                    ws.sendAudioStreamEnd()
-                    lastSelfHealKickMs = now
-                    smartSyncStatus.value = "SELF-HEAL KICK"
-                    refreshNotification()
                     continue
                 }
 
-                if (
-                    lastSelfHealKickMs > 0L &&
-                    lastGeminiAudioReceivedMs < lastSelfHealKickMs &&
-                    now - lastSelfHealKickMs >= 2_500L &&
-                    now - lastSelfHealReconnectMs >= 6_000L
-                ) {
-                    if (!geminiEverProducedAudio) {
-                        initialNoOutputRecoveryUsed = true
-                    }
-                    lastSelfHealReconnectMs = now
-                    geminiSessionStartedMs = now
-                    synchronized(this@AudioDubbingForegroundService) {
-                        hybridSpeechActive = false
-                        hybridSilenceStartMs = 0L
-                        hybridSpeechStartMs = 0L
-                        lastHybridStreamEndMs = 0L
-                    }
-                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
-                    smartSyncStatus.value = "SELF-HEAL RECONNECT"
-                    refreshNotification()
-                    ws.forceReconnect(
-                        resetSession = true,
-                        reason = "no translated audio"
-                    )
+                selfHealStage = 1
+                lastSelfHealReconnectMs = now
+                geminiSessionStartedMs = now
+                if (activeGeminiSyncMode == "auto") {
+                    autoVadBiasMs = (autoVadBiasMs + 60L).coerceAtMost(180L)
                 }
+                audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                geminiPipelineState.value = "RECOVERING"
+                smartSyncStatus.value = "SELF-HEAL RESUME"
+                refreshNotification()
+                ws.forceReconnect(
+                    resetSession = false,
+                    reason = "resume-first watchdog"
+                )
             }
         }
     }
@@ -1262,7 +1265,9 @@ class AudioDubbingForegroundService : Service() {
 
             if (activeVoiceSource == "gemini") {
                 val allowMicro =
-                    activeGeminiSyncMode == "balanced" && geminiMicroCatchUpEnabled
+                    (activeGeminiSyncMode == "balanced" ||
+                        activeGeminiSyncMode == "auto") &&
+                        geminiMicroCatchUpEnabled
                 autoSyncActive.value = allowMicro
                 audioPlayerManager?.setAutoSyncEnabled(false)
                 audioPlayerManager?.setBalancedMicroCatchUp(allowMicro)
@@ -1381,7 +1386,17 @@ class AudioDubbingForegroundService : Service() {
         if (notificationPaused) {
             flushGeminiInputChunk()
             if (activeVoiceSource == "gemini") {
-                webSocketManager?.sendAudioStreamEnd()
+                if (usesClientActivityDetection(activeGeminiSyncMode)) {
+                    synchronized(this) {
+                        if (hybridSpeechActive) webSocketManager?.sendActivityEnd()
+                        hybridSpeechActive = false
+                        hybridSilenceStartMs = 0L
+                        hybridSpeechStartMs = 0L
+                    }
+                } else {
+                    webSocketManager?.sendAudioStreamEnd()
+                }
+                geminiPipelineState.value = "PAUSED"
             }
             audioPlayerManager?.setExternalPaused(true)
             deviceTtsManager?.setExternalPaused(true)
@@ -1402,6 +1417,7 @@ class AudioDubbingForegroundService : Service() {
         if (!isRunning.value || activeVoiceSource != "gemini") return
         serviceScope.launch {
             val order = listOf(
+                "auto",
                 "ultra_fast",
                 "hybrid_fast",
                 "balanced",
@@ -1412,7 +1428,8 @@ class AudioDubbingForegroundService : Service() {
             val next = order[(index + 1) % order.size]
 
             activeGeminiSyncMode = next
-            val useMicro = next == "balanced" && geminiMicroCatchUpEnabled
+            val useMicro =
+                (next == "balanced" || next == "auto") && geminiMicroCatchUpEnabled
 
             synchronized(this@AudioDubbingForegroundService) {
                 hybridSpeechActive = false
@@ -1442,17 +1459,24 @@ class AudioDubbingForegroundService : Service() {
                 } else {
                     "NO_INTERRUPTION"
                 }
-            webSocketManager?.reconfigureRealtime(vadMs, activityHandling)
+            webSocketManager?.reconfigureRealtime(
+                vadMs,
+                activityHandling,
+                clientActivityDetection = usesClientActivityDetection(next)
+            )
 
             geminiSessionStartedMs = SystemClock.elapsedRealtime()
             lastSelfHealKickMs = 0L
             lastSelfHealReconnectMs = 0L
+            selfHealStage = 0
+            autoVadBiasMs = 0L
             smartSyncStatus.value = geminiProfileLabel()
             refreshNotification()
         }
     }
 
     private fun profileShortName(): String = when (activeGeminiSyncMode) {
+        "auto" -> "AUTO"
         "ultra_fast" -> "ULTRA"
         "hybrid_fast" -> "HYBRID"
         "balanced" -> "BALANCED"
@@ -1529,6 +1553,7 @@ class AudioDubbingForegroundService : Service() {
         }
         val detailText =
             stateText +
+                " · " + geminiPipelineState.value +
                 " · Sync " +
                 (if (syncOffsetMs.value >= 0) "+" else "") +
                 syncOffsetMs.value +
