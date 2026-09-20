@@ -331,18 +331,10 @@ $methods = @'
 $c = $c.Substring(0, $methodStart) + $methods + $c.Substring($methodEnd)
 
 # Stop transcriber/cache before disposing the dubbing model.
-$stopNeedle = @'
-        browserSync = null;
-        browserSyncMode = false;
-        browserTime = 0;
-        browserRate = 1.0;
+$stopInsert = $c.IndexOf('        try { if (gemini != null) await gemini.DisposeAsync(); } catch { }')
+if ($stopInsert -lt 0) { throw 'Gemini dispose anchor missing' }
 
-        try { if (gemini != null) await gemini.DisposeAsync(); } catch { }
-'@
-$stopReplacement = @'
-        browserSync = null;
-        browserSyncMode = false;
-
+$cleanup = @'
         if (transcriber != null)
         {
             try { await transcriber.DisposeAsync(); } catch { }
@@ -356,13 +348,8 @@ $stopReplacement = @'
         currentVideoId = "";
         currentVideoTitle = "";
         lastSubtitleEnd = 0;
-        browserTime = 0;
-        browserRate = 1.0;
-
-        try { if (gemini != null) await gemini.DisposeAsync(); } catch { }
 '@
-if (-not $c.Contains($stopNeedle)) { throw 'v6.2 stop bridge marker missing' }
-$c = $c.Replace($stopNeedle, $stopReplacement)
+$c = $c.Substring(0, $stopInsert) + $cleanup + $c.Substring($stopInsert)
 
 # Keep subtitle-source control locked while running.
 $controlsNeedle = '        liveMode.Enabled = !startingOrRunning;'
