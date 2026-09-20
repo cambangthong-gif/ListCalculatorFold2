@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "ALAD Dub Lite",
+  "version": "2.0.0",
+  "description": "Caption-first AI dubbing nhẹ máy: dịch phụ đề, Gemini TTS, cache và sync theo timeline.",
+  "permissions": ["storage","tabs","activeTab","sidePanel","scripting","unlimitedStorage"],
+  "host_permissions": [
+    "https://www.youtube.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["http://*/*","https://*/*"],
+    "js": ["content.js"],
+    "css": ["content.css"],
+    "run_at": "document_idle"
+  }],
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "ALAD Dub Lite" },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
