@@ -8,10 +8,13 @@
   let textTrackHandlers = [];
   let lastCaption = "";
   let lastCaptionAt = 0;
+  let lastCaptionSeenAt = 0;
   let lastStateSent = 0;
+  let lastCaptionStatus = "";
   let lastMediaKey = "";
   let originalVolumeBeforeAlad = null;
   let scanTimer = null;
+  let lastCaptionEnableAttempt = 0;
 
   const HOST = location.hostname.toLowerCase();
 
@@ -65,7 +68,10 @@
   function emitCaption(text, source = "dom") {
     if (!connected || !media) return;
     text = normalize(text);
-    if (!text || text === lastCaption || text.length > 500) return;
+    if (!text || text.length > 500) return;
+
+    lastCaptionSeenAt = performance.now();
+    if (text === lastCaption) return;
 
     const now = performance.now();
     const elapsed = lastCaptionAt ? Math.max(0.2, (now - lastCaptionAt) / 1000) : 0.8;
@@ -81,8 +87,36 @@
       playbackRate: Number(media.playbackRate || 1),
       paused: Boolean(media.paused),
       source,
-      site: HOST
+      site: HOST,
+      title: document.title || ""
     });
+  }
+
+  function ensureCaptionsEnabled() {
+    if (!connected || !media) return;
+
+    const now = performance.now();
+    if (now - lastCaptionEnableAttempt < 1200) return;
+    lastCaptionEnableAttempt = now;
+
+    // Native HTML5 tracks: hidden loads cues without forcing visible captions.
+    try {
+      if (media.textTracks) {
+        for (const track of media.textTracks) {
+          if (track.kind !== "captions" && track.kind !== "subtitles") continue;
+          if (track.mode === "disabled") track.mode = "hidden";
+        }
+      }
+    } catch {}
+
+    // YouTube uses a custom caption renderer and often exposes no useful TextTrack.
+    // If CC exists but is off, turn it on so the DOM caption stream is actually created.
+    if (HOST.includes("youtube.com")) {
+      const cc = document.querySelector(".ytp-subtitles-button");
+      if (cc && !cc.disabled && cc.getAttribute("aria-pressed") === "false") {
+        try { cc.click(); } catch {}
+      }
+    }
   }
 
   function activeTrackText() {
@@ -90,13 +124,9 @@
     const parts = [];
     for (const track of media.textTracks) {
       if (track.kind !== "captions" && track.kind !== "subtitles") continue;
-
-      // If the page keeps the track disabled, hidden lets activeCues update
-      // without forcing subtitles visibly on the page.
       try {
         if (track.mode === "disabled") track.mode = "hidden";
       } catch {}
-
       const cues = track.activeCues;
       if (!cues) continue;
       for (let i = 0; i < cues.length; i++) {
@@ -115,6 +145,7 @@
     textTrackHandlers = [];
 
     if (!media?.textTracks) return;
+    ensureCaptionsEnabled();
 
     for (const track of media.textTracks) {
       if (track.kind !== "captions" && track.kind !== "subtitles") continue;
@@ -143,7 +174,7 @@
 
     const overlapsX = er.right >= mr.left && er.left <= mr.right;
     const overlapsY = er.bottom >= mr.top && er.top <= mr.bottom;
-    const nearLowerArea = er.top >= mr.top + mr.height * 0.35;
+    const nearLowerArea = er.top >= mr.top + mr.height * 0.30;
     return overlapsX && overlapsY && nearLowerArea;
   }
 
@@ -151,7 +182,10 @@
     let nodes = [];
 
     if (HOST.includes("youtube.com")) {
-      nodes = [...document.querySelectorAll(".ytp-caption-segment, .ytp-caption-window-container .caption-visual-line")];
+      nodes = [...document.querySelectorAll(".ytp-caption-segment")];
+      if (!nodes.length) {
+        nodes = [...document.querySelectorAll(".ytp-caption-window-container .caption-visual-line")];
+      }
     } else if (HOST.includes("netflix.com")) {
       nodes = [...document.querySelectorAll(".player-timedtext-text-container, [class*='timedtext']")];
     } else {
@@ -166,6 +200,8 @@
   function scanCaption() {
     if (!connected || !media) return;
 
+    ensureCaptionsEnabled();
+
     const trackText = activeTrackText();
     if (trackText) {
       emitCaption(trackText, "textTrack");
@@ -176,6 +212,26 @@
     if (domText) emitCaption(domText, "dom");
   }
 
+  function reportCaptionStatus() {
+    if (!connected || !media) return;
+    const active = performance.now() - lastCaptionSeenAt < 3000;
+    const state = active ? "active" : "missing";
+    if (state === lastCaptionStatus) return;
+    lastCaptionStatus = state;
+
+    send({
+      type: "captionStatus",
+      text: state,
+      videoId: mediaKey(media),
+      currentTime: Number(media.currentTime || 0),
+      duration: Number(media.duration || 0),
+      playbackRate: Number(media.playbackRate || 1),
+      paused: Boolean(media.paused),
+      site: HOST,
+      title: document.title || ""
+    });
+  }
+
   function attachCaptionObserver() {
     if (captionObserver) captionObserver.disconnect();
 
@@ -184,7 +240,7 @@
       scanTimer = setTimeout(() => {
         scanTimer = null;
         scanCaption();
-      }, 80);
+      }, 60);
     });
 
     captionObserver.observe(document.documentElement || document.body, {
@@ -210,17 +266,26 @@
     textTrackHandlers = [];
   }
 
-  function onPlay() { currentState("state"); }
+  function onPlay() {
+    ensureCaptionsEnabled();
+    currentState("state");
+  }
   function onPause() { currentState("state"); }
   function onSeeked() {
     lastCaption = "";
+    lastCaptionSeenAt = 0;
+    lastCaptionStatus = "";
     currentState("seek");
+    ensureCaptionsEnabled();
     scanCaption();
   }
   function onRate() { currentState("state"); }
   function onLoaded() {
     lastCaption = "";
+    lastCaptionSeenAt = 0;
+    lastCaptionStatus = "";
     currentState("video");
+    ensureCaptionsEnabled();
     attachTextTracks();
     scanCaption();
   }
@@ -238,6 +303,7 @@
     media.addEventListener("ratechange", onRate);
     media.addEventListener("loadedmetadata", onLoaded);
     media.addEventListener("emptied", onLoaded);
+    ensureCaptionsEnabled();
     attachTextTracks();
     currentState("video");
     scanCaption();
@@ -258,17 +324,19 @@
     originalVolumeBeforeAlad = null;
   }
 
+  function activate() {
+    attachMedia();
+    ensureCaptionsEnabled();
+    attachCaptionObserver();
+    currentState("state");
+    scanCaption();
+  }
+
   chrome.runtime.onMessage.addListener(message => {
     if (message?.type === "aladBridgeStatus") {
       connected = Boolean(message.connected);
-      if (connected) {
-        attachMedia();
-        attachCaptionObserver();
-        currentState("state");
-        scanCaption();
-      } else {
-        restoreVolume();
-      }
+      if (connected) activate();
+      else restoreVolume();
     }
 
     if (message?.type === "aladSetVolume") {
@@ -279,20 +347,13 @@
       connected = true;
       attachMedia();
       setVolume(message.originalVolume ?? 1);
-      attachCaptionObserver();
-      currentState("state");
-      scanCaption();
+      activate();
     }
   });
 
   chrome.runtime.sendMessage({ type: "aladBridgeProbe" }).then(r => {
     connected = Boolean(r?.connected);
-    if (connected) {
-      attachMedia();
-      attachCaptionObserver();
-      currentState("state");
-      scanCaption();
-    }
+    if (connected) activate();
   }).catch(() => {});
 
   setInterval(() => {
@@ -303,15 +364,22 @@
       if (key !== lastMediaKey) {
         lastMediaKey = key;
         lastCaption = "";
+        lastCaptionSeenAt = 0;
+        lastCaptionStatus = "";
         currentState("video");
+        ensureCaptionsEnabled();
         attachTextTracks();
       }
     }
 
-    if (connected && media && performance.now() - lastStateSent > 500) {
-      lastStateSent = performance.now();
-      currentState("state");
-      scanCaption();
+    if (connected && media) {
+      ensureCaptionsEnabled();
+      if (performance.now() - lastStateSent > 500) {
+        lastStateSent = performance.now();
+        currentState("state");
+        scanCaption();
+      }
+      reportCaptionStatus();
     }
   }, 250);
 })();
