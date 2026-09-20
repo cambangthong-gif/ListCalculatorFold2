@@ -1,0 +1,48 @@
+#alad-dub-overlay {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 11%;
+  z-index: 2147483646;
+  pointer-events: none;
+  text-align: center;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity .12s ease, transform .12s ease;
+  font-family: Arial, Helvetica, sans-serif;
+}
+#alad-dub-overlay.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+#alad-dub-overlay .alad-dub-translated {
+  display: inline-block;
+  max-width: 92%;
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.78);
+  color: white;
+  font-weight: 700;
+  font-size: clamp(16px, 2.1vw, 28px);
+  line-height: 1.28;
+  text-shadow: 0 1px 2px #000;
+}
+#alad-dub-overlay .alad-dub-source {
+  margin: 5px auto 0;
+  max-width: 86%;
+  color: rgba(255,255,255,.88);
+  font-size: clamp(11px, 1.15vw, 16px);
+  line-height: 1.2;
+  text-shadow: 0 1px 2px #000;
+}
+.alad-dub-player-button {
+  width: 54px !important;
+  min-width: 54px !important;
+  padding: 0 7px !important;
+  font: 700 11px/36px Arial, sans-serif !important;
+  color: #fff !important;
+  opacity: .92;
+}
+.alad-dub-player-button.active {
+  color: #75ffad !important;
+}
