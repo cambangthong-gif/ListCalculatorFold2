@@ -176,6 +176,7 @@ fun OverlayContent(
     val nativeRate by AudioDubbingForegroundService.nativeOutputRateHz.collectAsState()
     val outputBuffer by AudioDubbingForegroundService.outputBufferMs.collectAsState()
     val underruns by AudioDubbingForegroundService.outputUnderruns.collectAsState()
+    val pipelineState by AudioDubbingForegroundService.geminiPipelineState.collectAsState()
 
     val infiniteTransition = rememberInfiniteTransition(label = "widget_pulse")
     val pulseScale by infiniteTransition.animateFloat(
@@ -304,6 +305,7 @@ fun OverlayContent(
                 ) {
                     val smartLabel = when {
                         syncStatus.startsWith("SELF-HEAL") ||
+                        syncStatus.startsWith("AUTO") ||
                         syncStatus.startsWith("CONTINUOUS") ||
                         syncStatus.startsWith("STABLE") ||
                         syncStatus.startsWith("HYBRID") ||
@@ -320,7 +322,7 @@ fun OverlayContent(
                     Text(
                         text = "SYNC ${if (syncOffset >= 0) "+" else ""}${syncOffset}ms\n" +
                             (if (autoSync) "AUTO" else "FIXED") + " · " + smartLabel +
-                            "\nC" + captureBlock + " · " +
+                            "\n" + pipelineState + " · C" + captureBlock + " · " +
                             (if (nativeRate > 0) (nativeRate / 1000).toString() + "k" else "--") +
                             " · b" + outputBuffer + " · u" + underruns,
                         color = if (autoSync) NeonCyan else Color.White,
