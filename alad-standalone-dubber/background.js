@@ -59,21 +59,58 @@ async function ensureContentScript(tabId) {
   return { injected: true };
 }
 
+async function getApiKeyInfo() {
+  const [s, l] = await Promise.all([
+    chrome.storage.session.get("geminiApiKey"),
+    chrome.storage.local.get("geminiApiKey")
+  ]);
+
+  if (l.geminiApiKey) {
+    return { key: l.geminiApiKey, hasKey: true, storage: "local" };
+  }
+  if (s.geminiApiKey) {
+    return { key: s.geminiApiKey, hasKey: true, storage: "session" };
+  }
+  return { key: "", hasKey: false, storage: "none" };
+}
+
 async function getApiKey() {
-  const s = await chrome.storage.session.get("geminiApiKey");
-  if (s.geminiApiKey) return s.geminiApiKey;
-  const l = await chrome.storage.local.get("geminiApiKey");
-  return l.geminiApiKey || "";
+  return (await getApiKeyInfo()).key;
 }
 
 async function saveApiKey(key, remember) {
-  await chrome.storage.session.remove("geminiApiKey");
+  key = String(key || "").trim();
+  if (!key) return;
+
   if (remember) {
     await chrome.storage.local.set({ geminiApiKey: key });
+    await chrome.storage.session.remove("geminiApiKey");
   } else {
-    await chrome.storage.local.remove("geminiApiKey");
     await chrome.storage.session.set({ geminiApiKey: key });
+    await chrome.storage.local.remove("geminiApiKey");
   }
+}
+
+async function applyKeyPreference(remember) {
+  const info = await getApiKeyInfo();
+  if (!info.hasKey) return info;
+
+  if (remember && info.storage === "session") {
+    await chrome.storage.local.set({ geminiApiKey: info.key });
+    await chrome.storage.session.remove("geminiApiKey");
+  } else if (!remember && info.storage === "local") {
+    await chrome.storage.session.set({ geminiApiKey: info.key });
+    await chrome.storage.local.remove("geminiApiKey");
+  }
+
+  return getApiKeyInfo();
+}
+
+async function clearApiKey() {
+  await Promise.all([
+    chrome.storage.session.remove("geminiApiKey"),
+    chrome.storage.local.remove("geminiApiKey")
+  ]);
 }
 
 async function loadSettings() {
@@ -294,16 +331,46 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       case "ALAD_GET_CONFIG": {
         const settings = await loadSettings();
-        const key = await getApiKey();
-        sendResponse({ ok: true, settings, hasKey: !!key });
+        const keyInfo = await getApiKeyInfo();
+        sendResponse({
+          ok: true,
+          settings,
+          hasKey: keyInfo.hasKey,
+          keyStorage: keyInfo.storage
+        });
         break;
       }
       case "ALAD_SAVE_CONFIG": {
+        const remember = !!msg.rememberKey;
         if (typeof msg.apiKey === "string" && msg.apiKey.trim()) {
-          await saveApiKey(msg.apiKey.trim(), !!msg.rememberKey);
+          await saveApiKey(msg.apiKey.trim(), remember);
+        } else {
+          await applyKeyPreference(remember);
         }
         await saveSettings(msg.settings || {});
-        sendResponse({ ok: true });
+        const keyInfo = await getApiKeyInfo();
+        sendResponse({
+          ok: true,
+          hasKey: keyInfo.hasKey,
+          keyStorage: keyInfo.storage
+        });
+        break;
+      }
+      case "ALAD_SAVE_KEY": {
+        const key = String(msg.apiKey || "").trim();
+        if (!key) throw new Error("Chưa nhập API key.");
+        await saveApiKey(key, !!msg.rememberKey);
+        const keyInfo = await getApiKeyInfo();
+        sendResponse({
+          ok: true,
+          hasKey: keyInfo.hasKey,
+          keyStorage: keyInfo.storage
+        });
+        break;
+      }
+      case "ALAD_CLEAR_KEY": {
+        await clearApiKey();
+        sendResponse({ ok: true, hasKey: false, keyStorage: "none" });
         break;
       }
       case "ALAD_GENERATE_YOUTUBE_CHUNK": {
