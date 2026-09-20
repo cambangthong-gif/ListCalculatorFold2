@@ -374,8 +374,6 @@ class AudioDubbingForegroundService : Service() {
         notificationPaused = false
         selfHealStage = 0
         autoVadBiasMs = 0L
-        selfHealStage = 0
-        autoVadBiasMs = 0L
         geminiPipelineState.value = "CONNECTING"
         synchronized(this) {
             hybridSpeechActive = false
@@ -1404,6 +1402,9 @@ class AudioDubbingForegroundService : Service() {
         } else {
             lastMeaningfulSourceMs = 0L
             geminiSessionStartedMs = SystemClock.elapsedRealtime()
+            if (activeVoiceSource == "gemini") {
+                geminiPipelineState.value = "READY"
+            }
             audioPlayerManager?.setExternalPaused(false)
             audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
             deviceTtsManager?.setExternalPaused(false)
