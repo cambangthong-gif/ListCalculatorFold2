@@ -26,6 +26,8 @@ class AudioPlayerManager(private val context: Context) {
         private const val DYNAMIC_FOCUS_RELEASE_MS = 450L
         private const val ULTRA_PREBUFFER_MS = 25
         private const val ULTRA_PREBUFFER_MAX_WAIT_MS = 15L
+        private const val AUTO_PREBUFFER_MS = 35
+        private const val AUTO_PREBUFFER_MAX_WAIT_MS = 25L
         private const val FAST_PREBUFFER_MS = 45
         private const val FAST_PREBUFFER_MAX_WAIT_MS = 35L
         private const val STABLE_PREBUFFER_MS = 110
@@ -53,7 +55,7 @@ class AudioPlayerManager(private val context: Context) {
     @Volatile private var externallyPaused = false
     @Volatile private var sourceClockProvider: (() -> Long)? = null
     @Volatile private var stableLiveMode = false
-    @Volatile private var stableProfile = "balanced"
+    @Volatile private var stableProfile = "auto"
     @Volatile private var balancedMicroCatchUp = false
 
     private var audioTrack: AudioTrack? = null
@@ -77,6 +79,8 @@ class AudioPlayerManager(private val context: Context) {
     private var resamplePrevSample = 0
     private var hasResamplePrev = false
     private var resamplePosition = 0.0
+    private var resampleInputScratch = IntArray(0)
+    private var resampleOutputScratch = ByteArray(0)
 
     fun start() {
         if (running.getAndSet(true)) return
@@ -181,7 +185,8 @@ class AudioPlayerManager(private val context: Context) {
     ) {
         stableLiveMode = enabled
         stableProfile = profile
-        balancedMicroCatchUp = enabled && profile == "balanced" && microCatchUp
+        balancedMicroCatchUp =
+            enabled && (profile == "balanced" || profile == "auto") && microCatchUp
         needsStablePrebuffer = true
         if (enabled) {
             autoSync = false
@@ -202,7 +207,8 @@ class AudioPlayerManager(private val context: Context) {
 
     fun playAudioData(data: ByteArray, sourceClockMs: Long = -1L) {
         if (!running.get() || data.isEmpty()) return
-        val chunk = AudioChunk(data.copyOf(), SystemClock.elapsedRealtime(), sourceClockMs)
+        // WebSocket/Base64 decode already owns this ByteArray. Do not duplicate it.
+        val chunk = AudioChunk(data, SystemClock.elapsedRealtime(), sourceClockMs)
         queue.offerLast(chunk)
         queuedBytes.addAndGet(chunk.data.size.toLong())
     }
@@ -294,11 +300,13 @@ class AudioPlayerManager(private val context: Context) {
                     val targetPrebuffer = when (stableProfile) {
                         "stable" -> STABLE_PREBUFFER_MS
                         "ultra_fast", "continuous" -> ULTRA_PREBUFFER_MS
+                        "auto" -> AUTO_PREBUFFER_MS
                         else -> FAST_PREBUFFER_MS
                     }
                     val maxWait = when (stableProfile) {
                         "stable" -> STABLE_PREBUFFER_MAX_WAIT_MS
                         "ultra_fast", "continuous" -> ULTRA_PREBUFFER_MAX_WAIT_MS
+                        "auto" -> AUTO_PREBUFFER_MAX_WAIT_MS
                         else -> FAST_PREBUFFER_MAX_WAIT_MS
                     }
                     while (
@@ -326,16 +334,18 @@ class AudioPlayerManager(private val context: Context) {
                 }
                 updateCatchUpSpeed()
                 acquireFocusForSpeech()
-                val outputData = resampleToNative(chunk.data)
+                val outputSize = resampleToNativeScratch(chunk.data)
+                val outputData =
+                    if (nativeSampleRate == SOURCE_SAMPLE_RATE) chunk.data else resampleOutputScratch
                 synchronized(trackLock) {
                     val track = audioTrack
                     if (track != null && running.get()) {
                         var offset = 0
-                        while (offset < outputData.size && running.get()) {
+                        while (offset < outputSize && running.get()) {
                             val wrote = track.write(
                                 outputData,
                                 offset,
-                                outputData.size - offset,
+                                outputSize - offset,
                                 AudioTrack.WRITE_BLOCKING
                             )
                             if (wrote <= 0) break
@@ -364,11 +374,20 @@ class AudioPlayerManager(private val context: Context) {
         val queueLag = queuedDurationMs().toLong()
         if (stableLiveMode && balancedMicroCatchUp) {
             val pressure = queueLag + (-manualSyncMs).coerceAtLeast(0)
-            val target = when {
-                pressure < 220L -> 1.00f
-                pressure < 420L -> 1.03f
-                pressure < 700L -> 1.05f
-                else -> 1.08f
+            val target = if (stableProfile == "auto") {
+                when {
+                    pressure < 260L -> 1.00f
+                    pressure < 480L -> 1.01f
+                    pressure < 760L -> 1.02f
+                    else -> 1.04f
+                }
+            } else {
+                when {
+                    pressure < 220L -> 1.00f
+                    pressure < 420L -> 1.03f
+                    pressure < 700L -> 1.05f
+                    else -> 1.08f
+                }
             }
             applyPlaybackSpeed(target)
             return
@@ -479,6 +498,7 @@ class AudioPlayerManager(private val context: Context) {
         val burstTarget = when (stableProfile) {
             "stable" -> nativeFramesPerBurst * 4
             "ultra_fast", "continuous" -> nativeFramesPerBurst * 2
+            "auto" -> nativeFramesPerBurst * 2
             else -> nativeFramesPerBurst * 3
         }
         return maxOf(trackMinFrames, burstTarget).coerceAtMost(trackCapacityFrames)
@@ -518,60 +538,68 @@ class AudioPlayerManager(private val context: Context) {
         resamplePosition = 0.0
     }
 
-    private fun resampleToNative(data: ByteArray): ByteArray {
-        if (data.isEmpty() || nativeSampleRate == SOURCE_SAMPLE_RATE) return data
+    private fun resampleToNativeScratch(data: ByteArray): Int {
+        if (data.isEmpty()) return 0
+        if (nativeSampleRate == SOURCE_SAMPLE_RATE) return data.size
+
         val sampleCount = data.size / 2
-        if (sampleCount <= 0) return data
+        if (sampleCount <= 0) return 0
 
         val extra = if (hasResamplePrev) 1 else 0
-        val samples = IntArray(sampleCount + extra)
+        val neededSamples = sampleCount + extra
+        if (resampleInputScratch.size < neededSamples) {
+            resampleInputScratch = IntArray(neededSamples * 2)
+        }
+
         var dst = 0
         if (hasResamplePrev) {
-            samples[0] = resamplePrevSample
-            dst = 1
+            resampleInputScratch[dst++] = resamplePrevSample
         }
 
         var src = 0
-        while (src + 1 < data.size && dst < samples.size) {
-            samples[dst++] =
+        while (src + 1 < data.size) {
+            resampleInputScratch[dst++] =
                 ((data[src].toInt() and 0xFF) or (data[src + 1].toInt() shl 8))
                     .toShort()
                     .toInt()
             src += 2
         }
+
         if (dst < 2) {
             if (dst == 1) {
-                resamplePrevSample = samples[0]
+                resamplePrevSample = resampleInputScratch[0]
                 hasResamplePrev = true
             }
-            return ByteArray(0)
+            return 0
         }
 
         val step = SOURCE_SAMPLE_RATE.toDouble() / nativeSampleRate.toDouble()
-        val output = ArrayList<Short>((dst / step).toInt() + 4)
+        val estimatedSamples = (dst / step).toInt() + 8
+        val neededBytes = estimatedSamples * 2
+        if (resampleOutputScratch.size < neededBytes) {
+            resampleOutputScratch = ByteArray(neededBytes * 2)
+        }
+
         var pos = resamplePosition
         val lastIndex = dst - 1
+        var out = 0
         while (pos < lastIndex) {
             val i = pos.toInt().coerceIn(0, lastIndex - 1)
             val frac = pos - i
-            val a = samples[i].toDouble()
-            val b = samples[i + 1].toDouble()
-            output.add((a + (b - a) * frac).toInt().coerceIn(-32768, 32767).toShort())
+            val a = resampleInputScratch[i].toDouble()
+            val b = resampleInputScratch[i + 1].toDouble()
+            val v = (a + (b - a) * frac)
+                .toInt()
+                .coerceIn(-32768, 32767)
+            resampleOutputScratch[out++] = (v and 0xFF).toByte()
+            resampleOutputScratch[out++] = ((v shr 8) and 0xFF).toByte()
             pos += step
         }
 
         resamplePosition = pos - lastIndex
-        resamplePrevSample = samples[lastIndex]
+        resamplePrevSample = resampleInputScratch[lastIndex]
         hasResamplePrev = true
-
-        val bytes = ByteArray(output.size * 2)
-        var o = 0
-        for (sample in output) {
-            val v = sample.toInt()
-            bytes[o++] = (v and 0xFF).toByte()
-            bytes[o++] = ((v shr 8) and 0xFF).toByte()
-        }
-        return bytes
+        return out
     }
 
     fun stop() {
@@ -579,7 +607,7 @@ class AudioPlayerManager(private val context: Context) {
         workerThread?.interrupt(); workerThread = null
         externallyPaused = false
         stableLiveMode = false
-        stableProfile = "balanced"
+        stableProfile = "auto"
         balancedMicroCatchUp = false
         needsStablePrebuffer = true
         queue.clear(); queuedBytes.set(0); applyPlaybackSpeed(1.0f); releaseFocus()
