@@ -22,8 +22,13 @@
         <input id="apiKey" type="password" placeholder="Dán API key của anh">
         <button id="toggleKey" class="ghost" type="button">Hiện</button>
       </div>
-      <label class="check"><input id="rememberKey" type="checkbox" checked> Nhớ key trên máy này</label>
-      <small>Key chỉ lưu trong bộ nhớ của extension, không gửi cho ALAD server.</small>
+      <div class="keyactions">
+        <button id="saveKey" class="secondary" type="button">Lưu API key</button>
+        <button id="clearKey" class="ghost" type="button">Xóa key</button>
+      </div>
+      <div id="keyStatus" class="key-status">Chưa lưu API key</div>
+      <label class="check"><input id="rememberKey" type="checkbox" checked> Nhớ key sau khi đóng trình duyệt</label>
+      <small>Key được lưu trong bộ nhớ extension của trình duyệt, không gửi cho ALAD server.</small>
     </section>
 
     <section class="card">
