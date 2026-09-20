@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "ALAD Universal Browser Bridge",
-  "version": "1.1.0",
-  "description": "Đồng bộ video, phụ đề và trạng thái trình phát web với ALAD Windows v6.1.",
+  "version": "1.2.0",
+  "description": "Đồng bộ video, phụ đề và trạng thái trình phát web với ALAD Windows v7.1.",
   "permissions": ["tabs"],
   "host_permissions": [
     "<all_urls>",
