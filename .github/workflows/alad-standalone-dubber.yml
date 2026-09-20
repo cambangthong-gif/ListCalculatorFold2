@@ -21,7 +21,7 @@ jobs:
           p='alad-standalone-dubber/manifest.json'
           m=json.load(open(p, encoding='utf-8'))
           assert m['manifest_version'] == 3
-          assert m['version'] == '1.0.0'
+          assert m['version'] == '1.1.0'
           assert m['side_panel']['default_path'] == 'sidepanel.html'
           print('manifest ok')
           PY
@@ -39,17 +39,19 @@ jobs:
           grep -q 'videoMetadata' alad-standalone-dubber/background.js
           grep -q 'speechSynthesis' alad-standalone-dubber/content.js
           grep -q 'alad-dub-player-button' alad-standalone-dubber/content.js
+          grep -q 'ALAD_ENSURE_CONTENT' alad-standalone-dubber/background.js
+          grep -q '"scripting"' alad-standalone-dubber/manifest.json
           ! grep -R -q '127.0.0.1' alad-standalone-dubber
 
       - name: Package
         run: |
-          mkdir -p out/ALAD-Dub-Standalone-v1.0
-          cp -R alad-standalone-dubber/* out/ALAD-Dub-Standalone-v1.0/
+          mkdir -p out/ALAD-Dub-Standalone-v1.1
+          cp -R alad-standalone-dubber/* out/ALAD-Dub-Standalone-v1.1/
           cd out
-          zip -r ALAD-Dub-Standalone-v1.0.zip ALAD-Dub-Standalone-v1.0
+          zip -r ALAD-Dub-Standalone-v1.1.zip ALAD-Dub-Standalone-v1.1
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ALAD-Dub-Standalone-v1.0
-          path: out/ALAD-Dub-Standalone-v1.0.zip
+          name: ALAD-Dub-Standalone-v1.1
+          path: out/ALAD-Dub-Standalone-v1.1.zip
           if-no-files-found: error
