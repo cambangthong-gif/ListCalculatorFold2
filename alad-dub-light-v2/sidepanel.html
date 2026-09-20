@@ -1,0 +1,37 @@
+<!doctype html><html lang="vi"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ALAD Dub Lite</title><link rel="stylesheet" href="sidepanel.css"></head>
+<body><main>
+<header><div><h1>ALAD Dub Lite <small>v2</small></h1><p>Caption-first · Gemini TTS · nhẹ máy</p></div><span id="dot"></span></header>
+<section class="card">
+<label>Gemini API key</label><div class="row"><input id="key" type="password" placeholder="API key của anh"><button id="show" class="ghost">Hiện</button></div>
+<label class="check"><input id="remember" type="checkbox" checked> Nhớ key</label>
+</section>
+<section class="card">
+<label>Nguồn phụ đề</label><select id="sourceMode">
+<option value="auto">Tự động · phụ đề trước, AI nếu thiếu</option>
+<option value="captions">Chỉ phụ đề có sẵn · nhẹ nhất</option>
+<option value="ai">Ép AI tạo phụ đề · không cần CC</option>
+</select>
+<label>Ngôn ngữ</label><select id="lang">
+<option value="vi">Tiếng Việt</option><option value="en">English</option>
+<option value="ja">日本語</option><option value="ko">한국어</option>
+<option value="zh">中文</option><option value="th">ไทย</option>
+<option value="id">Bahasa Indonesia</option><option value="fr">Français</option>
+<option value="de">Deutsch</option><option value="es">Español</option>
+</select>
+<label>Giọng Gemini TTS</label><select id="voice">
+<option>Kore</option><option>Aoede</option><option>Charon</option><option>Puck</option>
+<option>Achird</option><option>Sulafat</option><option>Gacrux</option><option>Vindemiatrix</option>
+</select>
+<div class="twocol">
+<div><label>Tiếng gốc <span id="origText"></span></label><input id="orig" type="range" min="0" max="1" step=".05" value=".18"></div>
+<div><label>Giọng dub <span id="dubText"></span></label><input id="dub" type="range" min="0" max="1" step=".05" value="1"></div>
+</div>
+<label class="check"><input id="caps" type="checkbox" checked> Hiện phụ đề song ngữ</label>
+</section>
+<section class="card status"><b id="status">Sẵn sàng</b><span id="detail"></span></section>
+<div class="actions"><button id="start" class="primary">▶ Bắt đầu</button><button id="stop" class="danger">■ Dừng</button></div>
+<button id="clear" class="ghost full">Xóa cache dịch + giọng</button>
+<footer>v2 không quét toàn DOM. YouTube dùng caption track trực tiếp; chỉ dùng AI video khi thiếu phụ đề hoặc anh ép AI.</footer>
+</main><script src="sidepanel.js"></script></body></html>
