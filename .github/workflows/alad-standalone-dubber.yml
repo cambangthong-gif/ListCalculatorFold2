@@ -1,0 +1,55 @@
+name: Package ALAD Dub Standalone
+
+on:
+  push:
+    branches: [ alad-windows-v5-fluent ]
+    paths:
+      - 'alad-standalone-dubber/**'
+      - '.github/workflows/alad-standalone-dubber.yml'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest
+        run: |
+          python - <<'PY'
+          import json
+          p='alad-standalone-dubber/manifest.json'
+          m=json.load(open(p, encoding='utf-8'))
+          assert m['manifest_version'] == 3
+          assert m['version'] == '1.0.0'
+          assert m['side_panel']['default_path'] == 'sidepanel.html'
+          print('manifest ok')
+          PY
+
+      - name: Syntax check JavaScript
+        run: |
+          node --check alad-standalone-dubber/background.js
+          node --check alad-standalone-dubber/content.js
+          node --check alad-standalone-dubber/sidepanel.js
+
+      - name: Verify standalone architecture
+        run: |
+          grep -q 'gemini-3.8-flash:generateContent' alad-standalone-dubber/background.js
+          grep -q 'file_data' alad-standalone-dubber/background.js
+          grep -q 'videoMetadata' alad-standalone-dubber/background.js
+          grep -q 'speechSynthesis' alad-standalone-dubber/content.js
+          grep -q 'alad-dub-player-button' alad-standalone-dubber/content.js
+          ! grep -R -q '127.0.0.1' alad-standalone-dubber
+
+      - name: Package
+        run: |
+          mkdir -p out/ALAD-Dub-Standalone-v1.0
+          cp -R alad-standalone-dubber/* out/ALAD-Dub-Standalone-v1.0/
+          cd out
+          zip -r ALAD-Dub-Standalone-v1.0.zip ALAD-Dub-Standalone-v1.0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Dub-Standalone-v1.0
+          path: out/ALAD-Dub-Standalone-v1.0.zip
+          if-no-files-found: error
