@@ -550,7 +550,7 @@ if ($waitSend -ge 0 -and $waitSend -lt $lgEnd) {
 }
 
 # Dedicated Gemini 3.5 Transcribe Live client. It generates subtitle text only.
-$insertMarker = 'internal sealed class BrowserSyncState'
+$insertMarker = 'internal sealed record BrowserSyncState'
 $transcriberCode = @'
 internal sealed class GeminiTranscriberClient : IAsyncDisposable
 {
