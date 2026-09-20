@@ -406,43 +406,51 @@ $parseMethod = @'
 $c = $c.Substring(0, $parseStart) + $parseMethod + $c.Substring($parseEnd)
 
 # LiveGeminiClient: add a sequential text queue so subtitle segments are dubbed one at a time.
-$lockMarker = @'
-    private readonly SemaphoreSlim sendLock = new(1, 1);
-    private readonly SemaphoreSlim reconnectLock = new(1, 1);
-'@
-$lockReplacement = @'
-    private readonly SemaphoreSlim sendLock = new(1, 1);
-    private readonly SemaphoreSlim reconnectLock = new(1, 1);
+$lgStart = $c.IndexOf('internal sealed class LiveGeminiClient : IAsyncDisposable')
+$lgEnd = $c.IndexOf('internal sealed class ', $lgStart + 40)
+if ($lgStart -lt 0) { throw 'LiveGeminiClient class missing' }
+if ($lgEnd -lt 0) { $lgEnd = $c.Length }
+
+# Queue field: insert immediately before socket state; this is stable across v5.7/v6.2.
+$wsField = $c.IndexOf('    private ClientWebSocket? ws;', $lgStart)
+if ($wsField -lt 0 -or $wsField -gt $lgEnd) { throw 'LiveGemini ws field missing' }
+$queueField = @'
     private readonly Channel<string> subtitleQueue = Channel.CreateBounded<string>(new BoundedChannelOptions(12)
     {
         FullMode = BoundedChannelFullMode.DropOldest,
         SingleReader = true,
         SingleWriter = false
     });
-'@
-if (-not $c.Contains($lockMarker)) { throw 'LiveGemini lock marker missing' }
-$c = $c.Replace($lockMarker, $lockReplacement.TrimEnd())
 
-$taskMarker = '    private Task? sendTask;'
-$taskReplacement = @'
-    private Task? sendTask;
+'@
+$c = $c.Substring(0, $wsField) + $queueField + $c.Substring($wsField)
+
+# Task fields: insert next to sendTask.
+$sendTaskField = $c.IndexOf('    private Task? sendTask;', $lgStart)
+if ($sendTaskField -lt 0) { throw 'LiveGemini sendTask field missing' }
+$sendTaskLineEnd = $c.IndexOf($nl, $sendTaskField)
+if ($sendTaskLineEnd -lt 0) { throw 'LiveGemini sendTask line end missing' }
+$taskFields = @'
     private Task? subtitleTask;
     private TaskCompletionSource<bool>? subtitleTurnDone;
 '@
-if (-not $c.Contains($taskMarker)) { throw 'sendTask field marker missing' }
-$c = $c.Replace($taskMarker, $taskReplacement.TrimEnd())
+$c = $c.Substring(0, $sendTaskLineEnd + $nl.Length) + $taskFields + $c.Substring($sendTaskLineEnd + $nl.Length)
 
-$connectTaskMarker = '        sendTask = Task.Run(() => SendLoop(cts.Token), cts.Token);'
-$connectTaskReplacement = @'
-        sendTask = Task.Run(() => SendLoop(cts.Token), cts.Token);
-        subtitleTask = Task.Run(() => SubtitleLoop(cts.Token), cts.Token);
-'@
-if (-not $c.Contains($connectTaskMarker)) { throw 'send task start marker missing' }
-$c = $c.Replace($connectTaskMarker, $connectTaskReplacement.TrimEnd())
+# Start the subtitle worker after normal audio sender.
+$sendTaskStart = $c.IndexOf('        sendTask = Task.Run(() => SendLoop(cts.Token), cts.Token);', $lgStart)
+if ($sendTaskStart -lt 0) { throw 'LiveGemini sendTask start missing' }
+$sendTaskStartEnd = $c.IndexOf($nl, $sendTaskStart)
+$c = $c.Substring(0, $sendTaskStartEnd + $nl.Length) +
+    '        subtitleTask = Task.Run(() => SubtitleLoop(cts.Token), cts.Token);' + $nl +
+    $c.Substring($sendTaskStartEnd + $nl.Length)
 
-$queueAudioMarker = '    public void QueueAudio(byte[] pcm16k) => sendQueue.Writer.TryWrite(pcm16k);'
+# Add text-turn API + sequential sender immediately after QueueAudio.
+$queueAudioStart = $c.IndexOf('    public void QueueAudio(byte[] pcm16k)', $lgStart)
+if ($queueAudioStart -lt 0) { throw 'LiveGemini QueueAudio missing' }
+$queueAudioEnd = $c.IndexOf($nl, $queueAudioStart)
+if ($queueAudioEnd -lt 0) { throw 'LiveGemini QueueAudio line end missing' }
+
 $subtitleSendCode = @'
-    public void QueueAudio(byte[] pcm16k) => sendQueue.Writer.TryWrite(pcm16k);
 
     public void QueueSubtitleText(string text)
     {
@@ -504,17 +512,15 @@ $subtitleSendCode = @'
         }
     }
 '@
-if (-not $c.Contains($queueAudioMarker)) { throw 'QueueAudio marker missing' }
-$c = $c.Replace($queueAudioMarker, $subtitleSendCode.TrimEnd())
+$c = $c.Substring(0, $queueAudioEnd) + $subtitleSendCode + $c.Substring($queueAudioEnd)
 
-# Server turnComplete unlocks the next subtitle.
-$serverMarker = @'
-            if (!(root.TryGetProperty("serverContent", out var sc) || root.TryGetProperty("server_content", out sc)))
-                return;
-'@
-$serverReplacement = @'
-            if (!(root.TryGetProperty("serverContent", out var sc) || root.TryGetProperty("server_content", out sc)))
-                return;
+# Server turnComplete releases the next subtitle turn. Find the serverContent gate in LiveGemini only.
+$serverGate = $c.IndexOf('            if (!(root.TryGetProperty("serverContent"', $lgStart)
+if ($serverGate -lt 0) { throw 'LiveGemini serverContent gate missing' }
+$serverReturnEnd = $c.IndexOf($nl, $c.IndexOf('                return;', $serverGate))
+if ($serverReturnEnd -lt 0) { throw 'LiveGemini serverContent return missing' }
+
+$turnDoneCode = @'
 
             if ((sc.TryGetProperty("turnComplete", out var turnDone) || sc.TryGetProperty("turn_complete", out turnDone)) &&
                 turnDone.ValueKind == JsonValueKind.True)
@@ -522,12 +528,26 @@ $serverReplacement = @'
                 subtitleTurnDone?.TrySetResult(true);
             }
 '@
-if (-not $c.Contains($serverMarker)) { throw 'serverContent marker missing' }
-$c = $c.Replace($serverMarker, $serverReplacement.TrimEnd())
+$c = $c.Substring(0, $serverReturnEnd + $nl.Length) + $turnDoneCode + $c.Substring($serverReturnEnd + $nl.Length)
 
-# Complete subtitle task on disposal.
-$c = $c.Replace('        sendQueue.Writer.TryComplete();', '        sendQueue.Writer.TryComplete();' + $nl + '        subtitleQueue.Writer.TryComplete();')
-$c = $c.Replace('        try { if (sendTask != null) await sendTask; } catch { }', '        try { if (sendTask != null) await sendTask; } catch { }' + $nl + '        try { if (subtitleTask != null) await subtitleTask; } catch { }')
+# Complete subtitle queue/task in LiveGemini DisposeAsync only.
+$disposeStart = $c.IndexOf('    public async ValueTask DisposeAsync()', $lgStart)
+if ($disposeStart -lt 0) { throw 'LiveGemini DisposeAsync missing' }
+$writerComplete = $c.IndexOf('        sendQueue.Writer.TryComplete();', $disposeStart)
+if ($writerComplete -ge 0 -and $writerComplete -lt $lgEnd) {
+    $writerEnd = $c.IndexOf($nl, $writerComplete)
+    $c = $c.Substring(0, $writerEnd + $nl.Length) +
+        '        subtitleQueue.Writer.TryComplete();' + $nl +
+        $c.Substring($writerEnd + $nl.Length)
+}
+
+$waitSend = $c.IndexOf('        try { if (sendTask != null) await sendTask; } catch { }', $disposeStart)
+if ($waitSend -ge 0 -and $waitSend -lt $lgEnd) {
+    $waitEnd = $c.IndexOf($nl, $waitSend)
+    $c = $c.Substring(0, $waitEnd + $nl.Length) +
+        '        try { if (subtitleTask != null) await subtitleTask; } catch { }' + $nl +
+        $c.Substring($waitEnd + $nl.Length)
+}
 
 # Dedicated Gemini 3.5 Transcribe Live client. It generates subtitle text only.
 $insertMarker = 'internal sealed class BrowserSyncState'
