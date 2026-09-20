@@ -1,0 +1,938 @@
+name: Build VietVoice Bilingual Experimental
+
+on:
+  push:
+    branches: [vietvoice-bilingual-exp]
+    paths:
+      - '.github/workflows/build-vietvoice-bilingual-exp.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/java/com/cambangthong/vietvoicebilingual
+          mkdir -p app/src/main/res/{layout,values,drawable,xml}
+
+          cat > settings.gradle <<'EOF'
+          pluginManagement {
+              repositories { google(); mavenCentral(); gradlePluginPortal() }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories { google(); mavenCentral() }
+          }
+          rootProject.name = 'VietVoiceBilingual'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<'EOF'
+          plugins {
+              id 'com.android.application' version '8.7.3' apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8
+          EOF
+
+          cat > app/build.gradle <<'EOF'
+          plugins { id 'com.android.application' }
+
+          android {
+              namespace 'com.cambangthong.vietvoicebilingual'
+              compileSdk 35
+
+              defaultConfig {
+                  applicationId 'com.cambangthong.vietvoicebilingual'
+                  minSdk 26
+                  targetSdk 35
+                  versionCode 1
+                  versionName '0.1-exp'
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      signingConfig signingConfigs.debug
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'com.google.android.material:material:1.12.0'
+              implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+          }
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">VietVoice Bilingual</string>
+              <string name="tts_engine_name">VietVoice Bilingual</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/colors.xml <<'EOF'
+          <resources>
+              <color name="seed">#6750A4</color>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.VietVoiceBilingual" parent="Theme.Material3.DayNight.NoActionBar">
+                  <item name="colorPrimary">@color/seed</item>
+                  <item name="android:navigationBarColor">?attr/colorSurface</item>
+                  <item name="android:windowLightStatusBar">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/drawable/ic_voice.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+              <path android:fillColor="#6750A4"
+                  android:pathData="M12,3a3,3 0,0 0,-3 3v5a3,3 0,0 0,6 0V6a3,3 0,0 0,-3 -3zM5,11a1,1 0,0 1,2 0a5,5 0,0 0,10 0a1,1 0,0 1,2 0a7,7 0,0 1,-6 6.92V21h3a1,1 0,0 1,0 2H8a1,1 0,0 1,0 -2h3v-3.08A7,7 0,0 1,5 11z"/>
+          </vector>
+          EOF
+
+          cat > app/src/main/res/xml/tts_engine.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <tts-engine xmlns:android="http://schemas.android.com/apk/res/android"
+              android:settingsActivity="com.cambangthong.vietvoicebilingual.MainActivity" />
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <application
+                  android:allowBackup="true"
+                  android:icon="@drawable/ic_voice"
+                  android:label="VietVoice Bilingual"
+                  android:theme="@style/Theme.VietVoiceBilingual"
+                  android:usesCleartextTraffic="false">
+                  <activity android:name=".MainActivity" android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".VietVoiceBilingualService"
+                      android:label="VietVoice Bilingual"
+                      android:permission="android.permission.BIND_TEXT_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.TTS_SERVICE"/>
+                      </intent-filter>
+                      <meta-data android:name="android.speech.tts" android:resource="@xml/tts_engine"/>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/layout/activity_main.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:app="http://schemas.android.com/apk/res-auto"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:fillViewport="true">
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:orientation="vertical"
+                  android:padding="20dp">
+
+                  <TextView
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="VietVoice Bilingual"
+                      android:textAppearance="@style/TextAppearance.Material3.HeadlineMedium"
+                      android:textStyle="bold"/>
+
+                  <TextView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="4dp"
+                      android:text="Experimental · VieNeu v3 Turbo · cùng một giọng cho Việt + English"
+                      android:textAppearance="@style/TextAppearance.Material3.BodyMedium"/>
+
+                  <com.google.android.material.card.MaterialCardView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="18dp"
+                      app:cardCornerRadius="20dp">
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:padding="16dp">
+
+                          <TextView
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:text="1. Mẫu giọng"
+                              android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                              android:textStyle="bold"/>
+
+                          <TextView
+                              android:id="@+id/txtReference"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:text="Chưa có mẫu. Nên dùng 3–5 giây, nói rõ, ít ồn."/>
+
+                          <LinearLayout
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="10dp"
+                              android:orientation="horizontal">
+                              <com.google.android.material.button.MaterialButton
+                                  android:id="@+id/btnRecord"
+                                  android:layout_width="0dp"
+                                  android:layout_height="wrap_content"
+                                  android:layout_weight="1"
+                                  android:text="Ghi âm"
+                                  app:icon="@drawable/ic_voice"/>
+                              <com.google.android.material.button.MaterialButton
+                                  android:id="@+id/btnPick"
+                                  android:layout_width="0dp"
+                                  android:layout_height="wrap_content"
+                                  android:layout_marginStart="8dp"
+                                  android:layout_weight="1"
+                                  android:text="Chọn file"/>
+                          </LinearLayout>
+
+                          <com.google.android.material.button.MaterialButton
+                              android:id="@+id/btnPreview"
+                              style="@style/Widget.Material3.Button.OutlinedButton"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:text="Nghe mẫu"
+                              android:enabled="false"/>
+                      </LinearLayout>
+                  </com.google.android.material.card.MaterialCardView>
+
+                  <com.google.android.material.card.MaterialCardView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="14dp"
+                      app:cardCornerRadius="20dp">
+                      <LinearLayout
+                          android:layout_width="match_parent"
+                          android:layout_height="wrap_content"
+                          android:orientation="vertical"
+                          android:padding="16dp">
+
+                          <TextView
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:text="2. Kiểm tra Việt–Anh"
+                              android:textAppearance="@style/TextAppearance.Material3.TitleMedium"
+                              android:textStyle="bold"/>
+
+                          <com.google.android.material.textfield.TextInputLayout
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:hint="Câu thử">
+                              <com.google.android.material.textfield.TextInputEditText
+                                  android:id="@+id/editTest"
+                                  android:layout_width="match_parent"
+                                  android:layout_height="120dp"
+                                  android:gravity="top|start"
+                                  android:inputType="textMultiLine"
+                                  android:text="Tôi đang dùng Photoshop trên Windows 11 với NVIDIA GPU, and it should keep the same voice."/>
+                          </com.google.android.material.textfield.TextInputLayout>
+
+                          <CheckBox
+                              android:id="@+id/checkConsent"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:text="Tôi có quyền sử dụng mẫu giọng này và đồng ý gửi mẫu + văn bản đến public VieNeu Hugging Face Space để tổng hợp." />
+
+                          <com.google.android.material.button.MaterialButton
+                              android:id="@+id/btnTest"
+                              android:layout_width="match_parent"
+                              android:layout_height="56dp"
+                              android:layout_marginTop="8dp"
+                              android:text="Nghe thử bằng TTS engine"/>
+
+                          <ProgressBar
+                              android:id="@+id/progress"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:indeterminate="true"
+                              android:visibility="gone"/>
+
+                          <TextView
+                              android:id="@+id/txtStatus"
+                              android:layout_width="match_parent"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="8dp"
+                              android:text="Sẵn sàng"/>
+                      </LinearLayout>
+                  </com.google.android.material.card.MaterialCardView>
+
+                  <com.google.android.material.button.MaterialButton
+                      android:id="@+id/btnTtsSettings"
+                      style="@style/Widget.Material3.Button.OutlinedButton"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="14dp"
+                      android:text="Mở cài đặt Text-to-Speech"/>
+
+                  <TextView
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:layout_marginTop="14dp"
+                      android:layout_marginBottom="24dp"
+                      android:text="Lưu ý: đây là bản thử nghiệm miễn phí qua mạng. Public Space có thể có hàng chờ/rate limit và phía Space có thể ghi log nội dung yêu cầu. Không dùng cho dữ liệu nhạy cảm. Mẫu giọng chỉ nên là giọng của bạn hoặc người đã đồng ý."
+                      android:textAppearance="@style/TextAppearance.Material3.BodySmall"/>
+              </LinearLayout>
+          </ScrollView>
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/AppPrefs.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import java.io.File;
+
+          final class AppPrefs {
+              private static final String PREF = "vietvoice_bilingual";
+              private static final String KEY_CONSENT = "consent";
+              private AppPrefs() {}
+              static SharedPreferences p(Context c) { return c.getSharedPreferences(PREF, Context.MODE_PRIVATE); }
+              static boolean consent(Context c) { return p(c).getBoolean(KEY_CONSENT, false); }
+              static void setConsent(Context c, boolean v) { p(c).edit().putBoolean(KEY_CONSENT, v).apply(); }
+              static File ref(Context c) { return new File(c.getFilesDir(), "reference.wav"); }
+          }
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/WavRecorder.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import android.media.AudioFormat;
+          import android.media.AudioRecord;
+          import android.media.MediaRecorder;
+          import java.io.*;
+          import java.util.concurrent.atomic.AtomicBoolean;
+
+          final class WavRecorder {
+              private static final int SR = 16000;
+              private final AtomicBoolean running = new AtomicBoolean(false);
+              private AudioRecord recorder;
+              private Thread thread;
+              private File wav;
+
+              boolean isRecording() { return running.get(); }
+
+              void start(File out) throws IOException {
+                  if (running.get()) return;
+                  int min = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                  int buffer = Math.max(min * 2, 4096);
+                  recorder = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SR,
+                          AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, buffer);
+                  if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IOException("Không mở được microphone");
+                  wav = out;
+                  running.set(true);
+                  recorder.startRecording();
+                  thread = new Thread(() -> loop(buffer), "ref-recorder");
+                  thread.start();
+              }
+
+              void stop() {
+                  if (!running.getAndSet(false)) return;
+                  try { recorder.stop(); } catch (Exception ignored) {}
+                  try { thread.join(2000); } catch (Exception ignored) {}
+                  try { recorder.release(); } catch (Exception ignored) {}
+                  recorder = null;
+              }
+
+              private void loop(int bufferSize) {
+                  File pcm = new File(wav.getParentFile(), "reference.pcm");
+                  long bytes = 0;
+                  try (FileOutputStream out = new FileOutputStream(pcm)) {
+                      byte[] b = new byte[bufferSize];
+                      while (running.get()) {
+                          int n = recorder.read(b, 0, b.length);
+                          if (n > 0) { out.write(b, 0, n); bytes += n; }
+                      }
+                  } catch (Exception ignored) {}
+                  try { writeWav(pcm, wav, bytes); } catch (Exception ignored) {}
+                  //noinspection ResultOfMethodCallIgnored
+                  pcm.delete();
+              }
+
+              private static void writeWav(File pcm, File wav, long dataLen) throws IOException {
+                  try (DataOutputStream o = new DataOutputStream(new FileOutputStream(wav));
+                       FileInputStream in = new FileInputStream(pcm)) {
+                      ascii(o, "RIFF"); le32(o, 36 + dataLen); ascii(o, "WAVE");
+                      ascii(o, "fmt "); le32(o, 16); le16(o, 1); le16(o, 1);
+                      le32(o, SR); le32(o, SR * 2L); le16(o, 2); le16(o, 16);
+                      ascii(o, "data"); le32(o, dataLen);
+                      byte[] buf = new byte[8192]; int n;
+                      while ((n = in.read(buf)) > 0) o.write(buf, 0, n);
+                  }
+              }
+              private static void ascii(DataOutputStream o, String s) throws IOException { o.writeBytes(s); }
+              private static void le16(DataOutputStream o, long v) throws IOException {
+                  o.writeByte((int)(v & 255)); o.writeByte((int)((v >> 8) & 255));
+              }
+              private static void le32(DataOutputStream o, long v) throws IOException {
+                  o.writeByte((int)(v & 255)); o.writeByte((int)((v >> 8) & 255));
+                  o.writeByte((int)((v >> 16) & 255)); o.writeByte((int)((v >> 24) & 255));
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/WavData.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import java.io.IOException;
+          import java.nio.ByteBuffer;
+          import java.nio.ByteOrder;
+          import java.util.Arrays;
+
+          final class WavData {
+              final int sampleRate, channels;
+              final byte[] pcm16;
+              WavData(int sr, int ch, byte[] pcm) { sampleRate = sr; channels = ch; pcm16 = pcm; }
+
+              static WavData parse(byte[] wav) throws IOException {
+                  if (wav.length < 44 || !tag(wav,0,"RIFF") || !tag(wav,8,"WAVE"))
+                      throw new IOException("Audio trả về không phải WAV");
+                  int pos = 12, audioFormat = 1, channels = 1, sampleRate = 48000, bits = 16;
+                  int dataPos = -1, dataLen = -1;
+                  while (pos + 8 <= wav.length) {
+                      String id = new String(wav, pos, 4, java.nio.charset.StandardCharsets.US_ASCII);
+                      int len = le32(wav, pos + 4);
+                      int body = pos + 8;
+                      if (body + len > wav.length) len = wav.length - body;
+                      if ("fmt ".equals(id) && len >= 16) {
+                          audioFormat = le16(wav, body);
+                          channels = le16(wav, body + 2);
+                          sampleRate = le32(wav, body + 4);
+                          bits = le16(wav, body + 14);
+                      } else if ("data".equals(id)) {
+                          dataPos = body; dataLen = len; break;
+                      }
+                      pos = body + len + (len & 1);
+                  }
+                  if (dataPos < 0) throw new IOException("WAV không có data chunk");
+                  byte[] raw = Arrays.copyOfRange(wav, dataPos, dataPos + dataLen);
+                  if (audioFormat == 1 && bits == 16) return new WavData(sampleRate, channels, raw);
+                  if (audioFormat == 3 && bits == 32) {
+                      ByteBuffer in = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN);
+                      ByteBuffer out = ByteBuffer.allocate((raw.length / 4) * 2).order(ByteOrder.LITTLE_ENDIAN);
+                      while (in.remaining() >= 4) {
+                          float f = Math.max(-1f, Math.min(1f, in.getFloat()));
+                          out.putShort((short)Math.round(f * 32767f));
+                      }
+                      return new WavData(sampleRate, channels, out.array());
+                  }
+                  throw new IOException("WAV format chưa hỗ trợ: format=" + audioFormat + ", bits=" + bits);
+              }
+
+              private static boolean tag(byte[] b, int p, String s) {
+                  if (p + 4 > b.length) return false;
+                  for (int i=0;i<4;i++) if (b[p+i] != (byte)s.charAt(i)) return false;
+                  return true;
+              }
+              private static int le16(byte[] b,int p){ return (b[p]&255)|((b[p+1]&255)<<8); }
+              private static int le32(byte[] b,int p){ return (b[p]&255)|((b[p+1]&255)<<8)|((b[p+2]&255)<<16)|((b[p+3]&255)<<24); }
+          }
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/VieNeuSpaceClient.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import okhttp3.*;
+          import org.json.*;
+          import java.io.*;
+          import java.net.URLEncoder;
+          import java.nio.charset.StandardCharsets;
+          import java.util.Iterator;
+          import java.util.concurrent.TimeUnit;
+
+          final class VieNeuSpaceClient {
+              private static final String BASE = "https://pnnbao-ump-vieneu-tts-v3-turbo.hf.space";
+              private final OkHttpClient http = new OkHttpClient.Builder()
+                      .connectTimeout(35, TimeUnit.SECONDS)
+                      .readTimeout(12, TimeUnit.MINUTES)
+                      .writeTimeout(3, TimeUnit.MINUTES)
+                      .callTimeout(15, TimeUnit.MINUTES)
+                      .build();
+
+              private String endpoint;
+              private File cachedRefFile;
+              private long cachedRefLength;
+              private long cachedRefMtime;
+              private JSONObject cachedRemoteRef;
+
+              synchronized byte[] synthesize(String text, File ref) throws Exception {
+                  if (text == null || text.trim().isEmpty()) throw new IOException("Văn bản trống");
+                  JSONObject remoteRef = ensureUploaded(ref);
+                  String ep = endpoint != null ? endpoint : discoverEndpoint();
+                  endpoint = ep;
+
+                  JSONArray data = new JSONArray()
+                          .put(text.trim())
+                          .put("Phạm Tuyên")
+                          .put(remoteRef)
+                          .put(0.8)
+                          .put(25)
+                          .put(0.95)
+                          .put(1.2)
+                          .put(300)
+                          .put(256);
+
+                  JSONObject req = new JSONObject().put("data", data);
+                  Request call = jsonPost(BASE + "/gradio_api/call/" + ep, req);
+                  String eventId;
+                  try (Response r = http.newCall(call).execute()) {
+                      if (!r.isSuccessful()) {
+                          endpoint = discoverEndpoint();
+                          try (Response r2 = http.newCall(jsonPost(BASE + "/gradio_api/call/" + endpoint, req)).execute()) {
+                              if (!r2.isSuccessful()) throw new IOException("VieNeu call HTTP " + r2.code());
+                              eventId = new JSONObject(requireBody(r2)).optString("event_id");
+                          }
+                      } else eventId = new JSONObject(requireBody(r)).optString("event_id");
+                  }
+                  if (eventId == null || eventId.isEmpty()) throw new IOException("VieNeu không trả event_id");
+
+                  Request eventReq = new Request.Builder()
+                          .url(BASE + "/gradio_api/call/" + endpoint + "/" + eventId)
+                          .header("Accept", "text/event-stream")
+                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .build();
+                  String sse;
+                  try (Response r = http.newCall(eventReq).execute()) {
+                      if (!r.isSuccessful()) throw new IOException("VieNeu queue HTTP " + r.code());
+                      sse = requireBody(r);
+                  }
+                  JSONArray result = parseCompleteData(sse);
+                  String audioUrl = findAudioUrl(result);
+                  if (audioUrl == null) throw new IOException("VieNeu không trả file audio");
+                  if (audioUrl.startsWith("/")) audioUrl = BASE + audioUrl;
+
+                  Request audioReq = new Request.Builder().url(audioUrl)
+                          .header("User-Agent", "VietVoice-Bilingual/0.1").build();
+                  try (Response r = http.newCall(audioReq).execute()) {
+                      if (!r.isSuccessful()) throw new IOException("Tải audio HTTP " + r.code());
+                      ResponseBody body = r.body();
+                      if (body == null) throw new IOException("Audio rỗng");
+                      return body.bytes();
+                  }
+              }
+
+              private synchronized JSONObject ensureUploaded(File ref) throws Exception {
+                  if (ref == null || !ref.isFile() || ref.length() < 1000) throw new IOException("Chưa có mẫu giọng");
+                  if (cachedRemoteRef != null && ref.equals(cachedRefFile) &&
+                          ref.length() == cachedRefLength && ref.lastModified() == cachedRefMtime) return cachedRemoteRef;
+
+                  RequestBody fileBody = RequestBody.create(ref, MediaType.parse("audio/wav"));
+                  MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
+                          .addFormDataPart("files", "reference.wav", fileBody).build();
+                  Request request = new Request.Builder().url(BASE + "/gradio_api/upload")
+                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .post(body).build();
+
+                  try (Response r = http.newCall(request).execute()) {
+                      if (!r.isSuccessful()) throw new IOException("Upload mẫu giọng HTTP " + r.code());
+                      JSONArray a = new JSONArray(requireBody(r));
+                      if (a.length() == 0) throw new IOException("Upload không trả đường dẫn");
+                      Object first = a.get(0);
+                      JSONObject fd;
+                      if (first instanceof JSONObject) {
+                          fd = (JSONObject) first;
+                          if (!fd.has("meta")) fd.put("meta", new JSONObject().put("_type", "gradio.FileData"));
+                      } else {
+                          String path = String.valueOf(first);
+                          fd = new JSONObject()
+                                  .put("path", path)
+                                  .put("orig_name", "reference.wav")
+                                  .put("size", ref.length())
+                                  .put("mime_type", "audio/wav")
+                                  .put("meta", new JSONObject().put("_type", "gradio.FileData"));
+                      }
+                      cachedRefFile = ref; cachedRefLength = ref.length(); cachedRefMtime = ref.lastModified();
+                      cachedRemoteRef = fd;
+                      return fd;
+                  }
+              }
+
+              private String discoverEndpoint() {
+                  for (String p : new String[]{"/gradio_api/info", "/info"}) {
+                      try (Response r = http.newCall(new Request.Builder().url(BASE + p)
+                              .header("User-Agent", "VietVoice-Bilingual/0.1").get().build()).execute()) {
+                          if (!r.isSuccessful()) continue;
+                          JSONObject root = new JSONObject(requireBody(r));
+                          JSONObject named = root.optJSONObject("named_endpoints");
+                          if (named == null) continue;
+                          Iterator<String> it = named.keys();
+                          String fallback = null;
+                          while (it.hasNext()) {
+                              String k = it.next();
+                              String clean = k.startsWith("/") ? k.substring(1) : k;
+                              if (fallback == null) fallback = clean;
+                              if (clean.toLowerCase().contains("synthesize")) return clean;
+                          }
+                          if (fallback != null) return fallback;
+                      } catch (Exception ignored) {}
+                  }
+                  return "synthesize";
+              }
+
+              private static JSONArray parseCompleteData(String sse) throws Exception {
+                  String[] lines = sse.split("\\n");
+                  String lastData = null;
+                  String event = null;
+                  for (String line : lines) {
+                      if (line.startsWith("event:")) event = line.substring(6).trim();
+                      if (line.startsWith("data:")) {
+                          String d = line.substring(5).trim();
+                          if ("error".equals(event)) throw new IOException("VieNeu Space báo lỗi: " + d);
+                          lastData = d;
+                          if ("complete".equals(event)) return new JSONArray(d);
+                      }
+                  }
+                  if (lastData != null) return new JSONArray(lastData);
+                  throw new IOException("Không đọc được kết quả từ hàng chờ VieNeu");
+              }
+
+              private static String findAudioUrl(Object node) throws JSONException {
+                  if (node == null || node == JSONObject.NULL) return null;
+                  if (node instanceof JSONObject) {
+                      JSONObject o = (JSONObject) node;
+                      String url = o.optString("url", null);
+                      if (url != null && !url.isEmpty()) return url;
+                      String path = o.optString("path", null);
+                      if (path != null && (path.endsWith(".wav") || path.endsWith(".mp3") || path.endsWith(".flac"))) {
+                          return BASE + "/gradio_api/file=" + URLEncoder.encode(path, StandardCharsets.UTF_8).replace("+", "%20");
+                      }
+                      Iterator<String> it = o.keys();
+                      while (it.hasNext()) {
+                          String v = findAudioUrl(o.opt(it.next()));
+                          if (v != null) return v;
+                      }
+                  } else if (node instanceof JSONArray) {
+                      JSONArray a = (JSONArray) node;
+                      for (int i=0;i<a.length();i++) {
+                          String v = findAudioUrl(a.opt(i));
+                          if (v != null) return v;
+                      }
+                  } else if (node instanceof String) {
+                      String s = (String)node;
+                      if (s.startsWith("http") && (s.contains(".wav") || s.contains("file="))) return s;
+                  }
+                  return null;
+              }
+
+              private static Request jsonPost(String url, JSONObject o) {
+                  return new Request.Builder().url(url)
+                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .post(RequestBody.create(o.toString(), MediaType.parse("application/json; charset=utf-8"))).build();
+              }
+
+              private static String requireBody(Response r) throws IOException {
+                  ResponseBody b = r.body();
+                  if (b == null) throw new IOException("HTTP body rỗng");
+                  return b.string();
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/VietVoiceBilingualService.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import android.media.AudioFormat;
+          import android.speech.tts.SynthesisCallback;
+          import android.speech.tts.SynthesisRequest;
+          import android.speech.tts.TextToSpeech;
+          import android.speech.tts.TextToSpeechService;
+          import java.io.File;
+          import java.util.Locale;
+          import java.util.concurrent.atomic.AtomicBoolean;
+
+          public class VietVoiceBilingualService extends TextToSpeechService {
+              private VieNeuSpaceClient client;
+              private final AtomicBoolean stopped = new AtomicBoolean(false);
+
+              @Override public void onCreate() {
+                  super.onCreate();
+                  client = new VieNeuSpaceClient();
+              }
+
+              @Override protected String[] onGetLanguage() {
+                  return new String[]{"vi", "VN", ""};
+              }
+
+              @Override protected int onIsLanguageAvailable(String lang, String country, String variant) {
+                  if (lang == null) return TextToSpeech.LANG_NOT_SUPPORTED;
+                  String l = lang.toLowerCase(Locale.ROOT);
+                  if ("vi".equals(l) || "vie".equals(l) || "en".equals(l) || "eng".equals(l))
+                      return TextToSpeech.LANG_AVAILABLE;
+                  return TextToSpeech.LANG_NOT_SUPPORTED;
+              }
+
+              @Override protected int onLoadLanguage(String lang, String country, String variant) {
+                  return onIsLanguageAvailable(lang, country, variant);
+              }
+
+              @Override protected void onStop() {
+                  stopped.set(true);
+              }
+
+              @Override protected void onSynthesizeText(SynthesisRequest request, SynthesisCallback callback) {
+                  stopped.set(false);
+                  if (!AppPrefs.consent(this)) { callback.error(); return; }
+                  File ref = AppPrefs.ref(this);
+                  if (!ref.isFile()) { callback.error(); return; }
+                  try {
+                      byte[] wav = client.synthesize(request.getCharSequenceText().toString(), ref);
+                      if (stopped.get()) { callback.error(); return; }
+                      WavData data = WavData.parse(wav);
+                      int channels = Math.max(1, Math.min(2, data.channels));
+                      int ok = callback.start(data.sampleRate, AudioFormat.ENCODING_PCM_16BIT, channels);
+                      if (ok != TextToSpeech.SUCCESS) { callback.error(); return; }
+                      int max = Math.max(1024, Math.min(8192, callback.getMaxBufferSize()));
+                      int off = 0;
+                      while (off < data.pcm16.length && !stopped.get()) {
+                          int n = Math.min(max, data.pcm16.length - off);
+                          int r = callback.audioAvailable(data.pcm16, off, n);
+                          if (r != TextToSpeech.SUCCESS) { callback.error(); return; }
+                          off += n;
+                      }
+                      if (stopped.get()) callback.error(); else callback.done();
+                  } catch (Throwable t) {
+                      callback.error();
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/cambangthong/vietvoicebilingual/MainActivity.java <<'EOF'
+          package com.cambangthong.vietvoicebilingual;
+
+          import android.Manifest;
+          import android.content.*;
+          import android.content.pm.PackageManager;
+          import android.media.MediaPlayer;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.provider.Settings;
+          import android.speech.tts.TextToSpeech;
+          import android.view.View;
+          import android.widget.*;
+          import androidx.annotation.Nullable;
+          import androidx.appcompat.app.AppCompatActivity;
+          import androidx.core.app.ActivityCompat;
+          import java.io.*;
+
+          public class MainActivity extends AppCompatActivity {
+              private static final int REQ_PICK = 20, REQ_MIC = 21;
+              private TextView txtReference, txtStatus;
+              private Button btnRecord, btnPick, btnPreview, btnTest, btnTtsSettings;
+              private CheckBox checkConsent;
+              private EditText editTest;
+              private ProgressBar progress;
+              private final WavRecorder recorder = new WavRecorder();
+              private MediaPlayer player;
+              private TextToSpeech tts;
+
+              @Override protected void onCreate(Bundle b) {
+                  super.onCreate(b);
+                  setContentView(com.cambangthong.vietvoicebilingual.R.layout.activity_main);
+                  txtReference = findViewById(R.id.txtReference);
+                  txtStatus = findViewById(R.id.txtStatus);
+                  btnRecord = findViewById(R.id.btnRecord);
+                  btnPick = findViewById(R.id.btnPick);
+                  btnPreview = findViewById(R.id.btnPreview);
+                  btnTest = findViewById(R.id.btnTest);
+                  btnTtsSettings = findViewById(R.id.btnTtsSettings);
+                  checkConsent = findViewById(R.id.checkConsent);
+                  editTest = findViewById(R.id.editTest);
+                  progress = findViewById(R.id.progress);
+
+                  checkConsent.setChecked(AppPrefs.consent(this));
+                  checkConsent.setOnCheckedChangeListener((v, checked) -> AppPrefs.setConsent(this, checked));
+                  btnPick.setOnClickListener(v -> pick());
+                  btnRecord.setOnClickListener(v -> toggleRecord());
+                  btnPreview.setOnClickListener(v -> preview());
+                  btnTest.setOnClickListener(v -> testTts());
+                  btnTtsSettings.setOnClickListener(v -> {
+                      try { startActivity(new Intent(Settings.ACTION_TTS_SETTINGS)); }
+                      catch (Exception e) { toast("Không mở được cài đặt TTS"); }
+                  });
+                  updateRefUi();
+              }
+
+              private void pick() {
+                  Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                  i.addCategory(Intent.CATEGORY_OPENABLE);
+                  i.setType("audio/*");
+                  startActivityForResult(i, REQ_PICK);
+              }
+
+              private void toggleRecord() {
+                  if (recorder.isRecording()) {
+                      recorder.stop();
+                      btnRecord.setText("Ghi âm");
+                      txtStatus.setText("Đã lưu mẫu ghi âm.");
+                      updateRefUi();
+                      return;
+                  }
+                  if (ActivityCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC);
+                      return;
+                  }
+                  try {
+                      File f = AppPrefs.ref(this);
+                      recorder.start(f);
+                      btnRecord.setText("Dừng ghi");
+                      txtStatus.setText("Đang ghi… dừng sau khoảng 3–5 giây.");
+                  } catch (Exception e) { toast(e.getMessage()); }
+              }
+
+              @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
+                  super.onRequestPermissionsResult(requestCode, permissions, grants);
+                  if (requestCode == REQ_MIC && grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) toggleRecord();
+              }
+
+              @Override protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+                  super.onActivityResult(requestCode, resultCode, data);
+                  if (requestCode == REQ_PICK && resultCode == RESULT_OK && data != null && data.getData() != null) {
+                      Uri uri = data.getData();
+                      progress.setVisibility(View.VISIBLE);
+                      txtStatus.setText("Đang chép mẫu giọng…");
+                      new Thread(() -> {
+                          try (InputStream in = getContentResolver().openInputStream(uri);
+                               FileOutputStream out = new FileOutputStream(AppPrefs.ref(this))) {
+                              if (in == null) throw new IOException("Không mở được file");
+                              byte[] buf = new byte[8192]; int n;
+                              while ((n = in.read(buf)) > 0) out.write(buf,0,n);
+                              runOnUiThread(() -> { progress.setVisibility(View.GONE); txtStatus.setText("Đã lưu mẫu giọng."); updateRefUi(); });
+                          } catch (Exception e) {
+                              runOnUiThread(() -> { progress.setVisibility(View.GONE); toast("Lỗi: " + e.getMessage()); });
+                          }
+                      }).start();
+                  }
+              }
+
+              private void updateRefUi() {
+                  File f = AppPrefs.ref(this);
+                  if (f.isFile()) {
+                      txtReference.setText("Đã có mẫu: reference.wav · " + (f.length()/1024) + " KB");
+                      btnPreview.setEnabled(true);
+                  } else {
+                      txtReference.setText("Chưa có mẫu. Nên dùng 3–5 giây, nói rõ, ít ồn.");
+                      btnPreview.setEnabled(false);
+                  }
+              }
+
+              private void preview() {
+                  try {
+                      if (player != null) { player.release(); player = null; }
+                      player = new MediaPlayer();
+                      player.setDataSource(AppPrefs.ref(this).getAbsolutePath());
+                      player.prepare();
+                      player.start();
+                  } catch (Exception e) { toast("Không phát được mẫu: " + e.getMessage()); }
+              }
+
+              private void testTts() {
+                  if (!checkConsent.isChecked()) { toast("Cần bật ô đồng ý trước."); return; }
+                  if (!AppPrefs.ref(this).isFile()) { toast("Hãy chọn hoặc ghi mẫu giọng trước."); return; }
+                  String s = editTest.getText().toString().trim();
+                  if (s.isEmpty()) return;
+                  progress.setVisibility(View.VISIBLE);
+                  txtStatus.setText("Đang gọi VieNeu… public ZeroGPU có thể phải chờ.");
+                  if (tts != null) { try { tts.shutdown(); } catch (Exception ignored) {} }
+                  tts = new TextToSpeech(this, status -> {
+                      if (status == TextToSpeech.SUCCESS) {
+                          txtStatus.setText("Đang tổng hợp. Nếu chưa nghe ngay, chờ hàng ZeroGPU.");
+                          tts.speak(s, TextToSpeech.QUEUE_FLUSH, null, "mixed-test");
+                      } else {
+                          progress.setVisibility(View.GONE);
+                          txtStatus.setText("Không khởi tạo được VietVoice Bilingual TTS.");
+                      }
+                  }, getPackageName());
+                  // progress is only a coarse indicator; synthesis callback belongs to Android TTS service.
+                  progress.postDelayed(() -> progress.setVisibility(View.GONE), 45000);
+              }
+
+              private void toast(String s) { Toast.makeText(this, s == null ? "Có lỗi" : s, Toast.LENGTH_LONG).show(); }
+
+              @Override protected void onDestroy() {
+                  if (recorder.isRecording()) recorder.stop();
+                  if (player != null) player.release();
+                  if (tts != null) tts.shutdown();
+                  super.onDestroy();
+              }
+          }
+          EOF
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle wrapper --gradle-version 8.10.2
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon -x lint -x test --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find app/build/outputs/apk/release -type f -name '*.apk' | head -n1)"
+          test -n "$APK"
+          BT="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          "$BT/apksigner" verify --verbose "$APK"
+          "$BT/aapt" dump badging "$APK" | tee badging.txt
+          grep -q "package: name='com.cambangthong.vietvoicebilingual'" badging.txt
+          grep -q "application-label:'VietVoice Bilingual'" badging.txt
+          cp "$APK" VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
+          sha256sum VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk | tee SHA256.txt
+          ls -lh VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VietVoice-Bilingual-Experimental-v0.1-ZFold6
+          path: |
+            VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
+            SHA256.txt
+            badging.txt
+          if-no-files-found: error
