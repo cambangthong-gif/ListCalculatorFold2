@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 
-# v7 keeps the known-good v5.7 audio core via v6.2 Safe Browser Sync.
+# v7 subtitle-first build: keep the known-good v5.7 audio core via v6.2 Safe Browser Sync.
 # Subtitle Dubbing is a separate path; Live Audio remains untouched.
 & "$PSScriptRoot/patch-alad-windows-v6_2-safe-browser-sync.ps1"
 
