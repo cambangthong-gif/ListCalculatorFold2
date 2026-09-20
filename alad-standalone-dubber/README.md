@@ -1,4 +1,4 @@
-# ALAD Dub Standalone v1.1
+# ALAD Dub Standalone v1.2
 
 Extension độc lập, không cần ALAD Windows hay localhost bridge.
 
@@ -42,3 +42,13 @@ API key được lưu bằng `chrome.storage.local` nếu bật “Nhớ key”,
 - Side Panel tự kiểm tra content script trước khi gửi lệnh.
 - Nếu tab đã mở từ trước lúc cài/update extension, ALAD tự inject `content.js` + `content.css`, không còn lỗi `Receiving end does not exist`.
 - Với các trang `chrome://`, Chrome Web Store và trang nội bộ trình duyệt, Chrome không cho extension inject; hãy mở trang video http/https.
+
+
+## Sửa ở v1.2
+
+- Có nút **Lưu API key** riêng.
+- Nếu bật **Nhớ key sau khi đóng trình duyệt**, key lưu bằng `chrome.storage.local`.
+- Mở lại Side Panel sẽ hiện trạng thái **API key đã lưu trên máy này** thay vì để người dùng tưởng key đã mất.
+- Ô key không hiển thị lại giá trị thật để tránh lộ key; để trống ô và bấm Start vẫn dùng key đã lưu.
+- Có nút **Xóa key** riêng.
+- Nếu đổi tùy chọn Nhớ key, ALAD tự chuyển key giữa session/local storage mà không cần nhập lại.
