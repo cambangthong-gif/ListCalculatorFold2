@@ -46,6 +46,59 @@ function updateNumbers() {
   $("rateText").textContent = Number($("voiceRate").value).toFixed(2) + "×";
 }
 
+function showKeyStatus(hasKey, storage) {
+  const el = $("keyStatus");
+  el.classList.remove("saved", "session");
+
+  if (!hasKey) {
+    el.textContent = "Chưa lưu API key";
+    $("apiKey").placeholder = "Dán API key của anh";
+    return;
+  }
+
+  if (storage === "local") {
+    el.textContent = "✓ API key đã lưu trên máy này";
+    el.classList.add("saved");
+    $("rememberKey").checked = true;
+  } else {
+    el.textContent = "✓ API key đã lưu cho phiên trình duyệt này";
+    el.classList.add("session");
+    $("rememberKey").checked = false;
+  }
+
+  $("apiKey").value = "";
+  $("apiKey").placeholder = "••••••••••••  (đang dùng key đã lưu)";
+}
+
+async function saveKeyOnly() {
+  const key = $("apiKey").value.trim();
+  if (!key) {
+    const cfg = await chrome.runtime.sendMessage({ type: "ALAD_GET_CONFIG" });
+    if (cfg?.hasKey) {
+      showKeyStatus(true, cfg.keyStorage);
+      $("statusTitle").textContent = "API key đã có";
+      $("statusDetail").textContent = cfg.keyStorage === "local"
+        ? "Đã lưu lâu dài trên trình duyệt."
+        : "Đang lưu trong phiên hiện tại.";
+      return;
+    }
+    throw new Error("Chưa nhập API key.");
+  }
+
+  const res = await chrome.runtime.sendMessage({
+    type: "ALAD_SAVE_KEY",
+    apiKey: key,
+    rememberKey: $("rememberKey").checked
+  });
+  if (!res?.ok) throw new Error(res?.error || "Không lưu được API key.");
+
+  showKeyStatus(res.hasKey, res.keyStorage);
+  $("statusTitle").textContent = "Đã lưu API key";
+  $("statusDetail").textContent = res.keyStorage === "local"
+    ? "Key vẫn còn sau khi đóng/mở lại trình duyệt."
+    : "Key chỉ tồn tại trong phiên trình duyệt này.";
+}
+
 async function loadVoices() {
   if (!activeTab?.id) return;
   try {
@@ -67,6 +120,7 @@ async function loadVoices() {
 async function init() {
   const cfg = await chrome.runtime.sendMessage({ type: "ALAD_GET_CONFIG" });
   if (cfg?.settings) {
+    showKeyStatus(!!cfg.hasKey, cfg.keyStorage || "none");
     const s = cfg.settings;
     $("targetLanguage").value = s.targetLanguage || "vi";
     $("voiceName").dataset.saved = s.voiceName || "";
@@ -108,6 +162,8 @@ async function saveConfig() {
     settings: values()
   });
   if (!res?.ok) throw new Error(res?.error || "Không lưu được cài đặt");
+  showKeyStatus(!!res.hasKey, res.keyStorage || "none");
+  if (!res.hasKey) throw new Error("Chưa có Gemini API key. Hãy nhập key rồi bấm Lưu API key.");
 }
 
 async function start() {
@@ -161,6 +217,23 @@ chrome.runtime.onMessage.addListener(msg => {
 
 $("start").addEventListener("click", start);
 $("stop").addEventListener("click", stop);
+$("saveKey").addEventListener("click", async () => {
+  try {
+    await saveKeyOnly();
+  } catch (e) {
+    $("statusTitle").textContent = "Lỗi lưu API key";
+    $("statusDetail").textContent = e?.message || String(e);
+  }
+});
+$("clearKey").addEventListener("click", async () => {
+  const r = await chrome.runtime.sendMessage({ type: "ALAD_CLEAR_KEY" });
+  if (r?.ok) {
+    $("apiKey").value = "";
+    showKeyStatus(false, "none");
+    $("statusTitle").textContent = "Đã xóa API key";
+    $("statusDetail").textContent = "";
+  }
+});
 $("clearCache").addEventListener("click", async () => {
   const r = await chrome.runtime.sendMessage({ type: "ALAD_CLEAR_CACHE" });
   $("statusTitle").textContent = "Đã xóa cache";
