@@ -1,0 +1,55 @@
+name: Package ALAD Dub Lite v2
+
+on:
+  push:
+    branches: [ alad-windows-v5-fluent ]
+    paths:
+      - 'alad-dub-light-v2/**'
+      - '.github/workflows/alad-dub-light-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest
+        run: |
+          python - <<'PY'
+          import json
+          m=json.load(open('alad-dub-light-v2/manifest.json',encoding='utf-8'))
+          assert m['manifest_version']==3
+          assert m['version']=='2.0.0'
+          assert 'scripting' in m['permissions']
+          print('manifest ok')
+          PY
+
+      - name: Syntax check
+        run: |
+          node --check alad-dub-light-v2/background.js
+          node --check alad-dub-light-v2/content.js
+          node --check alad-dub-light-v2/sidepanel.js
+
+      - name: Verify lightweight architecture
+        run: |
+          grep -q 'getPlayerResponse' alad-dub-light-v2/background.js
+          grep -q 'fmt=json3' alad-dub-light-v2/background.js
+          grep -q 'gemini-3.1-flash-tts-preview' alad-dub-light-v2/background.js
+          grep -q 'Cache Storage' alad-dub-light-v2/README.md
+          grep -q 'timeupdate' alad-dub-light-v2/content.js
+          ! grep -q 'MutationObserver' alad-dub-light-v2/content.js
+          ! grep -q '120)' alad-dub-light-v2/content.js
+
+      - name: Package
+        run: |
+          mkdir -p out/ALAD-Dub-Lite-v2
+          cp -R alad-dub-light-v2/* out/ALAD-Dub-Lite-v2/
+          cd out
+          zip -r ALAD-Dub-Lite-v2.zip ALAD-Dub-Lite-v2
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ALAD-Dub-Lite-v2
+          path: out/ALAD-Dub-Lite-v2.zip
+          if-no-files-found: error
