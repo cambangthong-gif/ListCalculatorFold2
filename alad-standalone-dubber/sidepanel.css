@@ -68,3 +68,25 @@ button {
 .mode span, .status span { color: #9aa5b5; font-size: 12px; }
 .status b { color: #74d99f; }
 footer { margin-top: 13px; font-size: 11px; }
+
+.keyactions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  margin-top: 8px;
+}
+.secondary {
+  background: #244a86;
+  color: #eaf2ff;
+}
+.key-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #9aa5b5;
+}
+.key-status.saved {
+  color: #61d995;
+}
+.key-status.session {
+  color: #f0c66d;
+}
