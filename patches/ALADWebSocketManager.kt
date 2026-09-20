@@ -21,6 +21,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     var onOutputTranscription: ((String) -> Unit)? = null
     var onInputTranscription: ((String, Boolean) -> Unit)? = null
     var onTurnComplete: (() -> Unit)? = null
+    var onGenerationComplete: (() -> Unit)? = null
     var onInterrupted: (() -> Unit)? = null
     var onStatusChanged: ((String) -> Unit)? = null
 
@@ -65,6 +66,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var currentEnableTranscription = true
     private var currentVadSilenceMs = 550
     private var currentActivityHandling = "NO_INTERRUPTION"
+    private var currentClientActivityDetection = false
     private var sessionHandle: String? = null
     private val pendingAudio = ArrayDeque<PendingAudio>()
     private var goAwayRunnable: Runnable? = null
@@ -77,7 +79,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         voiceName: String = "Kore",
         enableTranscription: Boolean = true,
         vadSilenceMs: Int = 550,
-        activityHandling: String = "NO_INTERRUPTION"
+        activityHandling: String = "NO_INTERRUPTION",
+        clientActivityDetection: Boolean = false
     ) {
         currentApiKey = apiKey
         currentTargetLang = targetLang
@@ -90,6 +93,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             } else {
                 "NO_INTERRUPTION"
             }
+        currentClientActivityDetection = clientActivityDetection
         manualDisconnect = false
         reconnectScheduled = false
         reconnectAttempt = 0
@@ -113,6 +117,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         val generation = ++socketGeneration
         val finalUrl = "$GEMINI_WS_URL?key=$currentApiKey"
         val request = Request.Builder().url(finalUrl).build()
+        val tryingResume = !sessionHandle.isNullOrBlank()
 
         onStatusChanged?.invoke(
             if (reconnectAttempt == 0) "Connecting"
@@ -133,7 +138,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     resumeHandle = sessionHandle,
                     enableTranscription = currentEnableTranscription,
                     vadSilenceMs = currentVadSilenceMs,
-                    activityHandling = currentActivityHandling
+                    activityHandling = currentActivityHandling,
+                    clientActivityDetection = currentClientActivityDetection
                 )
             }
 
@@ -151,6 +157,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         val resumable = resumeUpdate.optBoolean("resumable", false)
                         val newHandle = resumeUpdate.optString("newHandle")
                             .ifBlank { resumeUpdate.optString("new_handle") }
+                            .ifBlank { resumeUpdate.optString("token") }
                         if (resumable && newHandle.isNotBlank()) {
                             sessionHandle = newHandle
                         } else if (!resumable) {
@@ -231,6 +238,12 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                             onInterrupted?.invoke()
                         }
                         if (
+                            serverContent.optBoolean("generationComplete", false) ||
+                            serverContent.optBoolean("generation_complete", false)
+                        ) {
+                            onGenerationComplete?.invoke()
+                        }
+                        if (
                             serverContent.optBoolean("turnComplete", false) ||
                             serverContent.optBoolean("turn_complete", false)
                         ) {
@@ -248,13 +261,31 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                     }
 
                     if (json.has("error")) {
-                        val errMessage = json.optJSONObject("error")
-                            ?.optString("message", "Unknown error") ?: "Unknown error"
-                        onStatusChanged?.invoke("Error: $errMessage")
-                        forceReconnect(
-                            resetSession = true,
-                            reason = "server error"
-                        )
+                        val err = json.optJSONObject("error")
+                        val errMessage = err?.optString("message", "Unknown error") ?: "Unknown error"
+                        val code = err?.optInt("code", 0) ?: 0
+
+                        when {
+                            code == 401 || code == 403 ||
+                                errMessage.contains("API key", ignoreCase = true) &&
+                                errMessage.contains("invalid", ignoreCase = true) -> {
+                                onStatusChanged?.invoke("Fatal auth: $errMessage")
+                                manualDisconnect = true
+                                isSetupComplete = false
+                                try { webSocket?.cancel() } catch (_: Throwable) {}
+                            }
+                            code == 429 -> {
+                                onStatusChanged?.invoke("Rate limited · retrying")
+                                scheduleReconnect("rate limited", 4_000L)
+                            }
+                            else -> {
+                                onStatusChanged?.invoke("Error: $errMessage")
+                                forceReconnect(
+                                    resetSession = tryingResume,
+                                    reason = "server error"
+                                )
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error parsing Gemini message", e)
@@ -301,7 +332,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         resumeHandle: String?,
         enableTranscription: Boolean,
         vadSilenceMs: Int,
-        activityHandling: String
+        activityHandling: String,
+        clientActivityDetection: Boolean
     ) {
         val targetLangCode = targetLang.split("-")[0]
 
@@ -327,11 +359,13 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                 put("realtimeInputConfig", JSONObject().apply {
                     put("activityHandling", activityHandling)
                     put("automaticActivityDetection", JSONObject().apply {
-                        put("disabled", false)
-                        put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
-                        put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
-                        put("prefixPaddingMs", 20)
-                        put("silenceDurationMs", vadSilenceMs)
+                        put("disabled", clientActivityDetection)
+                        if (!clientActivityDetection) {
+                            put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                            put("endOfSpeechSensitivity", "END_SENSITIVITY_HIGH")
+                            put("prefixPaddingMs", 20)
+                            put("silenceDurationMs", vadSilenceMs)
+                        }
                     })
                 })
                 if (enableTranscription) {
@@ -363,6 +397,30 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             isSetupComplete = false
             enqueuePending(base64Audio)
             scheduleReconnect("audio send failed")
+        }
+    }
+
+    fun sendActivityStart() {
+        if (!isSetupComplete || !currentClientActivityDetection) return
+        val payload = JSONObject().apply {
+            put("realtimeInput", JSONObject().apply {
+                put("activityStart", JSONObject())
+            })
+        }
+        if (webSocket?.send(payload.toString()) != true) {
+            scheduleReconnect("activity start failed")
+        }
+    }
+
+    fun sendActivityEnd() {
+        if (!isSetupComplete || !currentClientActivityDetection) return
+        val payload = JSONObject().apply {
+            put("realtimeInput", JSONObject().apply {
+                put("activityEnd", JSONObject())
+            })
+        }
+        if (webSocket?.send(payload.toString()) != true) {
+            scheduleReconnect("activity end failed")
         }
     }
 
@@ -521,7 +579,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     @Synchronized
     fun reconfigureRealtime(
         vadSilenceMs: Int,
-        activityHandling: String
+        activityHandling: String,
+        clientActivityDetection: Boolean = false
     ) {
         currentVadSilenceMs = vadSilenceMs.coerceIn(300, 900)
         currentActivityHandling =
@@ -530,6 +589,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
             } else {
                 "NO_INTERRUPTION"
             }
+        currentClientActivityDetection = clientActivityDetection
         forceReconnect(
             resetSession = true,
             reason = "realtime profile changed"
