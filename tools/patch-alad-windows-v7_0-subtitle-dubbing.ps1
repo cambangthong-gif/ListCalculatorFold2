@@ -124,12 +124,7 @@ $c = $c.Replace(
 
 # In Subtitle Dubbing the recorder feeds the dedicated transcriber, never the dubbing model.
 # Auto mode suppresses transcriber while page captions are arriving.
-$dataNeedle = @'
-                foreach (var chunk in chunker.Push(pcm))
-                {
-                    gemini.QueueAudio(chunk);
-                }
-'@
+$dataPattern = '(?s)                foreach \(var chunk in chunker\.Push\(pcm\)\)\s*\{\s*gemini\.QueueAudio\(chunk\);\s*\}'
 $dataReplacement = @'
                 foreach (var chunk in chunker.Push(pcm))
                 {
@@ -148,8 +143,9 @@ $dataReplacement = @'
                     }
                 }
 '@
-if (-not $c.Contains($dataNeedle)) { throw 'recorder audio loop marker missing' }
-$c = $c.Replace($dataNeedle, $dataReplacement)
+$c2 = [regex]::Replace($c, $dataPattern, $dataReplacement.TrimEnd(), 1)
+if ($c2 -eq $c) { throw 'recorder audio loop regex failed' }
+$c = $c2
 
 # v6.2 starts browser bridge after recorder. Extend it with caption events and transcriber.
 $bridgeStartNeedle = @'
