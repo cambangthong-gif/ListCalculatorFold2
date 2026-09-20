@@ -47,6 +47,8 @@ class AudioDubbingForegroundService : Service() {
         const val ACTION_SYNC_MINUS = "ACTION_SYNC_MINUS"
         const val ACTION_SYNC_PLUS = "ACTION_SYNC_PLUS"
         const val ACTION_SYNC_AUTO = "ACTION_SYNC_AUTO"
+        const val ACTION_NOTIFICATION_TOGGLE = "ACTION_NOTIFICATION_TOGGLE"
+        const val ACTION_PROFILE_CYCLE = "ACTION_PROFILE_CYCLE"
         const val ACTION_COMPANION_STATE = "ACTION_COMPANION_STATE"
         const val ACTION_SMART_SYNC_PREPARE = "ACTION_SMART_SYNC_PREPARE"
         const val EXTRA_RESULT_CODE = "EXTRA_RESULT_CODE"
@@ -121,6 +123,7 @@ class AudioDubbingForegroundService : Service() {
     @Volatile private var lastSelfHealReconnectMs = 0L
     @Volatile private var geminiEverProducedAudio = false
     @Volatile private var initialNoOutputRecoveryUsed = false
+    @Volatile private var notificationPaused = false
 
     private val playbackCallback = object : AudioManager.AudioPlaybackCallback() {
         override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
@@ -149,8 +152,12 @@ class AudioDubbingForegroundService : Service() {
 
             if (activeVoiceSource == "gemini") {
                 if (mediaActive) {
-                    audioPlayerManager?.setExternalPaused(false)
-                    smartSyncStatus.value = geminiProfileLabel()
+                    if (!notificationPaused) {
+                        audioPlayerManager?.setExternalPaused(false)
+                        audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                    }
+                    smartSyncStatus.value =
+                        if (notificationPaused) "USER PAUSED" else geminiProfileLabel()
                 } else {
                     mediaStopJob = serviceScope.launch {
                         // Preserve the old Tail Finish behavior without a fixed hard cut:
@@ -207,8 +214,10 @@ class AudioDubbingForegroundService : Service() {
             }
 
             if (mediaActive) {
-                audioPlayerManager?.setExternalPaused(false)
-                deviceTtsManager?.setExternalPaused(false)
+                if (!notificationPaused) {
+                    audioPlayerManager?.setExternalPaused(false)
+                    deviceTtsManager?.setExternalPaused(false)
+                }
                 return
             }
 
@@ -307,9 +316,20 @@ class AudioDubbingForegroundService : Service() {
                 val data = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
                 if (resultCode != 0 && data != null) startDubbing(resultCode, data)
             }
-            ACTION_SYNC_MINUS -> adjustSync(-100)
-            ACTION_SYNC_PLUS -> adjustSync(100)
-            ACTION_SYNC_AUTO -> enableAutoSyncAndCenter()
+            ACTION_SYNC_MINUS -> {
+                adjustSync(-100)
+                refreshNotification()
+            }
+            ACTION_SYNC_PLUS -> {
+                adjustSync(100)
+                refreshNotification()
+            }
+            ACTION_SYNC_AUTO -> {
+                enableAutoSyncAndCenter()
+                refreshNotification()
+            }
+            ACTION_NOTIFICATION_TOGGLE -> toggleNotificationPause()
+            ACTION_PROFILE_CYCLE -> cycleGeminiProfile()
             ACTION_COMPANION_STATE -> handleCompanionState(intent)
             ACTION_SMART_SYNC_PREPARE -> prepareSmartSync()
             ACTION_STOP -> {
@@ -337,6 +357,7 @@ class AudioDubbingForegroundService : Service() {
         lastSelfHealReconnectMs = 0L
         geminiEverProducedAudio = false
         initialNoOutputRecoveryUsed = false
+        notificationPaused = false
         synchronized(this) {
             hybridSpeechActive = false
             hybridSilenceStartMs = 0L
@@ -394,6 +415,7 @@ class AudioDubbingForegroundService : Service() {
 
             activeVoiceSource = voiceSource
             syncOffsetMs.value = manualSync
+            refreshNotification()
             autoSyncActive.value = if (voiceSource == "gemini") {
                 geminiSyncMode == "balanced" && geminiMicroCatchUp
             } else {
@@ -453,6 +475,7 @@ class AudioDubbingForegroundService : Service() {
             }
 
             webSocketManager?.onStatusChanged = { status ->
+                refreshNotification()
                 if (status.startsWith("Error") || status.startsWith("Reconnecting")) {
                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                         android.widget.Toast.makeText(
@@ -468,7 +491,7 @@ class AudioDubbingForegroundService : Service() {
                 if (activeVoiceSource == "gemini") {
                     lastGeminiAudioReceivedMs = SystemClock.elapsedRealtime()
                     geminiEverProducedAudio = true
-                    audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+                    audioPlayerManager?.ensurePlaybackAlive(forceResume = !notificationPaused)
                     audioPlayerManager?.playAudioData(audioChunk)
                     val player = audioPlayerManager
                     queueLatencyMs.value = player?.queuedDurationMs() ?: 0
@@ -613,6 +636,11 @@ class AudioDubbingForegroundService : Service() {
                     captureBlockMs.value =
                         audioCaptureManager?.lastReadDurationMs() ?: 0L
 
+                    if (notificationPaused) {
+                        audioAmplitude.value = 0f
+                        return@startCapture
+                    }
+
                     if (activeVoiceSource == "gemini") {
                         if (normalized >= 0.006f) {
                             lastMeaningfulSourceMs = SystemClock.elapsedRealtime()
@@ -649,7 +677,7 @@ class AudioDubbingForegroundService : Service() {
         geminiWatchdogJob = serviceScope.launch {
             while (isRunning.value) {
                 delay(750L)
-                if (activeVoiceSource != "gemini") continue
+                if (activeVoiceSource != "gemini" || notificationPaused) continue
 
                 val now = SystemClock.elapsedRealtime()
                 val recentSource =
@@ -1094,12 +1122,14 @@ class AudioDubbingForegroundService : Service() {
                 queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
             }
             "PLAY" -> {
-                audioPlayerManager?.setExternalPaused(false)
-                deviceTtsManager?.setExternalPaused(false)
+                if (!notificationPaused) {
+                    audioPlayerManager?.setExternalPaused(false)
+                    deviceTtsManager?.setExternalPaused(false)
+                }
             }
             "SEEK" -> {
                 audioPlayerManager?.clearForExternalSeek()
-                audioPlayerManager?.setExternalPaused(!playing)
+                audioPlayerManager?.setExternalPaused(notificationPaused || !playing)
                 deviceTtsManager?.clearBacklog()
                 synchronized(transcriptBuffer) {
                     transcriptBuffer.clear()
@@ -1115,10 +1145,10 @@ class AudioDubbingForegroundService : Service() {
             "SPEED" -> {
                 // The live source itself is already captured at YouTube's playback speed.
                 // Keep the dubbing queue near the live edge; no destructive flush needed.
-                audioPlayerManager?.setExternalPaused(!playing)
+                audioPlayerManager?.setExternalPaused(notificationPaused || !playing)
             }
             else -> {
-                audioPlayerManager?.setExternalPaused(!playing)
+                audioPlayerManager?.setExternalPaused(notificationPaused || !playing)
             }
         }
     }
@@ -1205,6 +1235,7 @@ class AudioDubbingForegroundService : Service() {
         lastSelfHealReconnectMs = 0L
         geminiEverProducedAudio = false
         initialNoOutputRecoveryUsed = false
+        notificationPaused = false
         sessionSettingsJob?.cancel()
         sessionSettingsJob = null
         smartSyncJob?.cancel()
@@ -1255,28 +1286,190 @@ class AudioDubbingForegroundService : Service() {
         }
     }
 
+    private fun toggleNotificationPause() {
+        if (!isRunning.value) return
+        notificationPaused = !notificationPaused
+
+        if (notificationPaused) {
+            flushGeminiInputChunk()
+            if (activeVoiceSource == "gemini") {
+                webSocketManager?.sendAudioStreamEnd()
+            }
+            audioPlayerManager?.setExternalPaused(true)
+            deviceTtsManager?.setExternalPaused(true)
+            smartSyncStatus.value = "USER PAUSED"
+        } else {
+            lastMeaningfulSourceMs = 0L
+            geminiSessionStartedMs = SystemClock.elapsedRealtime()
+            audioPlayerManager?.setExternalPaused(false)
+            audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
+            deviceTtsManager?.setExternalPaused(false)
+            smartSyncStatus.value =
+                if (activeVoiceSource == "gemini") geminiProfileLabel() else "Live Sync"
+        }
+        refreshNotification()
+    }
+
+    private fun cycleGeminiProfile() {
+        if (!isRunning.value || activeVoiceSource != "gemini") return
+        serviceScope.launch {
+            val order = listOf(
+                "ultra_fast",
+                "hybrid_fast",
+                "balanced",
+                "continuous",
+                "stable"
+            )
+            val index = order.indexOf(activeGeminiSyncMode).let { if (it < 0) 0 else it }
+            val next = order[(index + 1) % order.size]
+
+            activeGeminiSyncMode = next
+            val useMicro = next == "balanced" && geminiMicroCatchUpEnabled
+
+            synchronized(this@AudioDubbingForegroundService) {
+                hybridSpeechActive = false
+                hybridSilenceStartMs = 0L
+                hybridSpeechStartMs = 0L
+                lastHybridStreamEndMs = 0L
+                hybridPauseEmaMs = 0f
+            }
+
+            audioPlayerManager?.setStableLiveMode(
+                enabled = true,
+                profile = next,
+                microCatchUp = useMicro
+            )
+            audioPlayerManager?.setBalancedMicroCatchUp(useMicro)
+            autoSyncActive.value = useMicro
+            repository?.updateGeminiSyncMode(next)
+
+            val vadMs = when (next) {
+                "stable", "continuous" -> 800
+                "ultra_fast" -> 500
+                else -> 550
+            }
+            val activityHandling =
+                if (geminiInterruptionMode == "interrupt") {
+                    "START_OF_ACTIVITY_INTERRUPTS"
+                } else {
+                    "NO_INTERRUPTION"
+                }
+            webSocketManager?.reconfigureRealtime(vadMs, activityHandling)
+
+            geminiSessionStartedMs = SystemClock.elapsedRealtime()
+            lastSelfHealKickMs = 0L
+            lastSelfHealReconnectMs = 0L
+            smartSyncStatus.value = geminiProfileLabel()
+            refreshNotification()
+        }
+    }
+
+    private fun profileShortName(): String = when (activeGeminiSyncMode) {
+        "ultra_fast" -> "ULTRA"
+        "hybrid_fast" -> "HYBRID"
+        "balanced" -> "BALANCED"
+        "continuous" -> "CONTINUOUS"
+        "stable" -> "STABLE"
+        else -> activeGeminiSyncMode.uppercase()
+    }
+
+    private fun serviceActionPendingIntent(
+        requestCode: Int,
+        actionName: String
+    ): android.app.PendingIntent {
+        val actionIntent = Intent(this, AudioDubbingForegroundService::class.java).apply {
+            action = actionName
+        }
+        return android.app.PendingIntent.getService(
+            this,
+            requestCode,
+            actionIntent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun refreshNotification() {
+        if (!isRunning.value) return
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, createNotification())
+    }
+
     private fun createNotification(): Notification {
         val openIntent = Intent(this, com.alad.app.MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val pendingIntent = android.app.PendingIntent.getActivity(
-            this, 0, openIntent,
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            this,
+            0,
+            openIntent,
+            android.app.PendingIntent.FLAG_IMMUTABLE or
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val stopIntent = Intent(this, AudioDubbingForegroundService::class.java).apply {
-            action = ACTION_STOP
+
+        val pauseAction = NotificationCompat.Action(
+            if (notificationPaused) android.R.drawable.ic_media_play
+            else android.R.drawable.ic_media_pause,
+            if (notificationPaused) "Resume" else "Pause",
+            serviceActionPendingIntent(10, ACTION_NOTIFICATION_TOGGLE)
+        )
+        val minusAction = NotificationCompat.Action(
+            android.R.drawable.ic_media_rew,
+            "-100",
+            serviceActionPendingIntent(11, ACTION_SYNC_MINUS)
+        )
+        val autoAction = NotificationCompat.Action(
+            android.R.drawable.ic_menu_revert,
+            if (autoSyncActive.value) "Auto" else "Sync 0",
+            serviceActionPendingIntent(12, ACTION_SYNC_AUTO)
+        )
+        val plusAction = NotificationCompat.Action(
+            android.R.drawable.ic_media_ff,
+            "+100",
+            serviceActionPendingIntent(13, ACTION_SYNC_PLUS)
+        )
+        val profileAction = NotificationCompat.Action(
+            android.R.drawable.ic_menu_manage,
+            profileShortName(),
+            serviceActionPendingIntent(14, ACTION_PROFILE_CYCLE)
+        )
+
+        val stateText = when {
+            notificationPaused -> "PAUSED"
+            smartSyncStatus.value.startsWith("SELF-HEAL") -> smartSyncStatus.value
+            else -> profileShortName()
         }
-        val stopPendingIntent = android.app.PendingIntent.getService(
-            this, 1, stopIntent,
-            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        val detailText =
+            stateText +
+                " · Sync " +
+                (if (syncOffsetMs.value >= 0) "+" else "") +
+                syncOffsetMs.value +
+                "ms · q" +
+                queueLatencyMs.value +
+                "ms"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("ALAD TTS Select")
-            .setContentText("Live translate · selectable device TTS")
+            .setContentTitle(
+                if (notificationPaused) "ALAD · Paused"
+                else "ALAD · " + profileShortName()
+            )
+            .setContentText(detailText)
+            .setSubText("Self-Heal ON")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setShowWhen(false)
             .setContentIntent(pendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Disconnect", stopPendingIntent)
+            .addAction(pauseAction)
+            .addAction(minusAction)
+            .addAction(autoAction)
+            .addAction(plusAction)
+            .addAction(profileAction)
+            .setStyle(
+                androidx.media.app.NotificationCompat.MediaStyle()
+                    .setShowActionsInCompactView(0, 2, 4)
+            )
             .setOngoing(true)
             .build()
     }
