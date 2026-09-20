@@ -39,7 +39,7 @@ class SettingsViewModel(private val repository: UserPreferencesRepository) : Vie
     val lowLatency: StateFlow<Boolean> = _lowLatency.asStateFlow()
     private val _maxCatchUpSpeed = MutableStateFlow(1.15f)
     val maxCatchUpSpeed: StateFlow<Float> = _maxCatchUpSpeed.asStateFlow()
-    private val _geminiSyncMode = MutableStateFlow("balanced")
+    private val _geminiSyncMode = MutableStateFlow("auto")
     val geminiSyncMode: StateFlow<String> = _geminiSyncMode.asStateFlow()
     private val _geminiMicroCatchUp = MutableStateFlow(true)
     val geminiMicroCatchUp: StateFlow<Boolean> = _geminiMicroCatchUp.asStateFlow()
