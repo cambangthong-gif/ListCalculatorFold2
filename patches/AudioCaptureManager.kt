@@ -89,7 +89,14 @@ class AudioCaptureManager {
 
                     if (read > 0) {
                         reads++
-                        onAudioData(readBuffer.copyOf(read))
+                        // Common path is exactly 30 ms / 960 bytes. The callback is
+                        // synchronous, so the same capture buffer is safe until it returns.
+                        // Allocate only for rare partial reads.
+                        if (read == READ_CHUNK_BYTES) {
+                            onAudioData(readBuffer)
+                        } else {
+                            onAudioData(readBuffer.copyOf(read))
+                        }
                         if (reads % 200L == 0L) {
                             Log.d(
                                 TAG,
