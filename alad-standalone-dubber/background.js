@@ -16,6 +16,49 @@ chrome.runtime.onStartup.addListener(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 });
 
+
+async function ensureContentScript(tabId) {
+  if (!tabId) throw new Error("Không tìm thấy tab hiện tại.");
+
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "ALAD_GET_STATE" });
+    return { injected: false };
+  } catch {}
+
+  let tab;
+  try { tab = await chrome.tabs.get(tabId); } catch {}
+  const url = tab?.url || "";
+  if (!/^https?:\/\//i.test(url)) {
+    throw new Error("ALAD Dub chỉ chạy trên trang web http/https. Hãy mở trang video rồi thử lại.");
+  }
+
+  try {
+    await chrome.scripting.insertCSS({
+      target: { tabId },
+      files: ["content.css"]
+    });
+  } catch {}
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["content.js"]
+    });
+  } catch (e) {
+    throw new Error("Không thể chèn ALAD vào tab này: " + (e?.message || String(e)));
+  }
+
+  await new Promise(r => setTimeout(r, 120));
+
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "ALAD_GET_STATE" });
+  } catch {
+    throw new Error("ALAD đã thử chèn vào trang nhưng tab vẫn không nhận lệnh. Hãy reload trang một lần.");
+  }
+
+  return { injected: true };
+}
+
 async function getApiKey() {
   const s = await chrome.storage.session.get("geminiApiKey");
   if (s.geminiApiKey) return s.geminiApiKey;
@@ -244,6 +287,11 @@ async function geminiTranslateText(text, targetLanguage) {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
     switch (msg?.type) {
+      case "ALAD_ENSURE_CONTENT": {
+        const result = await ensureContentScript(msg.tabId);
+        sendResponse({ ok: true, ...result });
+        break;
+      }
       case "ALAD_GET_CONFIG": {
         const settings = await loadSettings();
         const key = await getApiKey();
