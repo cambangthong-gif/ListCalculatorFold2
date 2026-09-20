@@ -41,7 +41,7 @@ function connect() {
       socket.send(JSON.stringify({
         type: "hello",
         client: "alad-universal-browser-bridge",
-        version: "1.1.0"
+        version: "1.2.0"
       }));
     } catch {}
   };
