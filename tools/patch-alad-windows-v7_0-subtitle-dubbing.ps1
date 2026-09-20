@@ -222,8 +222,7 @@ if ($methodStart -lt 0 -or $methodEnd -lt 0) { throw 'OnBrowserSyncState anchors
 $methods = @'
     private static string ShortText(string text, int max)
     {
-        text = text.Replace("", " ").Replace("
-", " ").Trim();
+        text = text.Replace((char)13, ' ').Replace((char)10, ' ').Trim();
         return text.Length <= max ? text : text[..max] + "…";
     }
 
