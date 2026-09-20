@@ -67,6 +67,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     private var currentVadSilenceMs = 550
     private var currentActivityHandling = "NO_INTERRUPTION"
     private var currentClientActivityDetection = false
+    @Volatile private var desiredClientActivityActive = false
+    @Volatile private var clientActivityDirty = false
     private var sessionHandle: String? = null
     private val pendingAudio = ArrayDeque<PendingAudio>()
     private var goAwayRunnable: Runnable? = null
@@ -94,6 +96,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                 "NO_INTERRUPTION"
             }
         currentClientActivityDetection = clientActivityDetection
+        desiredClientActivityActive = false
+        clientActivityDirty = false
         manualDisconnect = false
         reconnectScheduled = false
         reconnectAttempt = 0
@@ -256,6 +260,7 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                         isSetupComplete = true
                         reconnectAttempt = 0
                         onStatusChanged?.invoke("Gemini Ready · $currentVoiceName")
+                        flushClientActivityState()
                         flushPendingAudio()
                         return
                     }
@@ -401,26 +406,43 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
     }
 
     fun sendActivityStart() {
-        if (!isSetupComplete || !currentClientActivityDetection) return
-        val payload = JSONObject().apply {
-            put("realtimeInput", JSONObject().apply {
-                put("activityStart", JSONObject())
-            })
-        }
-        if (webSocket?.send(payload.toString()) != true) {
-            scheduleReconnect("activity start failed")
-        }
+        if (!currentClientActivityDetection) return
+        desiredClientActivityActive = true
+        clientActivityDirty = true
+        if (isSetupComplete) flushClientActivityState()
     }
 
     fun sendActivityEnd() {
-        if (!isSetupComplete || !currentClientActivityDetection) return
+        if (!currentClientActivityDetection) return
+        desiredClientActivityActive = false
+        clientActivityDirty = true
+        if (isSetupComplete) flushClientActivityState()
+    }
+
+    @Synchronized
+    private fun flushClientActivityState() {
+        if (
+            !isSetupComplete ||
+            !currentClientActivityDetection ||
+            !clientActivityDirty
+        ) return
+
+        val active = desiredClientActivityActive
         val payload = JSONObject().apply {
             put("realtimeInput", JSONObject().apply {
-                put("activityEnd", JSONObject())
+                put(
+                    if (active) "activityStart" else "activityEnd",
+                    JSONObject()
+                )
             })
         }
-        if (webSocket?.send(payload.toString()) != true) {
-            scheduleReconnect("activity end failed")
+
+        if (webSocket?.send(payload.toString()) == true) {
+            clientActivityDirty = false
+        } else {
+            scheduleReconnect(
+                if (active) "activity start failed" else "activity end failed"
+            )
         }
     }
 
@@ -590,6 +612,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
                 "NO_INTERRUPTION"
             }
         currentClientActivityDetection = clientActivityDetection
+        desiredClientActivityActive = false
+        clientActivityDirty = false
         forceReconnect(
             resetSession = true,
             reason = "realtime profile changed"
@@ -641,6 +665,8 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
         reconnectAttempt = 0
         sessionHandle = null
         pendingAudio.clear()
+        desiredClientActivityActive = false
+        clientActivityDirty = false
         lastServerMessageMs = 0L
         lastAudioSendMs = 0L
         cancelGoAwayRolloverLocked()
