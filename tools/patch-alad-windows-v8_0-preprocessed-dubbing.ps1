@@ -693,7 +693,7 @@ internal sealed class OfflineSubtitlePreprocessor
 
     private static List<(string Text, double Start, double End)> ExtractWords(JsonElement root)
     {
-        var words = new List<(string, double, double)>();
+        var words = new List<(string Text, double Start, double End)>();
         if (!root.TryGetProperty("steps", out var steps) || steps.ValueKind != JsonValueKind.Array)
             return words;
 
