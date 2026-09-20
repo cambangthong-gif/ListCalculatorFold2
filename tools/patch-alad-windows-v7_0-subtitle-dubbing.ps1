@@ -148,13 +148,15 @@ if ($c2 -eq $c) { throw 'recorder audio loop regex failed' }
 $c = $c2
 
 # v6.2 starts browser bridge after recorder. Extend it with caption events and transcriber.
-$bridgeStartNeedle = @'
-                    browserSync = new BrowserSyncBridge(37921, LogStatus);
-                    browserSync.StateChanged += OnBrowserSyncState;
-                    await browserSync.StartAsync(runCts.Token);
-                    inputState.Text = "Browser Sync: audio đang chạy · chờ extension";
-'@
-$bridgeStartReplacement = @'
+$bridgeIfStart = $c.IndexOf('            if (browserSyncMode)')
+$bridgeIfEnd = $c.IndexOf('            isRunning = true;', $bridgeIfStart)
+if ($bridgeIfStart -lt 0 -or $bridgeIfEnd -lt 0) { throw 'browser bridge if-block anchors missing' }
+
+$bridgeIfReplacement = @'
+            if (browserSyncMode)
+            {
+                try
+                {
                     browserSync = new BrowserSyncBridge(37921, LogStatus);
                     browserSync.StateChanged += OnBrowserSyncState;
                     await browserSync.StartAsync(runCts.Token);
@@ -192,9 +194,25 @@ $bridgeStartReplacement = @'
                     {
                         inputState.Text = "Browser Sync: audio đang chạy · chờ extension";
                     }
+                }
+                catch (Exception ex)
+                {
+                    browserSync = null;
+                    if (subtitleDubbingMode)
+                    {
+                        LogStatus("Subtitle Dubbing bridge lỗi; vẫn giữ AI subtitle nếu đã kết nối: " + ex.Message);
+                        inputState.Text = "Subtitle Dubbing: bridge lỗi";
+                    }
+                    else
+                    {
+                        LogStatus("Browser Sync không khởi động, tiếp tục Live Audio: " + ex.Message);
+                        inputState.Text = "Browser Sync lỗi · Live Audio vẫn chạy";
+                    }
+                }
+            }
+
 '@
-if (-not $c.Contains($bridgeStartNeedle)) { throw 'browser bridge start marker missing' }
-$c = $c.Replace($bridgeStartNeedle, $bridgeStartReplacement)
+$c = $c.Substring(0, $bridgeIfStart) + $bridgeIfReplacement + $c.Substring($bridgeIfEnd)
 
 # Caption + player sync. Caption messages become the authoritative subtitle source unless
 # the user explicitly selected force-AI mode.
