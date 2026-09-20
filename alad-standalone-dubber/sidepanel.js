@@ -8,6 +8,19 @@ async function getActiveTab() {
   return activeTab;
 }
 
+
+async function ensureContent() {
+  await getActiveTab();
+  if (!activeTab?.id) throw new Error("Không tìm thấy tab hiện tại.");
+
+  const r = await chrome.runtime.sendMessage({
+    type: "ALAD_ENSURE_CONTENT",
+    tabId: activeTab.id
+  });
+  if (!r?.ok) throw new Error(r?.error || "Không thể kết nối ALAD với tab hiện tại.");
+  return r;
+}
+
 function isYoutubeWatch(url) {
   try {
     const u = new URL(url);
@@ -36,6 +49,7 @@ function updateNumbers() {
 async function loadVoices() {
   if (!activeTab?.id) return;
   try {
+    await ensureContent();
     const res = await chrome.tabs.sendMessage(activeTab.id, { type: "ALAD_GET_VOICES" });
     if (!res?.ok) return;
     const selected = $("voiceName").value;
@@ -63,6 +77,13 @@ async function init() {
   }
 
   await getActiveTab();
+
+  try {
+    await ensureContent();
+  } catch (e) {
+    $("statusTitle").textContent = "Chưa kết nối với trang";
+    $("statusDetail").textContent = e?.message || String(e);
+  }
 
   if (isYoutubeWatch(activeTab?.url || "")) {
     $("modeTitle").textContent = "YouTube AI Dubbing";
@@ -92,8 +113,7 @@ async function saveConfig() {
 async function start() {
   try {
     await saveConfig();
-    await getActiveTab();
-    if (!activeTab?.id) throw new Error("Không tìm thấy tab hiện tại.");
+    await ensureContent();
 
     const res = await chrome.tabs.sendMessage(activeTab.id, {
       type: "ALAD_START",
@@ -114,6 +134,7 @@ async function start() {
 async function stop() {
   await getActiveTab();
   if (activeTab?.id) {
+    try { await ensureContent(); } catch {}
     try { await chrome.tabs.sendMessage(activeTab.id, { type: "ALAD_STOP" }); } catch {}
   }
   $("dot").classList.remove("on");
@@ -125,6 +146,7 @@ async function refreshState() {
   await getActiveTab();
   if (!activeTab?.id) return;
   try {
+    await ensureContent();
     const s = await chrome.tabs.sendMessage(activeTab.id, { type: "ALAD_GET_STATE" });
     $("dot").classList.toggle("on", !!s?.running);
     if (s?.status) $("statusTitle").textContent = s.status;
