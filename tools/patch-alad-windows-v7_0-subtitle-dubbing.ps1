@@ -373,16 +373,19 @@ if ($c2 -eq $c) { throw 'BrowserSyncState regex failed' }
 $c = $c2
 
 # Parse captions as well as player-state messages.
-$parseOld = @'
-            if (type != "state" && type != "seek" && type != "video") return;
+$parseStart = $c.IndexOf('    private void Parse(string json)')
+$parseEnd = $c.IndexOf('    public async ValueTask DisposeAsync()', $parseStart)
+if ($parseStart -lt 0 -or $parseEnd -lt 0) { throw 'BrowserSync Parse anchors missing' }
 
-            double currentTime = root.TryGetProperty("currentTime", out var ct) && ct.TryGetDouble(out var cv) ? cv : 0;
-            double rate = root.TryGetProperty("playbackRate", out var r) && r.TryGetDouble(out var rv) ? rv : 1;
-            bool paused = root.TryGetProperty("paused", out var p) && p.ValueKind == JsonValueKind.True;
+$parseMethod = @'
+    private void Parse(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            string type = root.TryGetProperty("type", out var t) ? (t.GetString() ?? "") : "";
 
-            StateChanged?.Invoke(new BrowserSyncState(type, currentTime, rate, paused));
-'@
-$parseNew = @'
             if (type != "state" && type != "seek" && type != "video" && type != "caption") return;
 
             double currentTime = root.TryGetProperty("currentTime", out var ct) && ct.TryGetDouble(out var cv) ? cv : 0;
@@ -393,10 +396,14 @@ $parseNew = @'
             string? videoId = root.TryGetProperty("videoId", out var v) ? v.GetString() : null;
             string? title = root.TryGetProperty("title", out var ti) ? ti.GetString() : null;
 
-            StateChanged?.Invoke(new BrowserSyncState(type, currentTime, duration, rate, paused, text, videoId, title));
+            StateChanged?.Invoke(new BrowserSyncState(
+                type, currentTime, duration, rate, paused, text, videoId, title));
+        }
+        catch { }
+    }
+
 '@
-if (-not $c.Contains($parseOld)) { throw 'BrowserSync parse marker missing' }
-$c = $c.Replace($parseOld, $parseNew)
+$c = $c.Substring(0, $parseStart) + $parseMethod + $c.Substring($parseEnd)
 
 # LiveGeminiClient: add a sequential text queue so subtitle segments are dubbed one at a time.
 $lockMarker = @'
