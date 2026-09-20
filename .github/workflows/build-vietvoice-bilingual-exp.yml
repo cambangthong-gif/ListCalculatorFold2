@@ -1,4 +1,4 @@
-name: Build VietVoice Bilingual Experimental
+name: Build VietVoice Bilingual Experimental v0.2
 
 on:
   push:
@@ -65,8 +65,8 @@ jobs:
                   applicationId 'com.cambangthong.vietvoicebilingual'
                   minSdk 26
                   targetSdk 35
-                  versionCode 1
-                  versionName '0.1-exp'
+                  versionCode 2
+                  versionName '0.2-exp'
               }
 
               buildTypes {
@@ -130,6 +130,11 @@ jobs:
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+              <queries>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE"/>
+                  </intent>
+              </queries>
               <application
                   android:allowBackup="true"
                   android:icon="@drawable/ic_voice"
@@ -145,7 +150,6 @@ jobs:
                   <service
                       android:name=".VietVoiceBilingualService"
                       android:label="VietVoice Bilingual"
-                      android:permission="android.permission.BIND_TEXT_SERVICE"
                       android:exported="true">
                       <intent-filter>
                           <action android:name="android.intent.action.TTS_SERVICE"/>
@@ -535,7 +539,7 @@ jobs:
                   Request eventReq = new Request.Builder()
                           .url(BASE + "/gradio_api/call/" + endpoint + "/" + eventId)
                           .header("Accept", "text/event-stream")
-                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .header("User-Agent", "VietVoice-Bilingual/0.2")
                           .build();
                   String sse;
                   try (Response r = http.newCall(eventReq).execute()) {
@@ -548,7 +552,7 @@ jobs:
                   if (audioUrl.startsWith("/")) audioUrl = BASE + audioUrl;
 
                   Request audioReq = new Request.Builder().url(audioUrl)
-                          .header("User-Agent", "VietVoice-Bilingual/0.1").build();
+                          .header("User-Agent", "VietVoice-Bilingual/0.2").build();
                   try (Response r = http.newCall(audioReq).execute()) {
                       if (!r.isSuccessful()) throw new IOException("Tải audio HTTP " + r.code());
                       ResponseBody body = r.body();
@@ -566,7 +570,7 @@ jobs:
                   MultipartBody body = new MultipartBody.Builder().setType(MultipartBody.FORM)
                           .addFormDataPart("files", "reference.wav", fileBody).build();
                   Request request = new Request.Builder().url(BASE + "/gradio_api/upload")
-                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .header("User-Agent", "VietVoice-Bilingual/0.2")
                           .post(body).build();
 
                   try (Response r = http.newCall(request).execute()) {
@@ -596,7 +600,7 @@ jobs:
               private String discoverEndpoint() {
                   for (String p : new String[]{"/gradio_api/info", "/info"}) {
                       try (Response r = http.newCall(new Request.Builder().url(BASE + p)
-                              .header("User-Agent", "VietVoice-Bilingual/0.1").get().build()).execute()) {
+                              .header("User-Agent", "VietVoice-Bilingual/0.2").get().build()).execute()) {
                           if (!r.isSuccessful()) continue;
                           JSONObject root = new JSONObject(requireBody(r));
                           JSONObject named = root.optJSONObject("named_endpoints");
@@ -662,7 +666,7 @@ jobs:
 
               private static Request jsonPost(String url, JSONObject o) {
                   return new Request.Builder().url(url)
-                          .header("User-Agent", "VietVoice-Bilingual/0.1")
+                          .header("User-Agent", "VietVoice-Bilingual/0.2")
                           .post(RequestBody.create(o.toString(), MediaType.parse("application/json; charset=utf-8"))).build();
               }
 
@@ -923,16 +927,16 @@ jobs:
           "$BT/aapt" dump badging "$APK" | tee badging.txt
           grep -q "package: name='com.cambangthong.vietvoicebilingual'" badging.txt
           grep -q "application-label:'VietVoice Bilingual'" badging.txt
-          cp "$APK" VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
-          sha256sum VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk | tee SHA256.txt
-          ls -lh VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
+          cp "$APK" VietVoice-Bilingual-Experimental-v0.2-ZFold6.apk
+          sha256sum VietVoice-Bilingual-Experimental-v0.2-ZFold6.apk | tee SHA256.txt
+          ls -lh VietVoice-Bilingual-Experimental-v0.2-ZFold6.apk
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VietVoice-Bilingual-Experimental-v0.1-ZFold6
+          name: VietVoice-Bilingual-Experimental-v0.2-ZFold6
           path: |
-            VietVoice-Bilingual-Experimental-v0.1-ZFold6.apk
+            VietVoice-Bilingual-Experimental-v0.2-ZFold6.apk
             SHA256.txt
             badging.txt
           if-no-files-found: error
