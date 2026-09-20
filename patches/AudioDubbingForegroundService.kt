@@ -739,6 +739,7 @@ class AudioDubbingForegroundService : Service() {
                     ws.sendAudioStreamEnd()
                     lastSelfHealKickMs = now
                     smartSyncStatus.value = "SELF-HEAL KICK"
+                    refreshNotification()
                     continue
                 }
 
@@ -761,6 +762,7 @@ class AudioDubbingForegroundService : Service() {
                     }
                     audioPlayerManager?.ensurePlaybackAlive(forceResume = true)
                     smartSyncStatus.value = "SELF-HEAL RECONNECT"
+                    refreshNotification()
                     ws.forceReconnect(
                         resetSession = true,
                         reason = "no translated audio"
@@ -1165,6 +1167,7 @@ class AudioDubbingForegroundService : Service() {
             syncOffsetMs.value = newOffset
             repository?.updateManualSyncMs(newOffset)
             queueLatencyMs.value = audioPlayerManager?.queuedDurationMs() ?: 0
+            refreshNotification()
         }
     }
 
@@ -1187,6 +1190,7 @@ class AudioDubbingForegroundService : Service() {
                 repository?.updateAutoSync(true)
             }
             repository?.updateManualSyncMs(0)
+            refreshNotification()
         }
     }
 
