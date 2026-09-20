@@ -1,0 +1,70 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #0f1115;
+  color: #eef1f6;
+}
+main { padding: 16px; }
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+h1 { margin: 0; font-size: 23px; }
+header p { margin: 3px 0 0; color: #99a2b1; font-size: 12px; }
+.dot {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #677080; box-shadow: 0 0 0 4px rgba(103,112,128,.14);
+}
+.dot.on { background: #35d07f; box-shadow: 0 0 0 4px rgba(53,208,127,.16); }
+.card {
+  background: #181c23;
+  border: 1px solid #272d37;
+  border-radius: 14px;
+  padding: 13px;
+  margin-bottom: 11px;
+}
+.card.compact { padding: 11px 13px; }
+label {
+  display: block;
+  margin: 8px 0 6px;
+  color: #cfd5df;
+  font-size: 12px;
+  font-weight: 600;
+}
+input[type=password], input[type=text], select {
+  width: 100%;
+  min-height: 39px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid #353c48;
+  background: #11151b;
+  color: #eef1f6;
+}
+input[type=range] { width: 100%; }
+.keyrow { display: grid; grid-template-columns: 1fr auto; gap: 7px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.check {
+  display: flex; align-items: center; gap: 7px;
+  font-weight: 500;
+}
+small, footer { color: #8893a3; line-height: 1.4; }
+.actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; }
+button {
+  border: 0; border-radius: 10px; min-height: 41px;
+  padding: 0 13px; font-weight: 700; cursor: pointer;
+}
+.primary { background: #3378f6; color: white; }
+.danger { background: #2a2023; color: #ff8a94; border: 1px solid #513038; }
+.ghost { background: #232832; color: #d7dce5; }
+.full { width: 100%; margin-top: 8px; }
+.mode, .status { display: flex; flex-direction: column; gap: 3px; }
+.mode { margin-bottom: 9px; }
+.mode span, .status span { color: #9aa5b5; font-size: 12px; }
+.status b { color: #74d99f; }
+footer { margin-top: 13px; font-size: 11px; }
