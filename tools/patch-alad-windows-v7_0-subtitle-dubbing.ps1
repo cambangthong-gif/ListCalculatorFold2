@@ -713,7 +713,7 @@ internal sealed class GeminiTranscriberClient : IAsyncDisposable
                 }
                 while (!result.EndOfMessage);
 
-                using var doc = JsonDocument.Parse(ms.GetBuffer().AsSpan(0, checked((int)ms.Length)));
+                using var doc = JsonDocument.Parse(ms.GetBuffer().AsMemory(0, checked((int)ms.Length)));
                 var root = doc.RootElement;
 
                 if (root.TryGetProperty("setupComplete", out _) || root.TryGetProperty("setup_complete", out _))
