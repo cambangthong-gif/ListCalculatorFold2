@@ -93,7 +93,8 @@ private val voiceSources = listOf(
 )
 
 private val geminiSyncModes = listOf(
-    Choice("continuous", "Continuous · dịch liên tục, khuyên dùng"),
+    Choice("auto", "Auto Reliable · tự cân bằng nhanh/ổn định"),
+    Choice("continuous", "Continuous · dịch liên tục"),
     Choice("stable", "Stable · mượt, ít can thiệp"),
     Choice("ultra_fast", "Ultra Fast · phản hồi sớm nhất"),
     Choice("hybrid_fast", "Hybrid Fast · ưu tiên độ trễ thấp"),
@@ -421,11 +422,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit = {}) {
                         )
                         Text(
                             when (geminiSyncMode) {
-                                "continuous" -> "Continuous: PCM 30ms liên tục, không chốt từng câu bằng audioStreamEnd; chỉ flush khi nguồn thật sự pause/hết."
-                                "stable" -> "Stable: server VAD ~800ms, buffer ~110ms, không Hybrid end-turn, không tăng tốc."
-                                "ultra_fast" -> "Ultra Fast: client chốt lượt khoảng 320ms im lặng, buffer ~25ms. Nhanh nhất nhưng câu có thể bị chia ngắn hơn."
-                                "hybrid_fast" -> "Hybrid Fast: chốt câu khoảng 500ms im lặng, buffer ~45ms, không tăng tốc."
-                                else -> "Balanced: Hybrid Fast + micro catch-up nhẹ 1.03–1.08×, không drop nội dung."
+                                "auto" -> "Auto Reliable: client activity VAD tự thích nghi khoảng 420–680ms, resume-first khi lỗi và micro catch-up rất nhẹ; không dùng audioStreamEnd để chốt câu."
+                                "continuous" -> "Continuous: PCM 30ms liên tục + server activity detection; audioStreamEnd chỉ dùng khi nguồn thật sự pause/hết."
+                                "stable" -> "Stable: server VAD ~800ms, buffer ~110ms, ưu tiên mượt và ít can thiệp."
+                                "ultra_fast" -> "Ultra Fast: client activityEnd khoảng 320ms im lặng, buffer ~25ms. Nhanh nhất nhưng dễ chia câu hơn."
+                                "hybrid_fast" -> "Hybrid Fast: client activityEnd khoảng 500ms, buffer ~45ms, không tăng tốc."
+                                else -> "Balanced: client activity VAD + micro catch-up nhẹ 1.03–1.08×, không drop nội dung."
                             },
                             color = TextSecondary,
                             fontSize = 12.sp,
