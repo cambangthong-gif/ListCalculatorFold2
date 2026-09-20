@@ -1,0 +1,13 @@
+:root{font-family:Inter,"Segoe UI",Arial,sans-serif;color-scheme:dark}
+*{box-sizing:border-box}body{margin:0;background:#0e1116;color:#edf1f7}main{padding:15px}
+header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+h1{font-size:21px;margin:0}h1 small{font-size:11px;color:#77d9a3}header p{margin:3px 0 0;color:#8d98a8;font-size:12px}
+#dot{width:11px;height:11px;border-radius:50%;background:#667080}#dot.on{background:#35d07f;box-shadow:0 0 0 4px #35d07f22}
+.card{background:#171b22;border:1px solid #272e38;border-radius:14px;padding:12px;margin-bottom:10px}
+label{display:block;font-size:12px;font-weight:600;color:#cbd2dd;margin:8px 0 5px}
+input[type=password],input[type=text],select{width:100%;min-height:39px;border:1px solid #343c48;border-radius:9px;background:#10141a;color:#eef2f7;padding:8px 9px}
+input[type=range]{width:100%}.row{display:grid;grid-template-columns:1fr auto;gap:7px}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{display:flex;gap:7px;align-items:center;font-weight:500}.status{display:flex;flex-direction:column;gap:4px}.status b{color:#70dc9e}.status span{color:#9aa5b5;font-size:12px}
+.actions{display:grid;grid-template-columns:1fr auto;gap:8px}button{min-height:41px;border:0;border-radius:10px;padding:0 13px;font-weight:700;cursor:pointer}
+.primary{background:#3479f6;color:#fff}.danger{background:#2a2023;color:#ff8d98;border:1px solid #503039}.ghost{background:#242a34;color:#dbe0e8}.full{width:100%;margin-top:8px}
+footer{margin-top:12px;color:#7f8998;font-size:11px;line-height:1.4}
