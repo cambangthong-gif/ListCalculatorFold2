@@ -518,6 +518,24 @@ class ALADWebSocketManager(private val client: OkHttpClient) {
 
     fun isReady(): Boolean = isSetupComplete
 
+    @Synchronized
+    fun reconfigureRealtime(
+        vadSilenceMs: Int,
+        activityHandling: String
+    ) {
+        currentVadSilenceMs = vadSilenceMs.coerceIn(300, 900)
+        currentActivityHandling =
+            if (activityHandling == "START_OF_ACTIVITY_INTERRUPTS") {
+                "START_OF_ACTIVITY_INTERRUPTS"
+            } else {
+                "NO_INTERRUPTION"
+            }
+        forceReconnect(
+            resetSession = true,
+            reason = "realtime profile changed"
+        )
+    }
+
     fun serverSilenceMs(): Long {
         val last = lastServerMessageMs
         return if (last <= 0L) Long.MAX_VALUE
