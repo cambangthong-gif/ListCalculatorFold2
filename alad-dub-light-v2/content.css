@@ -1,0 +1,18 @@
+#alad-v2-overlay{
+  position:absolute;left:7%;right:7%;bottom:11%;z-index:2147483646;
+  text-align:center;pointer-events:none;opacity:0;transition:opacity .12s ease;
+  font-family:Arial,"Segoe UI",sans-serif
+}
+#alad-v2-overlay.show{opacity:1}
+#alad-v2-overlay .alad-v2-tr{
+  display:inline-block;max-width:92%;padding:7px 12px;border-radius:10px;
+  background:rgba(0,0,0,.78);color:#fff;font-weight:700;
+  font-size:clamp(16px,2vw,28px);line-height:1.28;text-shadow:0 1px 2px #000
+}
+#alad-v2-overlay .alad-v2-src{
+  margin:4px auto 0;max-width:86%;color:rgba(255,255,255,.82);
+  font-size:clamp(11px,1vw,15px);text-shadow:0 1px 2px #000
+}
+.alad-v2-btn{width:52px!important;min-width:52px!important;padding:0 5px!important;
+  color:#fff!important;font:700 11px/36px Arial!important}
+.alad-v2-btn.active{color:#69e99c!important}
