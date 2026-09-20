@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ALAD Dub</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>ALAD Dub</h1>
+        <p>Standalone · không cần app Windows</p>
+      </div>
+      <span id="dot" class="dot"></span>
+    </header>
+
+    <section class="card">
+      <label>Gemini API key</label>
+      <div class="keyrow">
+        <input id="apiKey" type="password" placeholder="Dán API key của anh">
+        <button id="toggleKey" class="ghost" type="button">Hiện</button>
+      </div>
+      <label class="check"><input id="rememberKey" type="checkbox" checked> Nhớ key trên máy này</label>
+      <small>Key chỉ lưu trong bộ nhớ của extension, không gửi cho ALAD server.</small>
+    </section>
+
+    <section class="card">
+      <label>Ngôn ngữ lồng tiếng</label>
+      <select id="targetLanguage">
+        <option value="vi">Tiếng Việt</option>
+        <option value="en">English</option>
+        <option value="ja">日本語</option>
+        <option value="ko">한국어</option>
+        <option value="zh">中文</option>
+        <option value="th">ไทย</option>
+        <option value="id">Bahasa Indonesia</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="es">Español</option>
+        <option value="pt">Português</option>
+      </select>
+
+      <label>Giọng đọc</label>
+      <select id="voiceName"><option value="">Tự động chọn giọng phù hợp</option></select>
+
+      <div class="grid2">
+        <div>
+          <label>Âm lượng dub <span id="dubVolumeText"></span></label>
+          <input id="dubVolume" type="range" min="0" max="1" step="0.05" value="1">
+        </div>
+        <div>
+          <label>Tiếng gốc khi dub <span id="duckText"></span></label>
+          <input id="duckLevel" type="range" min="0" max="1" step="0.05" value="0.16">
+        </div>
+      </div>
+
+      <label>Tốc độ giọng <span id="rateText"></span></label>
+      <input id="voiceRate" type="range" min="0.7" max="1.4" step="0.05" value="1">
+
+      <label class="check"><input id="showTranslatedCaptions" type="checkbox" checked> Hiện phụ đề dịch trên video</label>
+    </section>
+
+    <section class="card compact">
+      <div class="mode">
+        <b id="modeTitle">Chế độ</b>
+        <span id="modeText">Đang kiểm tra trang...</span>
+      </div>
+      <div class="status">
+        <b id="statusTitle">Sẵn sàng</b>
+        <span id="statusDetail"></span>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="start" class="primary" type="button">▶ Bắt đầu lồng tiếng</button>
+      <button id="stop" class="danger" type="button">■ Dừng</button>
+    </div>
+
+    <button id="clearCache" class="ghost full" type="button">Xóa cache bản dịch</button>
+
+    <footer>
+      YouTube công khai: Gemini đọc trực tiếp video theo từng đoạn có timestamp.<br>
+      Trang khác: ALAD dùng caption/TextTrack mà trang cung cấp.
+    </footer>
+  </main>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
