@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - nettruyen-fold-reader-build
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
