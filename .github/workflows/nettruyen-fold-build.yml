@@ -53,6 +53,7 @@ jobs:
         shell: bash
         run: |
           printf "android.useAndroidX=true\\nandroid.nonTransitiveRClass=true\\n" > gradle.properties
+          sed -i "s/setTextAllCaps(false)/setAllCaps(false)/" app/src/main/java/vn/foldreader/nettruyen/MainActivity.java
           gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Rename APK
