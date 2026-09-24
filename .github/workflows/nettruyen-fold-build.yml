@@ -50,7 +50,10 @@ jobs:
 
       - name: Build debug APK
         working-directory: /tmp/nettruyen-src/NetTruyenFoldOnline
-        run: gradle --no-daemon :app:assembleDebug --stacktrace
+        shell: bash
+        run: |
+          printf "android.useAndroidX=true\\nandroid.nonTransitiveRClass=true\\n" > gradle.properties
+          gradle --no-daemon :app:assembleDebug --stacktrace
 
       - name: Rename APK
         shell: bash
