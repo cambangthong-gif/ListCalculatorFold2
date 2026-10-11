@@ -13,6 +13,7 @@ patch("app/build.gradle.kts","versionCode = 2","versionCode = 3")
 patch("app/src/main/aidl/com/redtrigger/IInputService.aidl",
       "    /** Destroy the service. */",
       "    /** Start experimental detached shell reader. */\n    String startDetachedDaemon();\n\n    /** Destroy the service. */")
+(base/"app/src/main/assets").mkdir(parents=True, exist_ok=True)
 shutil.copyfile(Path(__file__).parent/"rm8_volume_detached.sh",base/"app/src/main/assets/rm8_volume_detached.sh")
 receiver='''package com.redtrigger
 
