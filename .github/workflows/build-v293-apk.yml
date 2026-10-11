@@ -1,0 +1,77 @@
+name: Build ListCalculatorFold2 v2.9.3 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v293-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply v2.9.1 base patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64, gzip
+          p=pathlib.Path('.github/workflows/build-v291-apk.yml').read_text()
+          m=re.search(r"PATCH_GZ_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.1 patch')
+          pathlib.Path('/tmp/v291.patch').write_bytes(gzip.decompress(base64.b64decode(m.group(1))))
+          PY
+          git apply --check /tmp/v291.patch
+          git apply /tmp/v291.patch
+
+      - name: Apply v2.9.3 UI patch
+        shell: bash
+        env:
+          PATCH293_GZ_B64: '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'
+        run: |
+          echo "$PATCH293_GZ_B64" | base64 --decode | gzip --decompress > /tmp/v293.patch
+          git apply --check /tmp/v293.patch
+          git apply /tmp/v293.patch
+          sed -i -E 's/versionCode [0-9]+/versionCode 293/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.3'/" app/build.gradle
+          grep -nE 'versionCode|versionName' app/build.gradle
+
+      - name: Restore stable signing key
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/listcalculator-update.jks"
+          test -s "$RUNNER_TEMP/listcalculator-update.jks"
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/listcalculator-update.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.3-TotalFix-NoCashRemainder.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListCalculatorFold2-v2.9.3-TotalFix-NoCashRemainder
+          path: ListCalculatorFold2-v2.9.3-TotalFix-NoCashRemainder.apk
+          if-no-files-found: error
