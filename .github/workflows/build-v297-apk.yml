@@ -75,201 +75,177 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
+
           p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
           s=p.read_text()
 
-          def rep(old,new,n=1):
-              global s
-              if old not in s:
-                  raise SystemExit('Missing anchor: '+old[:100].replace('\n',' '))
-              s=s.replace(old,new,n)
+          # Success path: never end with an empty result. Fall back to row/column geometry.
+          pat=r'if\(sheets\.isEmpty\(\)\)\s*\{\s*showOcrRawFallback\(result\.getText\(\)\);\s*\}\s*else if\(sheets\.size\(\)==1\)\s*\{\s*showOcrReview\(sheets\.get\(0\)\);\s*\}\s*else\s*\{'
+          repl='''if(sheets.isEmpty()){
+                            OcrSheet fallback=buildFallbackOcrSheet(result,image.getWidth(),image.getHeight());
+                            showOcrReviewWithRaw(fallback,result.getText(),true);
+                        }else if(sheets.size()==1){
+                            showOcrReviewWithRaw(sheets.get(0),result.getText(),false);
+                        }else{'''
+          s,n=re.subn(pat,repl,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('Cannot replace OCR success path')
 
-          rep("""                        if(sheets.isEmpty()){
-                              showOcrRawFallback(result.getText());
-                          }else if(sheets.size()==1){
-                              showOcrReview(sheets.get(0));
-                          }else{""",
-              """                        if(sheets.isEmpty()){
-                              OcrSheet fallback=buildFallbackOcrSheet(result,image.getWidth(),image.getHeight());
-                              showOcrReviewWithRaw(fallback,result.getText(),true);
-                          }else if(sheets.size()==1){
-                              showOcrReviewWithRaw(sheets.get(0),result.getText(),false);
-                          }else{""")
+          s=s.replace('if(which<sheets.size())showOcrReview(sheets.get(which));',
+                      'if(which<sheets.size())showOcrReviewWithRaw(sheets.get(which),result.getText(),false);',1)
+          s=s.replace('if(found>=2)sheets.add(sh);','if(found>=1)sheets.add(sh);',1)
 
-          rep("""                                    if(which<sheets.size())showOcrReview(sheets.get(which));""",
-              """                                    if(which<sheets.size())showOcrReviewWithRaw(sheets.get(which),result.getText(),false);""")
-
-          rep("""            if(found>=2)sheets.add(sh);""","""            if(found>=1)sheets.add(sh);""")
-
-          old_agent='''    String agentCanonical(String s){
-                  String n=normOcr(s);
-                  if(n.contains("dung"))return "Nguyễn Tấn Dũng";
-                  if(n.contains("hanh"))return "Lê Thiên Hạnh";
-                  if(n.matches(".*\\\\bsa\\\\b.*"))return "Nguyễn Văn Sa";
-                  if(n.contains("mai"))return "Nguyễn Thị Mai";
-                  if(n.contains("phong"))return "Nguyễn Đình Phong";
-                  if(n.contains("huong"))return "Nguyễn Thị Hường";
-                  return null;
-              }'''
-          new_agent='''    String agentCanonical(String s){
-                  String n=normOcr(s).replaceAll("[^a-z0-9 ]"," ");
-                  if(n.contains("dung")||n.contains("tan dung")||n.contains("tandung"))return "Nguyễn Tấn Dũng";
-                  if(n.contains("hanh")||n.contains("thien hanh")||n.contains("thienhanh"))return "Lê Thiên Hạnh";
-                  if(n.matches(".*\\\\bsa\\\\b.*")||n.contains("van sa")||n.contains("vansa"))return "Nguyễn Văn Sa";
-                  if(n.contains("mai")||n.contains("thi mai")||n.contains("thimai"))return "Nguyễn Thị Mai";
-                  if(n.contains("phong")||n.contains("dinh phong")||n.contains("dinhphong"))return "Nguyễn Đình Phong";
-                  if(n.contains("huong")||n.contains("thi huong")||n.contains("thihuong"))return "Nguyễn Thị Hường";
-                  return null;
-              }'''
-          rep(old_agent,new_agent)
-
-          marker="""    void showOcrRawFallback(String raw){"""
-          insert=r'''    OcrSheet buildFallbackOcrSheet(com.google.mlkit.vision.text.Text result,int iw,int ih){
-                  OcrSheet sh=new OcrSheet();
-                  ArrayList<OcrToken> lines=new ArrayList<>();
-                  ArrayList<OcrToken> numbers=new ArrayList<>();
-
-                  for(com.google.mlkit.vision.text.Text.TextBlock b:result.getTextBlocks()){
-                      for(com.google.mlkit.vision.text.Text.Line l:b.getLines()){
-                          Rect lb=l.getBoundingBox();
-                          if(lb!=null)lines.add(new OcrToken(l.getText(),lb));
-                          for(com.google.mlkit.vision.text.Text.Element e:l.getElements()){
-                              Rect eb=e.getBoundingBox();
-                              String num=cleanOcrNumber(e.getText());
-                              if(eb!=null&&!num.isEmpty())numbers.add(new OcrToken(num,eb));
-                          }
-                      }
-                  }
-
-                  for(OcrToken l:lines){
-                      String n=normOcr(l.text);
-                      if(n.contains("tinh:")||n.startsWith("tinh ")){
-                          String prov=l.text.replaceFirst("(?i).*Tỉnh\\s*:\\s*","").trim();
-                          if(!prov.isEmpty()){sh.province=prov;break;}
-                      }
-                  }
-
-                  LinkedHashMap<String,Float> rowY=new LinkedHashMap<>();
-                  for(OcrToken l:lines){
-                      String a=agentCanonical(l.text);
-                      if(a!=null)rowY.put(a,l.cy());
-                  }
-
-                  if(rowY.size()<4){
-                      TreeMap<Integer,Float> indexY=new TreeMap<>();
-                      for(OcrToken n:numbers){
-                          try{
-                              int k=Integer.parseInt(n.text);
-                              if(k>=1&&k<=6 && n.cx()<iw*.20f)indexY.put(k,n.cy());
-                          }catch(Exception ignored){}
-                      }
-                      String[] agents={"Nguyễn Tấn Dũng","Lê Thiên Hạnh","Nguyễn Văn Sa","Nguyễn Thị Mai","Nguyễn Đình Phong","Nguyễn Thị Hường"};
-                      if(indexY.size()>=4){
-                          for(int i=1;i<=6;i++)if(indexY.containsKey(i))rowY.put(agents[i-1],indexY.get(i));
-                      }
-                  }
-
-                  float cancelX=iw*.62f;
-                  for(OcrToken l:lines){
-                      String n=normOcr(l.text);
-                      if(n.contains("ve huy")||n.contains("huy ve")){
-                          cancelX=l.cx();break;
-                      }
-                  }
-
-                  float yTol=Math.max(24,ih*.022f);
-                  for(Map.Entry<String,Float> e:rowY.entrySet()){
-                      OcrToken best=null;
-                      float bestScore=Float.MAX_VALUE;
-                      for(OcrToken n:numbers){
-                          if(Math.abs(n.cy()-e.getValue())>yTol)continue;
-                          if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
-                          float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
-                          if(score<bestScore){bestScore=score;best=n;}
-                      }
-                      if(best!=null)sh.values.put(e.getKey(),best.text);
-                  }
-                  return sh;
-              }
-
-              void showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){
-                  ScrollView sc=new ScrollView(this);
-                  LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(14),dp(8),dp(14),dp(12));sc.addView(box);
-
-                  int found=0;for(String v:sh.values.values())if(v!=null&&!v.isEmpty())found++;
-                  String status=uncertain
-                          ?"Chưa xác định chắc cột Vé hủy • OCR đọc được "+found+"/6 số. Hãy kiểm tra và điền ô còn thiếu."
-                          :"Đã nhận "+found+"/6 số • kiểm tra lại trước khi nhập.";
-                  TextView info=text("Tỉnh: "+sh.province+"\\n"+status,13,true);
-                  info.setTextColor(uncertain?Color.rgb(180,83,9):accent);box.addView(info);
-
-                  final LinkedHashMap<String,EditText> fields=new LinkedHashMap<>();
-                  for(Map.Entry<String,String> e:sh.values.entrySet()){
-                      LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
-                      TextView name=text(e.getKey(),foldInnerLayout?14:12,false);name.setTextColor(ink);
-                      EditText val=new EditText(this);val.setSingleLine();val.setText(e.getValue());val.setTextSize(foldInnerLayout?20:17);
-                      val.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);
-                      val.setHint("?");
-                      val.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-                      GradientDrawable bg=new GradientDrawable();
-                      bg.setColor((e.getValue()==null||e.getValue().isEmpty())?Color.rgb(255,247,237):Color.WHITE);
-                      bg.setStroke(dp(1),(e.getValue()==null||e.getValue().isEmpty())?Color.rgb(251,146,60):Color.rgb(218,220,224));
-                      bg.setCornerRadius(dp(12));val.setBackground(bg);val.setPadding(dp(8),0,dp(8),0);
-                      row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
-                      row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
-                      box.addView(row);
-                      fields.put(e.getKey(),val);
-                  }
-
-                  Button rawBtn=smallActionButton("Xem chữ OCR đọc được");
-                  rawBtn.setOnClickListener(v->{
-                      haptic(v);
-                      TextView rv=text((raw==null||raw.trim().isEmpty())?"(OCR không đọc được chữ nào)":raw,12,false);
-                      rv.setTextIsSelectable(true);
-                      ScrollView rs=new ScrollView(this);rs.setPadding(dp(12),dp(8),dp(12),dp(8));rs.addView(rv);
-                      new AlertDialog.Builder(this).setTitle("Kết quả OCR thô").setView(rs).setPositiveButton("Đóng",null).show();
-                  });
-                  box.addView(rawBtn,new LinearLayout.LayoutParams(-1,dp(44)));
-
-                  TextView note=text("Ô màu cam là số OCR chưa đọc chắc. Với số viết tay, luôn đối chiếu ảnh trước khi nhập.",10,false);
-                  note.setTextColor(muted);box.addView(note);
-
-                  AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Xác nhận tờ hủy")
-                      .setView(sc)
-                      .setPositiveButton("Nhập vào bảng hiện tại",null)
-                      .setNeutralButton("Tạo bảng mới",null)
-                      .setNegativeButton("Hủy",null)
-                      .create();
-
-                  dlg.setOnShowListener(x->{
-                      dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
-                          OcrSheet edited=sheetFromFields(sh,fields);
-                          applyOcrSheet(edited,false);dlg.dismiss();
-                      });
-                      dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{
-                          OcrSheet edited=sheetFromFields(sh,fields);
-                          applyOcrSheet(edited,true);dlg.dismiss();
-                      });
-                  });
-                  dlg.show();
-              }
+          # Fuzzy agent matching.
+          a=s.find('    String agentCanonical(String s){')
+          b=s.find('    String cleanOcrNumber',a)
+          if a<0 or b<0: raise SystemExit('agentCanonical block not found')
+          agent='''    String agentCanonical(String s){
+              String n=normOcr(s).replaceAll("[^a-z0-9 ]"," ");
+              if(n.contains("dung")||n.contains("tan dung")||n.contains("tandung"))return "Nguyễn Tấn Dũng";
+              if(n.contains("hanh")||n.contains("thien hanh")||n.contains("thienhanh"))return "Lê Thiên Hạnh";
+              if(n.matches(".*\\\\bsa\\\\b.*")||n.contains("van sa")||n.contains("vansa"))return "Nguyễn Văn Sa";
+              if(n.contains("mai")||n.contains("thi mai")||n.contains("thimai"))return "Nguyễn Thị Mai";
+              if(n.contains("phong")||n.contains("dinh phong")||n.contains("dinhphong"))return "Nguyễn Đình Phong";
+              if(n.contains("huong")||n.contains("thi huong")||n.contains("thihuong"))return "Nguyễn Thị Hường";
+              return null;
+          }
 
           '''
-          rep(marker,insert+marker)
+          s=s[:a]+agent+s[b:]
 
-          start=s.find("    void showOcrReview(OcrSheet sh){")
-          end=s.find("    OcrSheet sheetFromFields",start)
-          if start<0 or end<0:
-              raise SystemExit('showOcrReview block not found')
-          s=s[:start]+'''    void showOcrReview(OcrSheet sh){
-                  showOcrReviewWithRaw(sh,"",false);
+          marker='    void showOcrRawFallback(String raw){'
+          if marker not in s: raise SystemExit('showOcrRawFallback marker not found')
+          insert=r'''    OcrSheet buildFallbackOcrSheet(com.google.mlkit.vision.text.Text result,int iw,int ih){
+              OcrSheet sh=new OcrSheet();
+              ArrayList<OcrToken> lines=new ArrayList<>();
+              ArrayList<OcrToken> numbers=new ArrayList<>();
+
+              for(com.google.mlkit.vision.text.Text.TextBlock b:result.getTextBlocks()){
+                  for(com.google.mlkit.vision.text.Text.Line l:b.getLines()){
+                      Rect lb=l.getBoundingBox();
+                      if(lb!=null)lines.add(new OcrToken(l.getText(),lb));
+                      for(com.google.mlkit.vision.text.Text.Element e:l.getElements()){
+                          Rect eb=e.getBoundingBox();
+                          String num=cleanOcrNumber(e.getText());
+                          if(eb!=null&&!num.isEmpty())numbers.add(new OcrToken(num,eb));
+                      }
+                  }
               }
 
-          '''+s[end:]
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("tinh:")||n.startsWith("tinh ")){
+                      String prov=l.text.replaceFirst("(?i).*Tỉnh\\s*:\\s*","").trim();
+                      if(!prov.isEmpty()){sh.province=prov;break;}
+                  }
+              }
+
+              LinkedHashMap<String,Float> rowY=new LinkedHashMap<>();
+              for(OcrToken l:lines){
+                  String ag=agentCanonical(l.text);
+                  if(ag!=null)rowY.put(ag,l.cy());
+              }
+
+              if(rowY.size()<4){
+                  TreeMap<Integer,Float> indexY=new TreeMap<>();
+                  for(OcrToken n:numbers){
+                      try{
+                          int k=Integer.parseInt(n.text);
+                          if(k>=1&&k<=6 && n.cx()<iw*.20f)indexY.put(k,n.cy());
+                      }catch(Exception ignored){}
+                  }
+                  String[] agents={"Nguyễn Tấn Dũng","Lê Thiên Hạnh","Nguyễn Văn Sa","Nguyễn Thị Mai","Nguyễn Đình Phong","Nguyễn Thị Hường"};
+                  if(indexY.size()>=4){
+                      for(int i=1;i<=6;i++)if(indexY.containsKey(i))rowY.put(agents[i-1],indexY.get(i));
+                  }
+              }
+
+              float cancelX=iw*.62f;
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("ve huy")||n.contains("huy ve")){cancelX=l.cx();break;}
+              }
+
+              float yTol=Math.max(24,ih*.022f);
+              for(Map.Entry<String,Float> e:rowY.entrySet()){
+                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
+                  for(OcrToken n:numbers){
+                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
+                      if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
+                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
+                      if(score<bestScore){bestScore=score;best=n;}
+                  }
+                  if(best!=null)sh.values.put(e.getKey(),best.text);
+              }
+              return sh;
+          }
+
+          void showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){
+              ScrollView sc=new ScrollView(this);
+              LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(14),dp(8),dp(14),dp(12));sc.addView(box);
+
+              int found=0;for(String v:sh.values.values())if(v!=null&&!v.isEmpty())found++;
+              String status=uncertain
+                      ?"Chưa xác định chắc cột Vé hủy • OCR đọc được "+found+"/6 số. Hãy kiểm tra và điền ô còn thiếu."
+                      :"Đã nhận "+found+"/6 số • kiểm tra lại trước khi nhập.";
+              TextView info=text("Tỉnh: "+sh.province+"\\n"+status,13,true);
+              info.setTextColor(uncertain?Color.rgb(180,83,9):accent);box.addView(info);
+
+              final LinkedHashMap<String,EditText> fields=new LinkedHashMap<>();
+              for(Map.Entry<String,String> e:sh.values.entrySet()){
+                  LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+                  TextView name=text(e.getKey(),foldInnerLayout?14:12,false);name.setTextColor(ink);
+                  EditText val=new EditText(this);val.setSingleLine();val.setText(e.getValue());val.setTextSize(foldInnerLayout?20:17);
+                  val.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);val.setHint("?");
+                  val.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                  GradientDrawable bg=new GradientDrawable();
+                  bg.setColor((e.getValue()==null||e.getValue().isEmpty())?Color.rgb(255,247,237):Color.WHITE);
+                  bg.setStroke(dp(1),(e.getValue()==null||e.getValue().isEmpty())?Color.rgb(251,146,60):Color.rgb(218,220,224));
+                  bg.setCornerRadius(dp(12));val.setBackground(bg);val.setPadding(dp(8),0,dp(8),0);
+                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
+                  row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
+                  box.addView(row);fields.put(e.getKey(),val);
+              }
+
+              Button rawBtn=smallActionButton("Xem chữ OCR đọc được");
+              rawBtn.setOnClickListener(v->{
+                  haptic(v);
+                  TextView rv=text((raw==null||raw.trim().isEmpty())?"(OCR không đọc được chữ nào)":raw,12,false);
+                  rv.setTextIsSelectable(true);
+                  ScrollView rs=new ScrollView(this);rs.setPadding(dp(12),dp(8),dp(12),dp(8));rs.addView(rv);
+                  new AlertDialog.Builder(this).setTitle("Kết quả OCR thô").setView(rs).setPositiveButton("Đóng",null).show();
+              });
+              box.addView(rawBtn,new LinearLayout.LayoutParams(-1,dp(44)));
+
+              TextView note=text("Ô màu cam là số OCR chưa đọc chắc. Với số viết tay, luôn đối chiếu ảnh trước khi nhập.",10,false);
+              note.setTextColor(muted);box.addView(note);
+
+              AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Xác nhận tờ hủy")
+                  .setView(sc).setPositiveButton("Nhập vào bảng hiện tại",null)
+                  .setNeutralButton("Tạo bảng mới",null).setNegativeButton("Hủy",null).create();
+              dlg.setOnShowListener(x->{
+                  dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,false);dlg.dismiss();});
+                  dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,true);dlg.dismiss();});
+              });
+              dlg.show();
+          }
+
+          '''
+          s=s.replace(marker,insert+marker,1)
+
+          a=s.find('    void showOcrReview(OcrSheet sh){')
+          b=s.find('    OcrSheet sheetFromFields',a)
+          if a<0 or b<0: raise SystemExit('showOcrReview block not found')
+          s=s[:a]+'''    void showOcrReview(OcrSheet sh){
+              showOcrReviewWithRaw(sh,"",false);
+          }
+
+          '''+s[b:]
 
           s=s.replace("Phiên bản 2.9.6","Phiên bản 2.9.7")
           p.write_text(s)
           PY
+
           sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
           sed -i -E 's/versionCode [0-9]+/versionCode 297/' app/build.gradle
           sed -i -E "s/versionName '[^']+'/versionName '2.9.7'/" app/build.gradle
