@@ -1,0 +1,504 @@
+name: Build ListCalculatorFold2 v2.9.9 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v299-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply v2.9.1 base patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64, gzip
+          p=pathlib.Path('.github/workflows/build-v291-apk.yml').read_text()
+          m=re.search(r"PATCH_GZ_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.1 patch')
+          pathlib.Path('/tmp/v291.patch').write_bytes(gzip.decompress(base64.b64decode(m.group(1))))
+          PY
+          git apply --check /tmp/v291.patch
+          git apply /tmp/v291.patch
+
+      - name: Apply v2.9.4 feature patch
+        shell: bash
+        run: |
+          cat .github/patches/v294.part0 .github/patches/v294.part1 .github/patches/v294.part2 .github/patches/v294.part3 | base64 --decode | gzip --decompress > /tmp/v294.patch
+          git apply --check /tmp/v294.patch
+          git apply /tmp/v294.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          if "com.google.mlkit:text-recognition" not in s:
+              s=s.replace("implementation 'androidx.recyclerview:recyclerview:1.4.0'","implementation 'androidx.recyclerview:recyclerview:1.4.0'\n    implementation 'com.google.mlkit:text-recognition:16.0.1'")
+          if "kotlin-stdlib-jdk7" not in s:
+              s += "\nconfigurations.configureEach {\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'\n}\n"
+          p.write_text(s)
+          PY
+
+      - name: Apply v2.9.6 Fold adaptive layout
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64
+          p=pathlib.Path('.github/workflows/build-v296-apk.yml').read_text()
+          m=re.search(r"TRANSFORM296_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.6 transform')
+          pathlib.Path('/tmp/v296_transform.py').write_bytes(base64.b64decode(m.group(1)))
+          PY
+          python3 /tmp/v296_transform.py
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+
+      - name: Apply v2.9.9 OCR fallback
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          # Success path: never end with an empty result. Fall back to row/column geometry.
+          pat=r'if\(sheets\.isEmpty\(\)\)\s*\{\s*showOcrRawFallback\(result\.getText\(\)\);\s*\}\s*else if\(sheets\.size\(\)==1\)\s*\{\s*showOcrReview\(sheets\.get\(0\)\);\s*\}\s*else\s*\{'
+          repl='''if(sheets.isEmpty()){
+                            OcrSheet fallback=buildFallbackOcrSheet(result,image.getWidth(),image.getHeight());
+                            showOcrReviewWithRaw(fallback,result.getText(),true);
+                        }else if(sheets.size()==1){
+                            showOcrReviewWithRaw(sheets.get(0),result.getText(),false);
+                        }else{'''
+          s,n=re.subn(pat,repl,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('Cannot replace OCR success path')
+
+          s=s.replace('if(which<sheets.size())showOcrReview(sheets.get(which));',
+                      'if(which<sheets.size())showOcrReviewWithRaw(sheets.get(which),result.getText(),false);',1)
+          s=s.replace('if(found>=2)sheets.add(sh);','if(found>=1)sheets.add(sh);',1)
+
+          # Fuzzy agent matching.
+          a=s.find('    String agentCanonical(String s){')
+          b=s.find('    String cleanOcrNumber',a)
+          if a<0 or b<0: raise SystemExit('agentCanonical block not found')
+          agent='''    String agentCanonical(String s){
+              String n=normOcr(s).replaceAll("[^a-z0-9 ]"," ");
+              if(n.contains("dung")||n.contains("tan dung")||n.contains("tandung"))return "Nguyễn Tấn Dũng";
+              if(n.contains("hanh")||n.contains("thien hanh")||n.contains("thienhanh"))return "Lê Thiên Hạnh";
+              if(n.matches(".*\\\\bsa\\\\b.*")||n.contains("van sa")||n.contains("vansa"))return "Nguyễn Văn Sa";
+              if(n.contains("mai")||n.contains("thi mai")||n.contains("thimai"))return "Nguyễn Thị Mai";
+              if(n.contains("phong")||n.contains("dinh phong")||n.contains("dinhphong"))return "Nguyễn Đình Phong";
+              if(n.contains("huong")||n.contains("thi huong")||n.contains("thihuong"))return "Nguyễn Thị Hường";
+              return null;
+          }
+
+          '''
+          s=s[:a]+agent+s[b:]
+
+          marker='    void showOcrRawFallback(String raw){'
+          if marker not in s: raise SystemExit('showOcrRawFallback marker not found')
+          insert=r'''    OcrSheet buildFallbackOcrSheet(com.google.mlkit.vision.text.Text result,int iw,int ih){
+              OcrSheet sh=new OcrSheet();
+              ArrayList<OcrToken> lines=new ArrayList<>();
+              ArrayList<OcrToken> numbers=new ArrayList<>();
+
+              for(com.google.mlkit.vision.text.Text.TextBlock b:result.getTextBlocks()){
+                  for(com.google.mlkit.vision.text.Text.Line l:b.getLines()){
+                      Rect lb=l.getBoundingBox();
+                      if(lb!=null)lines.add(new OcrToken(l.getText(),lb));
+                      for(com.google.mlkit.vision.text.Text.Element e:l.getElements()){
+                          Rect eb=e.getBoundingBox();
+                          String num=cleanOcrNumber(e.getText());
+                          if(eb!=null&&!num.isEmpty())numbers.add(new OcrToken(num,eb));
+                      }
+                  }
+              }
+
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("tinh:")||n.startsWith("tinh ")){
+                      String prov=l.text.replaceFirst("(?i).*Tỉnh\\s*:\\s*","").trim();
+                      if(!prov.isEmpty()){sh.province=prov;break;}
+                  }
+              }
+
+              LinkedHashMap<String,Float> rowY=new LinkedHashMap<>();
+              for(OcrToken l:lines){
+                  String ag=agentCanonical(l.text);
+                  if(ag!=null)rowY.put(ag,l.cy());
+              }
+
+              if(rowY.size()<4){
+                  TreeMap<Integer,Float> indexY=new TreeMap<>();
+                  for(OcrToken n:numbers){
+                      try{
+                          int k=Integer.parseInt(n.text);
+                          if(k>=1&&k<=6 && n.cx()<iw*.20f)indexY.put(k,n.cy());
+                      }catch(Exception ignored){}
+                  }
+                  String[] agents={"Nguyễn Tấn Dũng","Lê Thiên Hạnh","Nguyễn Văn Sa","Nguyễn Thị Mai","Nguyễn Đình Phong","Nguyễn Thị Hường"};
+                  if(indexY.size()>=4){
+                      for(int i=1;i<=6;i++)if(indexY.containsKey(i))rowY.put(agents[i-1],indexY.get(i));
+                  }
+              }
+
+              float cancelX=iw*.62f;
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("ve huy")||n.contains("huy ve")){cancelX=l.cx();break;}
+              }
+
+              float yTol=Math.max(24,ih*.022f);
+              for(Map.Entry<String,Float> e:rowY.entrySet()){
+                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
+                  for(OcrToken n:numbers){
+                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
+                      if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
+                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
+                      if(score<bestScore){bestScore=score;best=n;}
+                  }
+                  if(best!=null)sh.values.put(e.getKey(),best.text);
+              }
+              return sh;
+          }
+
+          void showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){
+              ScrollView sc=new ScrollView(this);
+              LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(14),dp(8),dp(14),dp(12));sc.addView(box);
+
+              int found=0;for(String v:sh.values.values())if(v!=null&&!v.isEmpty())found++;
+              String status=uncertain
+                      ?"Chưa xác định chắc cột Vé hủy • OCR đọc được "+found+"/6 số. Hãy kiểm tra và điền ô còn thiếu."
+                      :"Đã nhận "+found+"/6 số • kiểm tra lại trước khi nhập.";
+              TextView info=text("Tỉnh: "+sh.province+"\\n"+status,13,true);
+              info.setTextColor(uncertain?Color.rgb(180,83,9):accent);box.addView(info);
+
+              final LinkedHashMap<String,EditText> fields=new LinkedHashMap<>();
+              for(Map.Entry<String,String> e:sh.values.entrySet()){
+                  LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+                  TextView name=text(e.getKey(),foldInnerLayout?14:12,false);name.setTextColor(ink);
+                  EditText val=new EditText(this);val.setSingleLine();val.setText(e.getValue());val.setTextSize(foldInnerLayout?20:17);
+                  val.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);val.setHint("?");
+                  val.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                  GradientDrawable bg=new GradientDrawable();
+                  bg.setColor((e.getValue()==null||e.getValue().isEmpty())?Color.rgb(255,247,237):Color.WHITE);
+                  bg.setStroke(dp(1),(e.getValue()==null||e.getValue().isEmpty())?Color.rgb(251,146,60):Color.rgb(218,220,224));
+                  bg.setCornerRadius(dp(12));val.setBackground(bg);val.setPadding(dp(8),0,dp(8),0);
+                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
+                  row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
+                  box.addView(row);fields.put(e.getKey(),val);
+              }
+
+              Button rawBtn=smallActionButton("Xem chữ OCR đọc được");
+              rawBtn.setOnClickListener(v->{
+                  haptic(v);
+                  TextView rv=text((raw==null||raw.trim().isEmpty())?"(OCR không đọc được chữ nào)":raw,12,false);
+                  rv.setTextIsSelectable(true);
+                  ScrollView rs=new ScrollView(this);rs.setPadding(dp(12),dp(8),dp(12),dp(8));rs.addView(rv);
+                  new AlertDialog.Builder(this).setTitle("Kết quả OCR thô").setView(rs).setPositiveButton("Đóng",null).show();
+              });
+              box.addView(rawBtn,new LinearLayout.LayoutParams(-1,dp(44)));
+
+              TextView note=text("Ô màu cam là số OCR chưa đọc chắc. Với số viết tay, luôn đối chiếu ảnh trước khi nhập.",10,false);
+              note.setTextColor(muted);box.addView(note);
+
+              AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Xác nhận tờ hủy")
+                  .setView(sc).setPositiveButton("Nhập vào bảng hiện tại",null)
+                  .setNeutralButton("Tạo bảng mới",null).setNegativeButton("Hủy",null).create();
+              dlg.setOnShowListener(x->{
+                  dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,false);dlg.dismiss();});
+                  dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,true);dlg.dismiss();});
+              });
+              dlg.show();
+          }
+
+          '''
+          s=s.replace(marker,insert+marker,1)
+
+          a=s.find('    void showOcrReview(OcrSheet sh){')
+          b=s.find('    OcrSheet sheetFromFields',a)
+          if a<0 or b<0: raise SystemExit('showOcrReview block not found')
+          s=s[:a]+'''    void showOcrReview(OcrSheet sh){
+              showOcrReviewWithRaw(sh,"",false);
+          }
+
+          '''+s[b:]
+
+          s=s.replace("Phiên bản 2.9.6","Phiên bản 2.9.7")
+          p.write_text(s)
+          PY
+
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+          sed -i -E 's/versionCode [0-9]+/versionCode 299/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+
+      - name: Fix gallery and camera result handling
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          start=s.find('    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){')
+          end=s.find('    double selectedCustomTotal(',start)
+          if start<0 or end<0:
+              raise SystemExit('onActivityResult block not found')
+
+          method=r'''    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+              super.onActivityResult(requestCode,resultCode,data);
+
+              // OCR camera/gallery must be handled before the backup/restore early-return logic.
+              if(requestCode==REQ_OCR_CAMERA || requestCode==REQ_OCR_GALLERY){
+                  if(resultCode!=RESULT_OK)return;
+
+                  Uri uri=null;
+                  if(requestCode==REQ_OCR_CAMERA){
+                      uri=pendingOcrImageUri;
+                  }else if(data!=null){
+                      uri=data.getData();
+                      if(uri!=null){
+                          try{
+                              final int flags=data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+                              getContentResolver().takePersistableUriPermission(uri,flags);
+                          }catch(Exception ignored){}
+                      }
+                  }
+
+                  if(uri==null){
+                      Toast.makeText(this,"Không lấy được ảnh đã chọn",Toast.LENGTH_LONG).show();
+                      return;
+                  }
+
+                  Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();
+                  runCancelSheetOcr(uri);
+                  return;
+              }
+
+              if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+              Uri uri=data.getData();
+              try{
+                  if(requestCode==REQ_BACKUP){
+                      try(OutputStream os=getContentResolver().openOutputStream(uri)){
+                          os.write(stateJson().getBytes("UTF-8"));
+                      }
+                      Toast.makeText(this,"Đã sao lưu dữ liệu",Toast.LENGTH_SHORT).show();
+                  }else if(requestCode==REQ_RESTORE){
+                      StringBuilder sb=new StringBuilder();
+                      try(BufferedReader br=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){
+                          String line;while((line=br.readLine())!=null)sb.append(line);
+                      }
+                      new AlertDialog.Builder(this).setTitle("Khôi phục dữ liệu?")
+                          .setMessage("Dữ liệu hiện tại sẽ được thay bằng bản sao lưu.")
+                          .setPositiveButton("Khôi phục",(d,w)->{pushUndo("Khôi phục backup");restoreStateJson(sb.toString());})
+                          .setNegativeButton("Hủy",null).show();
+                  }
+              }catch(Exception e){
+                  Toast.makeText(this,"Không xử lý được file: "+e.getMessage(),Toast.LENGTH_LONG).show();
+              }
+          }
+
+
+          '''
+          s=s[:start]+method+s[end:]
+          s=s.replace("Phiên bản 2.9.7","Phiên bản 2.9.8")
+          p.write_text(s)
+          PY
+          sed -i -E 's/versionCode [0-9]+/versionCode 299/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+          grep -n "REQ_OCR_GALLERY\|onActivityResult\|runCancelSheetOcr" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java | tail -20
+
+      - name: Improve handwritten cancel-number selection
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          # Remember the chosen gallery image too, so OCR review can be reused consistently.
+          s=s.replace('uri=data.getData();\n                      if(uri!=null){',
+                      'uri=data.getData();\n                      pendingOcrImageUri=uri;\n                      if(uri!=null){',1)
+
+          # Add candidate storage to each OCR sheet.
+          old='''        final LinkedHashMap<String,String> values=new LinkedHashMap<>();
+        OcrSheet(){'''
+          new='''        final LinkedHashMap<String,String> values=new LinkedHashMap<>();
+        final LinkedHashMap<String,ArrayList<String>> candidates=new LinkedHashMap<>();
+        OcrSheet(){'''
+          if old not in s: raise SystemExit('OcrSheet anchor missing')
+          s=s.replace(old,new,1)
+
+          old='''            values.put("Nguyễn Thị Hường","");
+        }'''
+          new='''            values.put("Nguyễn Thị Hường","");
+            for(String k:values.keySet())candidates.put(k,new ArrayList<>());
+        }'''
+          s=s.replace(old,new,1)
+
+          # In fallback geometry, collect all plausible numbers on each row,
+          # prefer multi-digit handwritten values, and never auto-pick row numbers 1..6.
+          old='''              float yTol=Math.max(24,ih*.022f);
+              for(Map.Entry<String,Float> e:rowY.entrySet()){
+                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
+                  for(OcrToken n:numbers){
+                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
+                      if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
+                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
+                      if(score<bestScore){bestScore=score;best=n;}
+                  }
+                  if(best!=null)sh.values.put(e.getKey(),best.text);
+              }
+              return sh;'''
+          new='''              float yTol=Math.max(24,ih*.022f);
+              for(Map.Entry<String,Float> e:rowY.entrySet()){
+                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
+                  ArrayList<String> opts=sh.candidates.get(e.getKey());
+                  for(OcrToken n:numbers){
+                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
+                      if(n.cx()<iw*.45f || n.cx()>iw*.86f)continue;
+                      String val=n.text;
+                      if(val==null||val.isEmpty())continue;
+
+                      // Keep alternatives for the user, but do not auto-select TT 1..6.
+                      if(!opts.contains(val))opts.add(val);
+                      boolean rowNo=val.length()==1 && "123456".contains(val);
+                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
+                      if(rowNo)score+=iw*.50f;
+                      if(val.length()>=2)score-=iw*.08f;
+                      if(score<bestScore){bestScore=score;best=n;}
+                  }
+                  if(best!=null){
+                      String v=best.text;
+                      if(!(v.length()==1 && "123456".contains(v)))sh.values.put(e.getKey(),v);
+                  }
+              }
+              return sh;'''
+          if old not in s: raise SystemExit('fallback row candidate block missing')
+          s=s.replace(old,new,1)
+
+          # Also capture candidates in the normal parser.
+          old='''                OcrToken bestNum=null;
+                float bestScore=Float.MAX_VALUE;
+                for(OcrToken n:numbers){
+                    if(Math.abs(n.cy()-y)>yTol)continue;
+                    // Ưu tiên số ở đúng cột Vé hủy.
+                    float score=Math.abs(n.cx()-h.cx()) + Math.abs(n.cy()-y)*1.8f;
+                    if(score<bestScore && Math.abs(n.cx()-h.cx())<iw*.20f){
+                        bestScore=score;bestNum=n;
+                    }
+                }
+                if(bestNum!=null)sh.values.put(agent,bestNum.text);'''
+          new='''                OcrToken bestNum=null;
+                float bestScore=Float.MAX_VALUE;
+                ArrayList<String> opts=sh.candidates.get(agent);
+                for(OcrToken n:numbers){
+                    if(Math.abs(n.cy()-y)>yTol)continue;
+                    if(Math.abs(n.cx()-h.cx())>=iw*.20f)continue;
+                    String val=n.text;
+                    if(val==null||val.isEmpty())continue;
+                    if(!opts.contains(val))opts.add(val);
+                    boolean rowNo=val.length()==1 && "123456".contains(val);
+                    float score=Math.abs(n.cx()-h.cx()) + Math.abs(n.cy()-y)*1.8f;
+                    if(rowNo)score+=iw*.45f;
+                    if(val.length()>=2)score-=iw*.06f;
+                    if(score<bestScore){bestScore=score;bestNum=n;}
+                }
+                if(bestNum!=null){
+                    String v=bestNum.text;
+                    if(!(v.length()==1 && "123456".contains(v)))sh.values.put(agent,v);
+                }'''
+          if old not in s: raise SystemExit('normal parser candidate block missing')
+          s=s.replace(old,new,1)
+
+          # Preserve candidates when converting review fields back into a sheet.
+          old='''        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base.headerX;s.headerY=base.headerY;
+        for(Map.Entry<String,EditText> e:fields.entrySet())s.values.put(e.getKey(),cleanOcrNumber(e.getValue().getText().toString()));
+        return s;'''
+          new='''        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base.headerX;s.headerY=base.headerY;
+        for(Map.Entry<String,EditText> e:fields.entrySet()){
+            s.values.put(e.getKey(),cleanOcrNumber(e.getValue().getText().toString()));
+            ArrayList<String> src=base.candidates.get(e.getKey());
+            if(src!=null)s.candidates.put(e.getKey(),new ArrayList<>(src));
+        }
+        return s;'''
+          if old not in s: raise SystemExit('sheetFromFields block missing')
+          s=s.replace(old,new,1)
+
+          # Add a per-row "Chọn" button next to the editable value.
+          old='''                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
+                  row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
+                  box.addView(row);fields.put(e.getKey(),val);'''
+          new='''                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.45f));
+                  row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.62f));
+
+                  Button choose=smallActionButton("Chọn");
+                  ArrayList<String> opts=sh.candidates.get(e.getKey());
+                  choose.setEnabled(opts!=null&&!opts.isEmpty());
+                  choose.setAlpha(choose.isEnabled()?1f:.35f);
+                  choose.setOnClickListener(v->{
+                      haptic(v);
+                      ArrayList<String> list=sh.candidates.get(e.getKey());
+                      if(list==null||list.isEmpty())return;
+                      PopupMenu pm=new PopupMenu(this,choose);
+                      for(String x:list)pm.getMenu().add(x);
+                      pm.setOnMenuItemClickListener(mi->{val.setText(mi.getTitle());return true;});
+                      pm.show();
+                  });
+                  row.addView(choose,new LinearLayout.LayoutParams(dp(72),dp(42)));
+                  box.addView(row);fields.put(e.getKey(),val);'''
+          if old not in s: raise SystemExit('review row block missing')
+          s=s.replace(old,new,1)
+
+          # Make the review message explicit about candidate picking.
+          s=s.replace('Ô màu cam là số OCR chưa đọc chắc. Với số viết tay, luôn đối chiếu ảnh trước khi nhập.',
+                      'Ô màu cam là số OCR chưa chắc. Bấm Chọn để lấy số OCR khác cùng dòng, hoặc gõ sửa trực tiếp.',1)
+
+          s=s.replace("Phiên bản 2.9.8","Phiên bản 2.9.9")
+          p.write_text(s)
+          PY
+          sed -i -E 's/versionCode [0-9]+/versionCode 299/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+
+      - name: Restore stable signing key
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/listcalculator-update.jks"
+          test -s "$RUNNER_TEMP/listcalculator-update.jks"
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/listcalculator-update.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.9-OCR-Fallback-FoldAdaptive.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListCalculatorFold2-v2.9.9-OCR-Fallback-FoldAdaptive
+          path: ListCalculatorFold2-v2.9.9-OCR-Fallback-FoldAdaptive.apk
+          if-no-files-found: error
