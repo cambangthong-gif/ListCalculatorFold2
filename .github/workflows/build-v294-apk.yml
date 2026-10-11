@@ -45,6 +45,7 @@ jobs:
           cat .github/patches/v294.part0 .github/patches/v294.part1 .github/patches/v294.part2 .github/patches/v294.part3 | base64 --decode | gzip --decompress > /tmp/v294.patch
           git apply --check /tmp/v294.patch
           git apply /tmp/v294.patch
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
           python3 - <<'PY'
           from pathlib import Path
           import re
