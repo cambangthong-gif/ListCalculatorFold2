@@ -9,7 +9,7 @@ s=s.replace("uri=data.getData();\n                      if(uri!=null){",
             "uri=data.getData();\n                      pendingOcrImageUri=uri;\n                      if(uri!=null){",1)
 
 # Helper: collect every plausible OCR number from raw text as manual alternatives.
-marker="    void showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){"
+marker="showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){"
 if marker not in s:
     raise SystemExit("showOcrReviewWithRaw not found")
 helper=r'''    ArrayList<String> ocrNumberChoices(String raw){
@@ -28,7 +28,11 @@ helper=r'''    ArrayList<String> ocrNumberChoices(String raw){
     }
 
 '''
-s=s.replace(marker,helper+marker,1)
+idx=s.find(marker)
+if idx<0: raise SystemExit("showOcrReviewWithRaw not found")
+line_start=s.rfind("\n",0,idx)+1
+indent=s[line_start:idx]
+s=s[:line_start]+helper+indent+s[line_start:]
 
 # Add global OCR choices to review dialog.
 anchor='''              final LinkedHashMap<String,EditText> fields=new LinkedHashMap<>();
