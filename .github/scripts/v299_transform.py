@@ -55,8 +55,8 @@ if n!=1:
 s=s[:ms]+chunk+s[me:]
 
 # Fallback chooser.
-ms=s.find("    OcrSheet buildFallbackOcrSheet(")
-me=s.find("    void showOcrReviewWithRaw(",ms)
+ms=s.find("buildFallbackOcrSheet(")
+me=s.find("showOcrReviewWithRaw(",ms)
 if ms<0 or me<0:
     raise SystemExit("fallback/review boundaries missing")
 chunk=s[ms:me]
