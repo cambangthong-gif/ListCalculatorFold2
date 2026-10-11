@@ -27,10 +27,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - name: Android SDK
-        uses: android-actions/setup-android@v3
-      - name: SDK platform
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Use runner Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms"
       - name: Patch volume application
         run: python3 redmagic-shizuku/patch_redtrigger.py redtrigger-upstream
       - name: Gradle
