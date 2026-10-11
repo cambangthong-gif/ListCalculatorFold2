@@ -1,0 +1,46 @@
+name: RedMagic 8 Shizuku Volume APK
+on:
+  push:
+    branches:
+      - redmagic8-shoulder-volume
+    paths:
+      - 'redmagic-shizuku/**'
+      - '.github/workflows/redmagic8-shizuku-volume.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Get patch
+        uses: actions/checkout@v4
+      - name: Get RedTrigger upstream (MIT)
+        uses: actions/checkout@v4
+        with:
+          repository: zampierilucas/RedTrigger
+          ref: 6c31acebf97aaa23dd4cbe69609942a32dca228b
+          path: redtrigger-upstream
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+      - name: SDK platform
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Patch volume application
+        run: python3 redmagic-shizuku/patch_redtrigger.py redtrigger-upstream
+      - name: Gradle
+        uses: gradle/actions/setup-gradle@v4
+      - name: Build debug APK
+        working-directory: redtrigger-upstream
+        run: chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon --no-configuration-cache
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RedMagic8-Shizuku-Volume-v0.2
+          path: redtrigger-upstream/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
