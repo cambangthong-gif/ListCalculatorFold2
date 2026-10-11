@@ -1,4 +1,4 @@
-name: Build ListCalculatorFold2 v2.9.9 APK
+name: Build ListCalculatorFold2 v2.9.9 APK - OCR Picker
 
 on:
   workflow_dispatch:
