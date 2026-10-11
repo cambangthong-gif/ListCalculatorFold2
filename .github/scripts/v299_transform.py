@@ -1,40 +1,67 @@
 from pathlib import Path
+import re
 
 p=Path("app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java")
 s=p.read_text()
 
-def rep(old,new,n=1):
+def must_replace(old,new,count=1):
     global s
     if old not in s:
-        raise SystemExit("Missing anchor: "+old[:90].replace("\n"," "))
-    s=s.replace(old,new,n)
+        raise SystemExit("Missing anchor: "+old[:100].replace("\n"," "))
+    s=s.replace(old,new,count)
 
-# Remember gallery URI.
 s=s.replace("uri=data.getData();\n                      if(uri!=null){",
             "uri=data.getData();\n                      pendingOcrImageUri=uri;\n                      if(uri!=null){",1)
 
-rep("""        final LinkedHashMap<String,String> values=new LinkedHashMap<>();
+must_replace("""        final LinkedHashMap<String,String> values=new LinkedHashMap<>();
         OcrSheet(){""","""        final LinkedHashMap<String,String> values=new LinkedHashMap<>();
         final LinkedHashMap<String,ArrayList<String>> candidates=new LinkedHashMap<>();
         OcrSheet(){""")
 
-rep("""            values.put("Nguyễn Thị Hường","");
+must_replace("""            values.put("Nguyễn Thị Hường","");
         }""","""            values.put("Nguyễn Thị Hường","");
             for(String k:values.keySet())candidates.put(k,new ArrayList<>());
         }""")
 
-rep("""              float yTol=Math.max(24,ih*.022f);
-              for(Map.Entry<String,Float> e:rowY.entrySet()){
-                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
-                  for(OcrToken n:numbers){
-                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
-                      if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
-                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
-                      if(score<bestScore){bestScore=score;best=n;}
-                  }
-                  if(best!=null)sh.values.put(e.getKey(),best.text);
-              }
-              return sh;""","""              float yTol=Math.max(24,ih*.022f);
+# Normal parser chooser.
+ms=s.find("    ArrayList<OcrSheet> parseCancelSheets(")
+me=s.find("    OcrSheet buildFallbackOcrSheet(",ms)
+if ms<0 or me<0:
+    raise SystemExit("parseCancelSheets/buildFallback boundaries missing")
+chunk=s[ms:me]
+pat=r'''OcrToken bestNum=null;\s*float bestScore=Float\.MAX_VALUE;\s*for\(OcrToken n:numbers\)\{.*?\}\s*if\(bestNum!=null\)sh\.values\.put\(agent,bestNum\.text\);'''
+repl='''OcrToken bestNum=null;
+                float bestScore=Float.MAX_VALUE;
+                ArrayList<String> opts=sh.candidates.get(agent);
+                for(OcrToken n:numbers){
+                    if(Math.abs(n.cy()-y)>yTol)continue;
+                    if(Math.abs(n.cx()-h.cx())>=iw*.20f)continue;
+                    String val=n.text;
+                    if(val==null||val.isEmpty())continue;
+                    if(!opts.contains(val))opts.add(val);
+                    boolean rowNo=val.length()==1 && "123456".contains(val);
+                    float score=Math.abs(n.cx()-h.cx()) + Math.abs(n.cy()-y)*1.8f;
+                    if(rowNo)score+=iw*.45f;
+                    if(val.length()>=2)score-=iw*.06f;
+                    if(score<bestScore){bestScore=score;bestNum=n;}
+                }
+                if(bestNum!=null){
+                    String v=bestNum.text;
+                    if(!(v.length()==1 && "123456".contains(v)))sh.values.put(agent,v);
+                }'''
+chunk,n=re.subn(pat,repl,chunk,count=1,flags=re.S)
+if n!=1:
+    raise SystemExit("normal parser chooser not found")
+s=s[:ms]+chunk+s[me:]
+
+# Fallback chooser.
+ms=s.find("    OcrSheet buildFallbackOcrSheet(")
+me=s.find("    void showOcrReviewWithRaw(",ms)
+if ms<0 or me<0:
+    raise SystemExit("fallback/review boundaries missing")
+chunk=s[ms:me]
+pat=r'''float yTol=Math\.max\(24,ih\*\.022f\);\s*for\(Map\.Entry<String,Float> e:rowY\.entrySet\(\)\)\{.*?\}\s*return sh;'''
+repl='''float yTol=Math.max(24,ih*.022f);
               for(Map.Entry<String,Float> e:rowY.entrySet()){
                   OcrToken best=null;float bestScore=Float.MAX_VALUE;
                   ArrayList<String> opts=sh.candidates.get(e.getKey());
@@ -55,39 +82,14 @@ rep("""              float yTol=Math.max(24,ih*.022f);
                       if(!(v.length()==1 && "123456".contains(v)))sh.values.put(e.getKey(),v);
                   }
               }
-              return sh;""")
+              return sh;'''
+chunk,n=re.subn(pat,repl,chunk,count=1,flags=re.S)
+if n!=1:
+    raise SystemExit("fallback chooser not found")
+s=s[:ms]+chunk+s[me:]
 
-rep("""                OcrToken bestNum=null;
-                float bestScore=Float.MAX_VALUE;
-                for(OcrToken n:numbers){
-                    if(Math.abs(n.cy()-y)>yTol)continue;
-                    // Ưu tiên số ở đúng cột Vé hủy.
-                    float score=Math.abs(n.cx()-h.cx()) + Math.abs(n.cy()-y)*1.8f;
-                    if(score<bestScore && Math.abs(n.cx()-h.cx())<iw*.20f){
-                        bestScore=score;bestNum=n;
-                    }
-                }
-                if(bestNum!=null)sh.values.put(agent,bestNum.text);""","""                OcrToken bestNum=null;
-                float bestScore=Float.MAX_VALUE;
-                ArrayList<String> opts=sh.candidates.get(agent);
-                for(OcrToken n:numbers){
-                    if(Math.abs(n.cy()-y)>yTol)continue;
-                    if(Math.abs(n.cx()-h.cx())>=iw*.20f)continue;
-                    String val=n.text;
-                    if(val==null||val.isEmpty())continue;
-                    if(!opts.contains(val))opts.add(val);
-                    boolean rowNo=val.length()==1 && "123456".contains(val);
-                    float score=Math.abs(n.cx()-h.cx()) + Math.abs(n.cy()-y)*1.8f;
-                    if(rowNo)score+=iw*.45f;
-                    if(val.length()>=2)score-=iw*.06f;
-                    if(score<bestScore){bestScore=score;bestNum=n;}
-                }
-                if(bestNum!=null){
-                    String v=bestNum.text;
-                    if(!(v.length()==1 && "123456".contains(v)))sh.values.put(agent,v);
-                }""")
-
-rep("""        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base.headerX;s.headerY=base.headerY;
+# Preserve candidate lists after edit.
+must_replace("""        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base.headerX;s.headerY=base.headerY;
         for(Map.Entry<String,EditText> e:fields.entrySet())s.values.put(e.getKey(),cleanOcrNumber(e.getValue().getText().toString()));
         return s;""","""        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base.headerX;s.headerY=base.headerY;
         for(Map.Entry<String,EditText> e:fields.entrySet()){
@@ -97,7 +99,8 @@ rep("""        OcrSheet s=new OcrSheet();s.province=base.province;s.headerX=base
         }
         return s;""")
 
-rep("""                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
+# Add per-row candidate picker in review.
+must_replace("""                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
                   row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
                   box.addView(row);fields.put(e.getKey(),val);""","""                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.45f));
                   row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.62f));
