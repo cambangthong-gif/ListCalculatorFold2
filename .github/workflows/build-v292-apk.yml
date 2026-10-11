@@ -1,0 +1,64 @@
+name: Build ListCalculatorFold2 v2.9.2 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v292-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply v2.9.2 RedMagic dense UI patch
+        shell: bash
+        env:
+          PATCH_GZ_B64: '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'
+        run: |
+          echo "$PATCH_GZ_B64" | base64 --decode | gzip --decompress > /tmp/v292.patch
+          git apply --check /tmp/v292.patch
+          git apply /tmp/v292.patch
+          sed -i -E 's/versionCode [0-9]+/versionCode 292/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.2'/" app/build.gradle
+          grep -nE 'versionCode|versionName' app/build.gradle
+          grep -n 'Math.max(198,Math.min(218' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+
+      - name: Restore stable signing key
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/listcalculator-update.jks"
+          test -s "$RUNNER_TEMP/listcalculator-update.jks"
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/listcalculator-update.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.2-RedMagic-DenseUI.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListCalculatorFold2-v2.9.2-RedMagic-DenseUI
+          path: ListCalculatorFold2-v2.9.2-RedMagic-DenseUI.apk
+          if-no-files-found: error
