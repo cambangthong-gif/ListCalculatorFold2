@@ -1,0 +1,95 @@
+name: Build ListCalculatorFold2 v2.9.6 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v296-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply v2.9.1 base patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64, gzip
+          p=pathlib.Path('.github/workflows/build-v291-apk.yml').read_text()
+          m=re.search(r"PATCH_GZ_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.1 patch')
+          pathlib.Path('/tmp/v291.patch').write_bytes(gzip.decompress(base64.b64decode(m.group(1))))
+          PY
+          git apply --check /tmp/v291.patch
+          git apply /tmp/v291.patch
+
+      - name: Apply v2.9.4 feature patch
+        shell: bash
+        run: |
+          cat .github/patches/v294.part0 .github/patches/v294.part1 .github/patches/v294.part2 .github/patches/v294.part3 | base64 --decode | gzip --decompress > /tmp/v294.patch
+          git apply --check /tmp/v294.patch
+          git apply /tmp/v294.patch
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          if "com.google.mlkit:text-recognition" not in s:
+              s=s.replace("implementation 'androidx.recyclerview:recyclerview:1.4.0'","implementation 'androidx.recyclerview:recyclerview:1.4.0'\n    implementation 'com.google.mlkit:text-recognition:16.0.1'")
+          if "kotlin-stdlib-jdk7" not in s:
+              s += "\nconfigurations.configureEach {\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'\n}\n"
+          p.write_text(s)
+          PY
+
+      - name: Apply v2.9.6 Fold adaptive-grid patch
+        shell: bash
+        env:
+          PATCH296_GZ_B64: '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'
+        run: |
+          echo "$PATCH296_GZ_B64" | base64 --decode | gzip --decompress > /tmp/v296.patch
+          git apply --check /tmp/v296.patch
+          git apply /tmp/v296.patch
+          sed -i -E 's/versionCode [0-9]+/versionCode 296/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.9.6'/" app/build.gradle
+          grep -nE 'versionCode|versionName|text-recognition' app/build.gradle
+
+      - name: Restore stable signing key
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/listcalculator-update.jks"
+          test -s "$RUNNER_TEMP/listcalculator-update.jks"
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/listcalculator-update.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.6-FoldAdaptiveGrid-OCR.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListCalculatorFold2-v2.9.6-FoldAdaptiveGrid-OCR
+          path: ListCalculatorFold2-v2.9.6-FoldAdaptiveGrid-OCR.apk
+          if-no-files-found: error
