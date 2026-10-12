@@ -11,8 +11,11 @@ def rep(old,new,n=1):
     s=s.replace(old,new,n)
 
 # Route camera/gallery OCR through a crop/region picker first.
-rep('Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();\n                  runCancelSheetOcr(uri);',
-    'Toast.makeText(this,"Đã nhận ảnh • chọn vùng Vé hủy",Toast.LENGTH_SHORT).show();\n                  showCancelRegionPicker(uri);',1)
+pat=r'Toast\.makeText\(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast\.LENGTH_SHORT\)\.show\(\);\s*runCancelSheetOcr\(uri\);'
+repl='Toast.makeText(this,"Đã nhận ảnh • chọn vùng Vé hủy",Toast.LENGTH_SHORT).show();\\n                  showCancelRegionPicker(uri);'
+s,n=re.subn(pat,repl,s,count=1)
+if n!=1:
+    raise SystemExit("Cannot route OCR through region picker")
 
 marker='    void runCancelSheetOcr(Uri uri){'
 if marker not in s:
