@@ -1,0 +1,528 @@
+name: Build ListCalculatorFold2 v3.0.1 APK - 6 Row Cancel OCR
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-v301-apk.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Apply v2.9.1 base patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64, gzip
+          p=pathlib.Path('.github/workflows/build-v291-apk.yml').read_text()
+          m=re.search(r"PATCH_GZ_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.1 patch')
+          pathlib.Path('/tmp/v291.patch').write_bytes(gzip.decompress(base64.b64decode(m.group(1))))
+          PY
+          git apply --check /tmp/v291.patch
+          git apply /tmp/v291.patch
+
+      - name: Apply v2.9.4 feature patch
+        shell: bash
+        run: |
+          cat .github/patches/v294.part0 .github/patches/v294.part1 .github/patches/v294.part2 .github/patches/v294.part3 | base64 --decode | gzip --decompress > /tmp/v294.patch
+          git apply --check /tmp/v294.patch
+          git apply /tmp/v294.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/build.gradle')
+          s=p.read_text()
+          if "com.google.mlkit:text-recognition" not in s:
+              s=s.replace("implementation 'androidx.recyclerview:recyclerview:1.4.0'","implementation 'androidx.recyclerview:recyclerview:1.4.0'\n    implementation 'com.google.mlkit:text-recognition:16.0.1'")
+          if "kotlin-stdlib-jdk7" not in s:
+              s += "\nconfigurations.configureEach {\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk7'\n    exclude group: 'org.jetbrains.kotlin', module: 'kotlin-stdlib-jdk8'\n}\n"
+          p.write_text(s)
+          PY
+
+      - name: Apply v2.9.6 Fold adaptive layout
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import re, pathlib, base64
+          p=pathlib.Path('.github/workflows/build-v296-apk.yml').read_text()
+          m=re.search(r"TRANSFORM296_B64:\s*'([^']+)'", p)
+          if not m:
+              raise SystemExit('Cannot find v2.9.6 transform')
+          pathlib.Path('/tmp/v296_transform.py').write_bytes(base64.b64decode(m.group(1)))
+          PY
+          python3 /tmp/v296_transform.py
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+
+      - name: Apply v2.9.9 OCR fallback
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          # Success path: never end with an empty result. Fall back to row/column geometry.
+          pat=r'if\(sheets\.isEmpty\(\)\)\s*\{\s*showOcrRawFallback\(result\.getText\(\)\);\s*\}\s*else if\(sheets\.size\(\)==1\)\s*\{\s*showOcrReview\(sheets\.get\(0\)\);\s*\}\s*else\s*\{'
+          repl='''if(sheets.isEmpty()){
+                            OcrSheet fallback=buildFallbackOcrSheet(result,image.getWidth(),image.getHeight());
+                            showOcrReviewWithRaw(fallback,result.getText(),true);
+                        }else if(sheets.size()==1){
+                            showOcrReviewWithRaw(sheets.get(0),result.getText(),false);
+                        }else{'''
+          s,n=re.subn(pat,repl,s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('Cannot replace OCR success path')
+
+          s=s.replace('if(which<sheets.size())showOcrReview(sheets.get(which));',
+                      'if(which<sheets.size())showOcrReviewWithRaw(sheets.get(which),result.getText(),false);',1)
+          s=s.replace('if(found>=2)sheets.add(sh);','if(found>=1)sheets.add(sh);',1)
+
+          # Fuzzy agent matching.
+          a=s.find('    String agentCanonical(String s){')
+          b=s.find('    String cleanOcrNumber',a)
+          if a<0 or b<0: raise SystemExit('agentCanonical block not found')
+          agent='''    String agentCanonical(String s){
+              String n=normOcr(s).replaceAll("[^a-z0-9 ]"," ");
+              if(n.contains("dung")||n.contains("tan dung")||n.contains("tandung"))return "Nguyễn Tấn Dũng";
+              if(n.contains("hanh")||n.contains("thien hanh")||n.contains("thienhanh"))return "Lê Thiên Hạnh";
+              if(n.matches(".*\\\\bsa\\\\b.*")||n.contains("van sa")||n.contains("vansa"))return "Nguyễn Văn Sa";
+              if(n.contains("mai")||n.contains("thi mai")||n.contains("thimai"))return "Nguyễn Thị Mai";
+              if(n.contains("phong")||n.contains("dinh phong")||n.contains("dinhphong"))return "Nguyễn Đình Phong";
+              if(n.contains("huong")||n.contains("thi huong")||n.contains("thihuong"))return "Nguyễn Thị Hường";
+              return null;
+          }
+
+          '''
+          s=s[:a]+agent+s[b:]
+
+          marker='    void showOcrRawFallback(String raw){'
+          if marker not in s: raise SystemExit('showOcrRawFallback marker not found')
+          insert=r'''    OcrSheet buildFallbackOcrSheet(com.google.mlkit.vision.text.Text result,int iw,int ih){
+              OcrSheet sh=new OcrSheet();
+              ArrayList<OcrToken> lines=new ArrayList<>();
+              ArrayList<OcrToken> numbers=new ArrayList<>();
+
+              for(com.google.mlkit.vision.text.Text.TextBlock b:result.getTextBlocks()){
+                  for(com.google.mlkit.vision.text.Text.Line l:b.getLines()){
+                      Rect lb=l.getBoundingBox();
+                      if(lb!=null)lines.add(new OcrToken(l.getText(),lb));
+                      for(com.google.mlkit.vision.text.Text.Element e:l.getElements()){
+                          Rect eb=e.getBoundingBox();
+                          String num=cleanOcrNumber(e.getText());
+                          if(eb!=null&&!num.isEmpty())numbers.add(new OcrToken(num,eb));
+                      }
+                  }
+              }
+
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("tinh:")||n.startsWith("tinh ")){
+                      String prov=l.text.replaceFirst("(?i).*Tỉnh\\s*:\\s*","").trim();
+                      if(!prov.isEmpty()){sh.province=prov;break;}
+                  }
+              }
+
+              LinkedHashMap<String,Float> rowY=new LinkedHashMap<>();
+              for(OcrToken l:lines){
+                  String ag=agentCanonical(l.text);
+                  if(ag!=null)rowY.put(ag,l.cy());
+              }
+
+              if(rowY.size()<4){
+                  TreeMap<Integer,Float> indexY=new TreeMap<>();
+                  for(OcrToken n:numbers){
+                      try{
+                          int k=Integer.parseInt(n.text);
+                          if(k>=1&&k<=6 && n.cx()<iw*.20f)indexY.put(k,n.cy());
+                      }catch(Exception ignored){}
+                  }
+                  String[] agents={"Nguyễn Tấn Dũng","Lê Thiên Hạnh","Nguyễn Văn Sa","Nguyễn Thị Mai","Nguyễn Đình Phong","Nguyễn Thị Hường"};
+                  if(indexY.size()>=4){
+                      for(int i=1;i<=6;i++)if(indexY.containsKey(i))rowY.put(agents[i-1],indexY.get(i));
+                  }
+              }
+
+              float cancelX=iw*.62f;
+              for(OcrToken l:lines){
+                  String n=normOcr(l.text);
+                  if(n.contains("ve huy")||n.contains("huy ve")){cancelX=l.cx();break;}
+              }
+
+              float yTol=Math.max(24,ih*.022f);
+              for(Map.Entry<String,Float> e:rowY.entrySet()){
+                  OcrToken best=null;float bestScore=Float.MAX_VALUE;
+                  for(OcrToken n:numbers){
+                      if(Math.abs(n.cy()-e.getValue())>yTol)continue;
+                      if(n.cx()<iw*.48f || n.cx()>iw*.82f)continue;
+                      float score=Math.abs(n.cx()-cancelX)+Math.abs(n.cy()-e.getValue())*2f;
+                      if(score<bestScore){bestScore=score;best=n;}
+                  }
+                  if(best!=null)sh.values.put(e.getKey(),best.text);
+              }
+              return sh;
+          }
+
+          void showOcrReviewWithRaw(OcrSheet sh,String raw,boolean uncertain){
+              ScrollView sc=new ScrollView(this);
+              LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);box.setPadding(dp(14),dp(8),dp(14),dp(12));sc.addView(box);
+
+              int found=0;for(String v:sh.values.values())if(v!=null&&!v.isEmpty())found++;
+              String status=uncertain
+                      ?"Chưa xác định chắc cột Vé hủy • OCR đọc được "+found+"/6 số. Hãy kiểm tra và điền ô còn thiếu."
+                      :"Đã nhận "+found+"/6 số • kiểm tra lại trước khi nhập.";
+              TextView info=text("Tỉnh: "+sh.province+"\\n"+status,13,true);
+              info.setTextColor(uncertain?Color.rgb(180,83,9):accent);box.addView(info);
+
+              final LinkedHashMap<String,EditText> fields=new LinkedHashMap<>();
+              for(Map.Entry<String,String> e:sh.values.entrySet()){
+                  LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+                  TextView name=text(e.getKey(),foldInnerLayout?14:12,false);name.setTextColor(ink);
+                  EditText val=new EditText(this);val.setSingleLine();val.setText(e.getValue());val.setTextSize(foldInnerLayout?20:17);
+                  val.setGravity(Gravity.END|Gravity.CENTER_VERTICAL);val.setHint("?");
+                  val.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+                  GradientDrawable bg=new GradientDrawable();
+                  bg.setColor((e.getValue()==null||e.getValue().isEmpty())?Color.rgb(255,247,237):Color.WHITE);
+                  bg.setStroke(dp(1),(e.getValue()==null||e.getValue().isEmpty())?Color.rgb(251,146,60):Color.rgb(218,220,224));
+                  bg.setCornerRadius(dp(12));val.setBackground(bg);val.setPadding(dp(8),0,dp(8),0);
+                  row.addView(name,new LinearLayout.LayoutParams(0,dp(50),1.55f));
+                  row.addView(val,new LinearLayout.LayoutParams(0,dp(46),.75f));
+                  box.addView(row);fields.put(e.getKey(),val);
+              }
+
+              Button rawBtn=smallActionButton("Xem chữ OCR đọc được");
+              rawBtn.setOnClickListener(v->{
+                  haptic(v);
+                  TextView rv=text((raw==null||raw.trim().isEmpty())?"(OCR không đọc được chữ nào)":raw,12,false);
+                  rv.setTextIsSelectable(true);
+                  ScrollView rs=new ScrollView(this);rs.setPadding(dp(12),dp(8),dp(12),dp(8));rs.addView(rv);
+                  new AlertDialog.Builder(this).setTitle("Kết quả OCR thô").setView(rs).setPositiveButton("Đóng",null).show();
+              });
+              box.addView(rawBtn,new LinearLayout.LayoutParams(-1,dp(44)));
+
+              TextView note=text("Ô màu cam là số OCR chưa đọc chắc. Với số viết tay, luôn đối chiếu ảnh trước khi nhập.",10,false);
+              note.setTextColor(muted);box.addView(note);
+
+              AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Xác nhận tờ hủy")
+                  .setView(sc).setPositiveButton("Nhập vào bảng hiện tại",null)
+                  .setNeutralButton("Tạo bảng mới",null).setNegativeButton("Hủy",null).create();
+              dlg.setOnShowListener(x->{
+                  dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,false);dlg.dismiss();});
+                  dlg.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(v->{OcrSheet edited=sheetFromFields(sh,fields);applyOcrSheet(edited,true);dlg.dismiss();});
+              });
+              dlg.show();
+          }
+
+          '''
+          s=s.replace(marker,insert+marker,1)
+
+          a=s.find('    void showOcrReview(OcrSheet sh){')
+          b=s.find('    OcrSheet sheetFromFields',a)
+          if a<0 or b<0: raise SystemExit('showOcrReview block not found')
+          s=s[:a]+'''    void showOcrReview(OcrSheet sh){
+              showOcrReviewWithRaw(sh,"",false);
+          }
+
+          '''+s[b:]
+
+          s=s.replace("Phiên bản 2.9.6","Phiên bản 2.9.7")
+          p.write_text(s)
+          PY
+
+          sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+          sed -i -E 's/versionCode [0-9]+/versionCode 301/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '3.0.1'/" app/build.gradle
+
+      - name: Fix gallery and camera result handling
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          start=s.find('    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){')
+          end=s.find('    double selectedCustomTotal(',start)
+          if start<0 or end<0:
+              raise SystemExit('onActivityResult block not found')
+
+          method=r'''    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+              super.onActivityResult(requestCode,resultCode,data);
+
+              // OCR camera/gallery must be handled before the backup/restore early-return logic.
+              if(requestCode==REQ_OCR_CAMERA || requestCode==REQ_OCR_GALLERY){
+                  if(resultCode!=RESULT_OK)return;
+
+                  Uri uri=null;
+                  if(requestCode==REQ_OCR_CAMERA){
+                      uri=pendingOcrImageUri;
+                  }else if(data!=null){
+                      uri=data.getData();
+                      if(uri!=null){
+                          try{
+                              final int flags=data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+                              getContentResolver().takePersistableUriPermission(uri,flags);
+                          }catch(Exception ignored){}
+                      }
+                  }
+
+                  if(uri==null){
+                      Toast.makeText(this,"Không lấy được ảnh đã chọn",Toast.LENGTH_LONG).show();
+                      return;
+                  }
+
+                  Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();
+                  runCancelSheetOcr(uri);
+                  return;
+              }
+
+              if(resultCode!=RESULT_OK||data==null||data.getData()==null)return;
+              Uri uri=data.getData();
+              try{
+                  if(requestCode==REQ_BACKUP){
+                      try(OutputStream os=getContentResolver().openOutputStream(uri)){
+                          os.write(stateJson().getBytes("UTF-8"));
+                      }
+                      Toast.makeText(this,"Đã sao lưu dữ liệu",Toast.LENGTH_SHORT).show();
+                  }else if(requestCode==REQ_RESTORE){
+                      StringBuilder sb=new StringBuilder();
+                      try(BufferedReader br=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){
+                          String line;while((line=br.readLine())!=null)sb.append(line);
+                      }
+                      new AlertDialog.Builder(this).setTitle("Khôi phục dữ liệu?")
+                          .setMessage("Dữ liệu hiện tại sẽ được thay bằng bản sao lưu.")
+                          .setPositiveButton("Khôi phục",(d,w)->{pushUndo("Khôi phục backup");restoreStateJson(sb.toString());})
+                          .setNegativeButton("Hủy",null).show();
+                  }
+              }catch(Exception e){
+                  Toast.makeText(this,"Không xử lý được file: "+e.getMessage(),Toast.LENGTH_LONG).show();
+              }
+          }
+
+
+          '''
+          s=s[:start]+method+s[end:]
+          s=s.replace("Phiên bản 2.9.7","Phiên bản 2.9.8")
+          p.write_text(s)
+          PY
+          sed -i -E 's/versionCode [0-9]+/versionCode 301/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '3.0.1'/" app/build.gradle
+          grep -n "REQ_OCR_GALLERY\|onActivityResult\|runCancelSheetOcr" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java | tail -20
+
+      - name: Improve handwritten cancel-number selection
+        shell: bash
+        run: |
+          python3 .github/scripts/v299_transform.py
+          sed -i -E 's/versionCode [0-9]+/versionCode 301/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '3.0.1'/" app/build.gradle
+
+      - name: Add 6-row cancel-column OCR
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          # Route camera/gallery result to region selector instead of whole-page OCR.
+          s,n=re.subn(
+              r'Toast\.makeText\(this,"Đã nhận ảnh[^"]*",Toast\.LENGTH_SHORT\)\.show\(\);\s*runCancelSheetOcr\(uri\);',
+              'Toast.makeText(this,"Đã nhận ảnh • khoanh đúng 6 ô Vé hủy",Toast.LENGTH_SHORT).show();\\n                  showCancelColumnCropDialog(uri);',
+              s,count=1,flags=re.S)
+          if n!=1: raise SystemExit('Cannot reroute OCR result')
+
+          marker='    void showCancelPhotoMenu(){'
+          if marker not in s: raise SystemExit('showCancelPhotoMenu marker missing')
+
+          insert=r'''    Bitmap loadOcrBitmap(Uri uri) throws Exception{
+              if(Build.VERSION.SDK_INT>=28){
+                  ImageDecoder.Source src=ImageDecoder.createSource(getContentResolver(),uri);
+                  return ImageDecoder.decodeBitmap(src,(decoder,info,source)->{
+                      int w=info.getSize().getWidth(),h=info.getSize().getHeight();
+                      int max=Math.max(w,h);
+                      if(max>2600){
+                          float k=2600f/max;
+                          decoder.setTargetSize(Math.max(1,(int)(w*k)),Math.max(1,(int)(h*k)));
+                      }
+                      decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                  });
+              }
+              try(InputStream is=getContentResolver().openInputStream(uri)){return BitmapFactory.decodeStream(is);}
+          }
+
+          class CancelColumnCropView extends View{
+              Bitmap bmp; Paint border=new Paint(Paint.ANTI_ALIAS_FLAG),shade=new Paint(),guide=new Paint(Paint.ANTI_ALIAS_FLAG);
+              RectF sel=new RectF(); float scale=1,ox=0,oy=0,downX,downY; int mode=0; RectF start=new RectF();
+              CancelColumnCropView(Context c,Bitmap b){
+                  super(c);bmp=b;
+                  border.setStyle(Paint.Style.STROKE);border.setStrokeWidth(dp(3));border.setColor(accent);
+                  guide.setStyle(Paint.Style.STROKE);guide.setStrokeWidth(dp(1));guide.setColor(Color.argb(210,255,255,255));
+                  shade.setColor(Color.argb(125,0,0,0));setBackgroundColor(Color.BLACK);
+              }
+              void ensure(){
+                  if(sel.width()>0&&sel.height()>0)return;
+                  // Default narrow vertical region near common Vé hủy column.
+                  float w=bmp.getWidth(),h=bmp.getHeight();
+                  sel.set(w*.53f,h*.22f,w*.72f,h*.70f);
+              }
+              RectF vr(){return new RectF(ox+sel.left*scale,oy+sel.top*scale,ox+sel.right*scale,oy+sel.bottom*scale);}
+              float bx(float x){return Math.max(0,Math.min(bmp.getWidth(),(x-ox)/scale));}
+              float by(float y){return Math.max(0,Math.min(bmp.getHeight(),(y-oy)/scale));}
+              @Override protected void onDraw(Canvas c){
+                  super.onDraw(c);if(bmp==null)return;
+                  scale=Math.min(getWidth()/(float)bmp.getWidth(),getHeight()/(float)bmp.getHeight());
+                  float dw=bmp.getWidth()*scale,dh=bmp.getHeight()*scale;ox=(getWidth()-dw)/2f;oy=(getHeight()-dh)/2f;
+                  c.drawBitmap(bmp,null,new RectF(ox,oy,ox+dw,oy+dh),null);ensure();RectF r=vr();
+                  c.drawRect(ox,oy,ox+dw,r.top,shade);c.drawRect(ox,r.bottom,ox+dw,oy+dh,shade);
+                  c.drawRect(ox,r.top,r.left,r.bottom,shade);c.drawRect(r.right,r.top,ox+dw,r.bottom,shade);
+                  c.drawRoundRect(r,dp(8),dp(8),border);
+                  for(int i=1;i<6;i++){float y=r.top+r.height()*i/6f;c.drawLine(r.left,y,r.right,y,guide);}
+                  Paint hp=new Paint(Paint.ANTI_ALIAS_FLAG);hp.setColor(Color.WHITE);
+                  Paint hr=new Paint(Paint.ANTI_ALIAS_FLAG);hr.setColor(accent);float rad=dp(10);
+                  float[][] pts={{r.left,r.top},{r.right,r.top},{r.left,r.bottom},{r.right,r.bottom}};
+                  for(float[] q:pts){c.drawCircle(q[0],q[1],rad,hr);c.drawCircle(q[0],q[1],rad*.55f,hp);}
+              }
+              @Override public boolean onTouchEvent(MotionEvent e){
+                  float x=bx(e.getX()),y=by(e.getY());float hit=dp(36)/Math.max(.01f,scale);
+                  if(e.getAction()==MotionEvent.ACTION_DOWN){
+                      ensure();start.set(sel);downX=x;downY=y;
+                      float[][] pts={{sel.left,sel.top},{sel.right,sel.top},{sel.left,sel.bottom},{sel.right,sel.bottom}};
+                      int best=-1;float bd=Float.MAX_VALUE;for(int i=0;i<4;i++){float dx=x-pts[i][0],dy=y-pts[i][1],d=dx*dx+dy*dy;if(d<bd){bd=d;best=i;}}
+                      if(bd<hit*hit)mode=3+best;else if(sel.contains(x,y))mode=2;else{mode=1;sel.set(x,y,x,y);}invalidate();return true;
+                  }
+                  if(e.getAction()==MotionEvent.ACTION_MOVE){
+                      if(mode==1){sel.set(Math.min(downX,x),Math.min(downY,y),Math.max(downX,x),Math.max(downY,y));}
+                      else if(mode==2){
+                          sel.set(start);sel.offset(x-downX,y-downY);
+                          if(sel.left<0)sel.offset(-sel.left,0);if(sel.top<0)sel.offset(0,-sel.top);
+                          if(sel.right>bmp.getWidth())sel.offset(bmp.getWidth()-sel.right,0);
+                          if(sel.bottom>bmp.getHeight())sel.offset(0,bmp.getHeight()-sel.bottom);
+                      }else if(mode>=3){
+                          sel.set(start);
+                          if(mode==3){sel.left=x;sel.top=y;}else if(mode==4){sel.right=x;sel.top=y;}
+                          else if(mode==5){sel.left=x;sel.bottom=y;}else{sel.right=x;sel.bottom=y;}
+                          sel.set(Math.min(sel.left,sel.right),Math.min(sel.top,sel.bottom),Math.max(sel.left,sel.right),Math.max(sel.top,sel.bottom));
+                      }
+                      invalidate();return true;
+                  }
+                  if(e.getAction()==MotionEvent.ACTION_UP||e.getAction()==MotionEvent.ACTION_CANCEL){mode=0;invalidate();return true;}
+                  return true;
+              }
+              Bitmap crop(){
+                  ensure();int l=Math.max(0,(int)sel.left),t=Math.max(0,(int)sel.top),r=Math.min(bmp.getWidth(),(int)sel.right),b=Math.min(bmp.getHeight(),(int)sel.bottom);
+                  if(r-l<30||b-t<120)return null;return Bitmap.createBitmap(bmp,l,t,r-l,b-t);
+              }
+          }
+
+          void showCancelColumnCropDialog(Uri uri){
+              try{
+                  Bitmap bmp=loadOcrBitmap(uri);if(bmp==null){Toast.makeText(this,"Không mở được ảnh",Toast.LENGTH_LONG).show();return;}
+                  LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
+                  TextView tip=text("Khoanh CHỈ cột Vé hủy gồm đúng 6 dòng đại lý, không lấy dòng Tổng cộng. 6 vạch ngang là 6 đại lý.",12,true);
+                  tip.setTextColor(accent);tip.setPadding(dp(14),dp(8),dp(14),dp(8));box.addView(tip);
+                  CancelColumnCropView crop=new CancelColumnCropView(this,bmp);
+                  int hh=Math.min(dp(650),(int)(getResources().getDisplayMetrics().heightPixels*.66f));
+                  box.addView(crop,new LinearLayout.LayoutParams(-1,hh));
+                  AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Chọn 6 ô Vé hủy")
+                      .setView(box).setPositiveButton("Đọc 6 dòng",null).setNegativeButton("Hủy",null).create();
+                  dlg.setOnShowListener(x->dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                      Bitmap col=crop.crop();
+                      if(col==null){Toast.makeText(this,"Vùng chọn quá nhỏ",Toast.LENGTH_SHORT).show();return;}
+                      dlg.dismiss();recognizeSixCancelRows(col);
+                  }));
+                  dlg.show();
+              }catch(Exception e){Toast.makeText(this,"Không mở được ảnh: "+e.getMessage(),Toast.LENGTH_LONG).show();}
+          }
+
+          String bestNumberFromRaw(String raw){
+              if(raw==null)return "";
+              String[] parts=raw.split("[\\s,;:|]+");String best="";
+              for(String p:parts){
+                  String v=cleanOcrNumber(p);if(v==null||v.isEmpty())continue;
+                  if(v.length()==1 && "123456".contains(v))continue;
+                  if(v.length()>8)continue;
+                  if(v.length()>best.length())best=v;
+              }
+              return best;
+          }
+
+          void recognizeSixCancelRows(Bitmap col){
+              if(ocrProgress!=null&&ocrProgress.isShowing())ocrProgress.dismiss();
+              ocrProgress=ProgressDialog.show(this,"Đang đọc 6 dòng Vé hủy","Đọc từng ô riêng để giảm nhầm số…",true,false);
+              String[] vals={"","","","","",""};StringBuilder raw=new StringBuilder();
+              TextRecognizer rec=TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+              recognizeCancelBand(rec,col,0,vals,raw);
+          }
+
+          void recognizeCancelBand(TextRecognizer rec,Bitmap col,int idx,String[] vals,StringBuilder raw){
+              if(idx>=6){
+                  rec.close();if(ocrProgress!=null)ocrProgress.dismiss();
+                  OcrSheet sh=new OcrSheet();String[] agents={"Nguyễn Tấn Dũng","Lê Thiên Hạnh","Nguyễn Văn Sa","Nguyễn Thị Mai","Nguyễn Đình Phong","Nguyễn Thị Hường"};
+                  for(int i=0;i<6;i++)sh.values.put(agents[i],vals[i]);
+                  showOcrReviewWithRaw(sh,raw.toString(),true);return;
+              }
+              int h=col.getHeight(),w=col.getWidth();int top=Math.max(0,(int)(idx*h/6f)),bot=Math.min(h,(int)((idx+1)*h/6f));
+              // trim cell borders a little
+              int padX=Math.max(1,(int)(w*.04f)),padY=Math.max(1,(int)((bot-top)*.10f));
+              int cw=Math.max(1,w-2*padX),ch=Math.max(1,(bot-top)-2*padY);
+              Bitmap band=Bitmap.createBitmap(col,padX,Math.min(h-1,top+padY),cw,Math.min(ch,h-(top+padY)));
+              rec.process(InputImage.fromBitmap(band,0))
+                  .addOnSuccessListener(t->{String r=t.getText();vals[idx]=bestNumberFromRaw(r);raw.append("Dòng ").append(idx+1).append(": ").append(r).append("\\n");recognizeCancelBand(rec,col,idx+1,vals,raw);})
+                  .addOnFailureListener(e->{raw.append("Dòng ").append(idx+1).append(": [không đọc được]\\n");recognizeCancelBand(rec,col,idx+1,vals,raw);});
+          }
+
+          '''
+          s=s.replace(marker,insert+marker,1)
+          s=s.replace("Phiên bản 2.9.9","Phiên bản 3.0.1")
+          s=s.replace("Phiên bản 2.9.8","Phiên bản 3.0.1")
+          p.write_text(s)
+          PY
+          sed -i -E 's/versionCode [0-9]+/versionCode 301/' app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '3.0.1'/" app/build.gradle
+
+      - name: Restore stable signing key
+        shell: bash
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/listcalculator-update.jks"
+          test -s "$RUNNER_TEMP/listcalculator-update.jks"
+
+      - name: Build signed release APK
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/listcalculator-update.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          gradle :app:assembleRelease --stacktrace
+          test -f app/build/outputs/apk/release/app-release.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v3.0.1-6RowCancelOCR.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListCalculatorFold2-v3.0.1-6RowCancelOCR
+          path: ListCalculatorFold2-v3.0.1-6RowCancelOCR.apk
+          if-no-files-found: error
+
+# transform-retry-2
+
+# retry-3
