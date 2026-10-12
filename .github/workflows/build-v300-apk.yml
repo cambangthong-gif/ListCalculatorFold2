@@ -342,11 +342,12 @@ jobs:
           s=p.read_text()
 
           # OCR camera/gallery: after getting the image, open region selector first.
-          old='Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();\n                  runCancelSheetOcr(uri);'
-          new='Toast.makeText(this,"Đã nhận ảnh • chọn vùng cần nhập hủy",Toast.LENGTH_SHORT).show();\n                  showCancelCropDialog(uri);'
-          if old not in s:
+          import re
+          pat=r'Toast\.makeText\(this,"Đã nhận ảnh[^"]*",Toast\.LENGTH_SHORT\)\.show\(\);\s*runCancelSheetOcr\(uri\);'
+          repl='Toast.makeText(this,"Đã nhận ảnh • chọn vùng cần nhập hủy",Toast.LENGTH_SHORT).show();\\n                  showCancelCropDialog(uri);'
+          s,n=re.subn(pat,repl,s,count=1,flags=re.S)
+          if n!=1:
               raise SystemExit('OCR result anchor not found')
-          s=s.replace(old,new,1)
 
           marker='    void showCancelPhotoMenu(){'
           if marker not in s:
