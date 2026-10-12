@@ -1,4 +1,4 @@
-name: Build ListCalculatorFold2 v3.0.0 APK - Select Cancel Region
+name: Build ListCalculatorFold2 v2.10.0 APK - Select Cancel Region
 
 on:
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
           python3 /tmp/v296_transform.py
           sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
 
-      - name: Apply v2.9.7 OCR fallback
+      - name: Apply v2.9.9 OCR fallback
         shell: bash
         run: |
           python3 - <<'PY'
@@ -248,7 +248,7 @@ jobs:
 
           sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
           sed -i -E 's/versionCode [0-9]+/versionCode 300/' app/build.gradle
-          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.10.0'/" app/build.gradle
 
       - name: Fix gallery and camera result handling
         shell: bash
@@ -323,7 +323,7 @@ jobs:
           p.write_text(s)
           PY
           sed -i -E 's/versionCode [0-9]+/versionCode 300/' app/build.gradle
-          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.10.0'/" app/build.gradle
           grep -n "REQ_OCR_GALLERY\|onActivityResult\|runCancelSheetOcr" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java | tail -20
 
       - name: Improve handwritten cancel-number selection
@@ -331,15 +331,212 @@ jobs:
         run: |
           python3 .github/scripts/v299_transform.py
           sed -i -E 's/versionCode [0-9]+/versionCode 300/' app/build.gradle
-          sed -i -E "s/versionName '[^']+'/versionName '2.9.9'/" app/build.gradle
+          sed -i -E "s/versionName '[^']+'/versionName '2.10.0'/" app/build.gradle
 
-      - name: Add selectable cancel import region
+      - name: Add selectable cancel-sheet crop region
         shell: bash
         run: |
-          python3 .github/scripts/v300_transform.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
+          s=p.read_text()
+
+          # OCR camera/gallery: after getting the image, open region selector first.
+          old='Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();\n                  runCancelSheetOcr(uri);'
+          new='Toast.makeText(this,"Đã nhận ảnh • chọn vùng cần nhập hủy",Toast.LENGTH_SHORT).show();\n                  showCancelCropDialog(uri);'
+          if old not in s:
+              raise SystemExit('OCR result anchor not found')
+          s=s.replace(old,new,1)
+
+          marker='    void showCancelPhotoMenu(){'
+          if marker not in s:
+              raise SystemExit('showCancelPhotoMenu marker not found')
+
+          insert=r'''    Bitmap loadCancelCropBitmap(Uri uri) throws Exception{
+              if(Build.VERSION.SDK_INT>=28){
+                  ImageDecoder.Source src=ImageDecoder.createSource(getContentResolver(),uri);
+                  return ImageDecoder.decodeBitmap(src,(decoder,info,source)->{
+                      int w=info.getSize().getWidth(),h=info.getSize().getHeight();
+                      int max=Math.max(w,h);
+                      if(max>2400){
+                          float k=2400f/max;
+                          decoder.setTargetSize(Math.max(1,(int)(w*k)),Math.max(1,(int)(h*k)));
+                      }
+                      decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
+                  });
+              }
+              try(InputStream is=getContentResolver().openInputStream(uri)){
+                  return BitmapFactory.decodeStream(is);
+              }
+          }
+
+          class CancelCropView extends View{
+              Bitmap bmp;
+              Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+              Paint shade=new Paint();
+              RectF sel=new RectF();
+              float scale=1,ox=0,oy=0;
+              int mode=0; // 1=new, 2=move, 3..6=corners
+              float downX,downY;
+              RectF startSel=new RectF();
+
+              CancelCropView(Context c,Bitmap b){
+                  super(c);bmp=b;
+                  paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(dp(3));paint.setColor(accent);
+                  shade.setColor(Color.argb(120,0,0,0));
+                  setBackgroundColor(Color.rgb(20,20,20));
+              }
+
+              void ensureSel(){
+                  if(sel.width()>0&&sel.height()>0)return;
+                  float mx=bmp.getWidth()*.05f,my=bmp.getHeight()*.05f;
+                  sel.set(mx,my,bmp.getWidth()-mx,bmp.getHeight()-my);
+              }
+
+              @Override protected void onDraw(Canvas c){
+                  super.onDraw(c);
+                  if(bmp==null)return;
+                  float sx=getWidth()/(float)bmp.getWidth(),sy=getHeight()/(float)bmp.getHeight();
+                  scale=Math.min(sx,sy);
+                  float dw=bmp.getWidth()*scale,dh=bmp.getHeight()*scale;
+                  ox=(getWidth()-dw)/2f;oy=(getHeight()-dh)/2f;
+                  c.drawBitmap(bmp,null,new RectF(ox,oy,ox+dw,oy+dh),null);
+                  ensureSel();
+                  RectF r=toView(sel);
+                  c.drawRect(ox,oy,ox+dw,r.top,shade);
+                  c.drawRect(ox,r.bottom,ox+dw,oy+dh,shade);
+                  c.drawRect(ox,r.top,r.left,r.bottom,shade);
+                  c.drawRect(r.right,r.top,ox+dw,r.bottom,shade);
+                  c.drawRoundRect(r,dp(8),dp(8),paint);
+                  Paint handle=new Paint(Paint.ANTI_ALIAS_FLAG);handle.setColor(Color.WHITE);
+                  Paint ring=new Paint(Paint.ANTI_ALIAS_FLAG);ring.setColor(accent);
+                  float rad=dp(10);
+                  float[][] pts={{r.left,r.top},{r.right,r.top},{r.left,r.bottom},{r.right,r.bottom}};
+                  for(float[] q:pts){c.drawCircle(q[0],q[1],rad,ring);c.drawCircle(q[0],q[1],rad*.55f,handle);}
+              }
+
+              RectF toView(RectF b){return new RectF(ox+b.left*scale,oy+b.top*scale,ox+b.right*scale,oy+b.bottom*scale);}
+              float bx(float x){return Math.max(0,Math.min(bmp.getWidth(),(x-ox)/scale));}
+              float by(float y){return Math.max(0,Math.min(bmp.getHeight(),(y-oy)/scale));}
+
+              @Override public boolean onTouchEvent(android.view.MotionEvent e){
+                  if(bmp==null)return false;
+                  float x=bx(e.getX()),y=by(e.getY());
+                  float hit=dp(34)/Math.max(.01f,scale);
+                  if(e.getAction()==MotionEvent.ACTION_DOWN){
+                      ensureSel();startSel.set(sel);downX=x;downY=y;
+                      float[][] pts={{sel.left,sel.top},{sel.right,sel.top},{sel.left,sel.bottom},{sel.right,sel.bottom}};
+                      int best=-1;float bd=Float.MAX_VALUE;
+                      for(int i=0;i<4;i++){float dx=x-pts[i][0],dy=y-pts[i][1],d=dx*dx+dy*dy;if(d<bd){bd=d;best=i;}}
+                      if(bd<=hit*hit)mode=3+best;
+                      else if(sel.contains(x,y))mode=2;
+                      else{mode=1;sel.set(x,y,x,y);}
+                      invalidate();return true;
+                  }
+                  if(e.getAction()==MotionEvent.ACTION_MOVE){
+                      if(mode==1){
+                          sel.left=Math.min(downX,x);sel.right=Math.max(downX,x);sel.top=Math.min(downY,y);sel.bottom=Math.max(downY,y);
+                      }else if(mode==2){
+                          float dx=x-downX,dy=y-downY;
+                          sel.set(startSel);
+                          sel.offset(dx,dy);
+                          if(sel.left<0)sel.offset(-sel.left,0);
+                          if(sel.top<0)sel.offset(0,-sel.top);
+                          if(sel.right>bmp.getWidth())sel.offset(bmp.getWidth()-sel.right,0);
+                          if(sel.bottom>bmp.getHeight())sel.offset(0,bmp.getHeight()-sel.bottom);
+                      }else if(mode>=3){
+                          sel.set(startSel);
+                          if(mode==3){sel.left=x;sel.top=y;}
+                          else if(mode==4){sel.right=x;sel.top=y;}
+                          else if(mode==5){sel.left=x;sel.bottom=y;}
+                          else{sel.right=x;sel.bottom=y;}
+                          float l=Math.min(sel.left,sel.right),r=Math.max(sel.left,sel.right),t=Math.min(sel.top,sel.bottom),b=Math.max(sel.top,sel.bottom);
+                          sel.set(l,t,r,b);
+                      }
+                      invalidate();return true;
+                  }
+                  if(e.getAction()==MotionEvent.ACTION_UP||e.getAction()==MotionEvent.ACTION_CANCEL){
+                      mode=0;
+                      if(sel.width()<bmp.getWidth()*.08f||sel.height()<bmp.getHeight()*.08f){
+                          float mx=bmp.getWidth()*.05f,my=bmp.getHeight()*.05f;sel.set(mx,my,bmp.getWidth()-mx,bmp.getHeight()-my);
+                      }
+                      invalidate();return true;
+                  }
+                  return true;
+              }
+
+              Bitmap selectedBitmap(){
+                  ensureSel();
+                  int l=Math.max(0,(int)sel.left),t=Math.max(0,(int)sel.top);
+                  int r=Math.min(bmp.getWidth(),(int)sel.right),b=Math.min(bmp.getHeight(),(int)sel.bottom);
+                  if(r-l<20||b-t<20)return bmp;
+                  return Bitmap.createBitmap(bmp,l,t,r-l,b-t);
+              }
+
+              void selectAll(){
+                  float mx=bmp.getWidth()*.01f,my=bmp.getHeight()*.01f;
+                  sel.set(mx,my,bmp.getWidth()-mx,bmp.getHeight()-my);invalidate();
+              }
+          }
+
+          void showCancelCropDialog(Uri uri){
+              try{
+                  Bitmap bmp=loadCancelCropBitmap(uri);
+                  if(bmp==null){Toast.makeText(this,"Không mở được ảnh",Toast.LENGTH_LONG).show();return;}
+
+                  LinearLayout box=new LinearLayout(this);box.setOrientation(LinearLayout.VERTICAL);
+                  TextView tip=text("Kéo khung xanh vào đúng bảng/tỉnh cần nhập Hủy. Kéo 4 chấm trắng để chỉnh góc.",12,false);
+                  tip.setTextColor(muted);tip.setPadding(dp(14),dp(8),dp(14),dp(8));box.addView(tip);
+
+                  CancelCropView crop=new CancelCropView(this,bmp);
+                  int h=Math.min(dp(620),(int)(getResources().getDisplayMetrics().heightPixels*.62f));
+                  box.addView(crop,new LinearLayout.LayoutParams(-1,h));
+
+                  LinearLayout tools=new LinearLayout(this);tools.setPadding(dp(10),dp(8),dp(10),0);
+                  Button all=smallActionButton("Toàn ảnh");all.setOnClickListener(v->{haptic(v);crop.selectAll();});
+                  Button hint=smallActionButton("Chọn lại vùng");hint.setOnClickListener(v->{haptic(v);crop.sel.set(0,0,0,0);crop.invalidate();});
+                  tools.addView(all,new LinearLayout.LayoutParams(0,dp(44),1));
+                  tools.addView(hint,new LinearLayout.LayoutParams(0,dp(44),1));
+                  box.addView(tools);
+
+                  AlertDialog dlg=new AlertDialog.Builder(this).setTitle("Chọn vùng nhập Hủy")
+                      .setView(box)
+                      .setPositiveButton("Nhận dạng vùng chọn",null)
+                      .setNegativeButton("Hủy",null).create();
+
+                  dlg.setOnShowListener(x->{
+                      dlg.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{
+                          Bitmap chosen=crop.selectedBitmap();
+                          dlg.dismiss();
+                          runCancelSheetOcrBitmap(chosen);
+                      });
+                  });
+                  dlg.show();
+              }catch(Exception e){
+                  Toast.makeText(this,"Không mở được ảnh để chọn vùng: "+e.getMessage(),Toast.LENGTH_LONG).show();
+              }
+          }
+
+          void runCancelSheetOcrBitmap(Bitmap bmp){
+              if(bmp==null){Toast.makeText(this,"Vùng chọn không hợp lệ",Toast.LENGTH_LONG).show();return;}
+              try{
+                  File f=new File(getCacheDir(),"cancel_crop_"+System.currentTimeMillis()+".jpg");
+                  try(FileOutputStream os=new FileOutputStream(f)){bmp.compress(Bitmap.CompressFormat.JPEG,94,os);}
+                  Toast.makeText(this,"Đang nhận dạng vùng đã chọn…",Toast.LENGTH_SHORT).show();
+                  runCancelSheetOcr(Uri.fromFile(f));
+              }catch(Exception e){
+                  Toast.makeText(this,"Không xử lý được vùng chọn: "+e.getMessage(),Toast.LENGTH_LONG).show();
+              }
+          }
+
+          '''
+          s=s.replace(marker,insert+marker,1)
+          s=s.replace("Phiên bản 2.9.9","Phiên bản 2.10.0")
+          s=s.replace("Phiên bản 2.9.8","Phiên bản 2.10.0")
+          p.write_text(s)
+          PY
           sed -i -E 's/versionCode [0-9]+/versionCode 300/' app/build.gradle
-          sed -i -E "s/versionName '[^']+'/versionName '3.0.0'/" app/build.gradle
-          grep -n "Chọn vùng nhập hủy\|showCancelRegionPicker\|runCancelSheetOcrBitmap" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
+          sed -i -E "s/versionName '[^']+'/versionName '2.10.0'/" app/build.gradle
 
       - name: Restore stable signing key
         shell: bash
@@ -357,17 +554,15 @@ jobs:
         run: |
           gradle :app:assembleRelease --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v3.0.0-SelectRegion-OCR-FoldAdaptive.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.10.0-SelectCancelRegion.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ListCalculatorFold2-v3.0.0-SelectRegion-OCR-FoldAdaptive
-          path: ListCalculatorFold2-v3.0.0-SelectRegion-OCR-FoldAdaptive.apk
+          name: ListCalculatorFold2-v2.10.0-SelectCancelRegion
+          path: ListCalculatorFold2-v2.10.0-SelectCancelRegion.apk
           if-no-files-found: error
 
 # transform-retry-2
 
 # retry-3
-
-# retry region picker transform
