@@ -70,7 +70,7 @@ jobs:
           python3 /tmp/v296_transform.py
           sed -i 's/pushUndoSnapshot(/pushUndo(/g' app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java
 
-      - name: Apply v2.9.8 OCR fallback
+      - name: Apply v2.9.7 OCR fallback
         shell: bash
         run: |
           python3 - <<'PY'
@@ -242,7 +242,7 @@ jobs:
 
           '''+s[b:]
 
-          s=s.replace("Phiên bản 2.9.6","Phiên bản 2.9.7")
+          s=s.replace("Phiên bản 2.9.6","Phiên bản 2.9.8")
           p.write_text(s)
           PY
 
@@ -250,46 +250,45 @@ jobs:
           sed -i -E 's/versionCode [0-9]+/versionCode 298/' app/build.gradle
           sed -i -E "s/versionName '[^']+'/versionName '2.9.8'/" app/build.gradle
 
-      - name: Fix gallery and camera result handling
+      - name: Fix camera result dispatch
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
           p=Path('app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java')
           s=p.read_text()
 
-          start=s.find('    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){')
-          end=s.find('    double selectedCustomTotal(',start)
-          if start<0 or end<0:
-              raise SystemExit('onActivityResult block not found')
-
-          method=r'''    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
+          pat=r'    @Override protected void onActivityResult\(int requestCode,int resultCode,Intent data\)\{.*?\n    \}\n\n\n    double selectedCustomTotal'
+          repl=r'''    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data){
               super.onActivityResult(requestCode,resultCode,data);
 
-              // OCR camera/gallery must be handled before the backup/restore early-return logic.
-              if(requestCode==REQ_OCR_CAMERA || requestCode==REQ_OCR_GALLERY){
-                  if(resultCode!=RESULT_OK)return;
-
-                  Uri uri=null;
-                  if(requestCode==REQ_OCR_CAMERA){
-                      uri=pendingOcrImageUri;
-                  }else if(data!=null){
-                      uri=data.getData();
-                      if(uri!=null){
-                          try{
-                              final int flags=data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
-                              getContentResolver().takePersistableUriPermission(uri,flags);
-                          }catch(Exception ignored){}
-                      }
+              // Camera using EXTRA_OUTPUT normally returns data == null.
+              // Handle OCR requests BEFORE the generic file-picker guard.
+              if(requestCode==REQ_OCR_CAMERA){
+                  if(resultCode==RESULT_OK && pendingOcrImageUri!=null){
+                      Uri uri=pendingOcrImageUri;
+                      pendingOcrImageUri=null;
+                      Toast.makeText(this,"Đã chụp ảnh • đang nhận dạng…",Toast.LENGTH_SHORT).show();
+                      runCancelSheetOcr(uri);
+                  }else if(resultCode!=RESULT_CANCELED){
+                      Toast.makeText(this,"Không nhận được ảnh từ camera",Toast.LENGTH_LONG).show();
                   }
+                  return;
+              }
 
-                  if(uri==null){
-                      Toast.makeText(this,"Không lấy được ảnh đã chọn",Toast.LENGTH_LONG).show();
-                      return;
+              if(requestCode==REQ_OCR_GALLERY){
+                  if(resultCode==RESULT_OK && data!=null && data.getData()!=null){
+                      Uri uri=data.getData();
+                      try{
+                          getContentResolver().takePersistableUriPermission(
+                              uri,data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
+                      }catch(Exception ignored){}
+                      Toast.makeText(this,"Đã chọn ảnh • đang nhận dạng…",Toast.LENGTH_SHORT).show();
+                      runCancelSheetOcr(uri);
+                  }else if(resultCode!=RESULT_CANCELED){
+                      Toast.makeText(this,"Không nhận được ảnh",Toast.LENGTH_LONG).show();
                   }
-
-                  Toast.makeText(this,"Đã nhận ảnh, đang đọc tờ hủy…",Toast.LENGTH_SHORT).show();
-                  runCancelSheetOcr(uri);
                   return;
               }
 
@@ -306,9 +305,10 @@ jobs:
                       try(BufferedReader br=new BufferedReader(new InputStreamReader(getContentResolver().openInputStream(uri),"UTF-8"))){
                           String line;while((line=br.readLine())!=null)sb.append(line);
                       }
+                      final String restored=sb.toString();
                       new AlertDialog.Builder(this).setTitle("Khôi phục dữ liệu?")
                           .setMessage("Dữ liệu hiện tại sẽ được thay bằng bản sao lưu.")
-                          .setPositiveButton("Khôi phục",(d,w)->{pushUndo("Khôi phục backup");restoreStateJson(sb.toString());})
+                          .setPositiveButton("Khôi phục",(d,w)->{pushUndo("Khôi phục backup");restoreStateJson(restored);})
                           .setNegativeButton("Hủy",null).show();
                   }
               }catch(Exception e){
@@ -317,14 +317,16 @@ jobs:
           }
 
 
-          '''
-          s=s[:start]+method+s[end:]
-          s=s.replace("Phiên bản 2.9.7","Phiên bản 2.9.8")
+          double selectedCustomTotal'''
+          s2,n=re.subn(pat,repl,s,count=1,flags=re.S)
+          if n!=1:
+              raise SystemExit('Cannot replace onActivityResult')
+          s=s2.replace("Phiên bản 2.9.7","Phiên bản 2.9.8")
           p.write_text(s)
           PY
           sed -i -E 's/versionCode [0-9]+/versionCode 298/' app/build.gradle
           sed -i -E "s/versionName '[^']+'/versionName '2.9.8'/" app/build.gradle
-          grep -n "REQ_OCR_GALLERY\|onActivityResult\|runCancelSheetOcr" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java | tail -20
+          grep -n "REQ_OCR_CAMERA\|onActivityResult\|versionCode\|versionName" app/src/main/java/com/vinh/listcalculatorfold2/MainActivity.java app/build.gradle | tail -20
 
       - name: Restore stable signing key
         shell: bash
@@ -342,11 +344,11 @@ jobs:
         run: |
           gradle :app:assembleRelease --stacktrace
           test -f app/build/outputs/apk/release/app-release.apk
-          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.8-OCR-Fallback-FoldAdaptive.apk
+          cp app/build/outputs/apk/release/app-release.apk ListCalculatorFold2-v2.9.8-CameraResultFix-OCR-FoldAdaptive.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ListCalculatorFold2-v2.9.8-OCR-Fallback-FoldAdaptive
-          path: ListCalculatorFold2-v2.9.8-OCR-Fallback-FoldAdaptive.apk
+          name: ListCalculatorFold2-v2.9.8-CameraResultFix-OCR-FoldAdaptive
+          path: ListCalculatorFold2-v2.9.8-CameraResultFix-OCR-FoldAdaptive.apk
           if-no-files-found: error
