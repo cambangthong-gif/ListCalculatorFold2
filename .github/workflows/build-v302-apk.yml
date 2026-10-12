@@ -514,9 +514,12 @@ jobs:
                       'for(int i=1;i<rowCount;i++){float y=r.top+r.height()*i/(float)rowCount;c.drawLine(r.left,y,r.right,y,guide);}',1)
 
           # Replace crop dialog with dynamic agent count.
-          a=s.find('    void showCancelColumnCropDialog(Uri uri){')
-          b=s.find('    String bestNumberFromRaw',a)
-          if a<0 or b<0: raise SystemExit('crop dialog block not found')
+          m=re.search(r'\\n\\s*void showCancelColumnCropDialog\\(Uri uri\\)\\{',s)
+          if not m: raise SystemExit('crop dialog block not found')
+          a=m.start()+1
+          m2=re.search(r'\\n\\s*String bestNumberFromRaw\\(',s[m.end():])
+          if not m2: raise SystemExit('bestNumberFromRaw marker not found')
+          b=m.end()+m2.start()+1
           dialog=r'''    int currentCancelAgentCount(){
               TableModel t=selected();
               if(t==null||!"cancel".equals(t.type))return 6;
@@ -586,9 +589,12 @@ jobs:
           s=s[:a]+dialog+s[b:]
 
           # Replace fixed six-row OCR methods with dynamic row count and current table agent names.
-          a=s.find('    void recognizeSixCancelRows(Bitmap col){')
-          b=s.find('    void showCancelPhotoMenu(){',a)
-          if a<0 or b<0: raise SystemExit('fixed OCR methods block not found')
+          m=re.search(r'\\n\\s*void recognizeSixCancelRows\\(Bitmap col\\)\\{',s)
+          if not m: raise SystemExit('recognizeSixCancelRows block not found')
+          a=m.start()+1
+          m2=re.search(r'\\n\\s*void showCancelPhotoMenu\\(\\)\\{',s[m.end():])
+          if not m2: raise SystemExit('showCancelPhotoMenu marker not found')
+          b=m.end()+m2.start()+1
           methods=r'''    void recognizeCancelRows(Bitmap col,int rowCount,ArrayList<String> agentNames){
               if(ocrProgress!=null&&ocrProgress.isShowing())ocrProgress.dismiss();
               ocrProgress=ProgressDialog.show(this,"Đang đọc cột Vé hủy","Đọc "+rowCount+" dòng đại lý…",true,false);
