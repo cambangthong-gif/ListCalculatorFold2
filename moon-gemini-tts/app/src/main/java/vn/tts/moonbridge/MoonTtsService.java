@@ -29,7 +29,8 @@ public class MoonTtsService extends TextToSpeechService {
  private static final List<String> LANGS=Arrays.asList("vi","en","ja","ko","zh","fr","de","es","pt","it","ru","th","id","hi","ar","nl","tr","pl");
  private volatile boolean stopped=false;
  private volatile HttpURLConnection active;
- private volatile boolean streamUnavailable=false;
+ private volatile long streamRetryAtMs=0;
+ private volatile String lastStreamProblem="";
 
  @Override protected String[] onGetLanguage(){return new String[]{"vie","VNM",""};}
  private static String lang(String l){
@@ -86,8 +87,9 @@ public class MoonTtsService extends TextToSpeechService {
 
   long begin=SystemClock.elapsedRealtime();
   AudioWriter writer=new AudioWriter(callback,begin);
-  boolean useStream=SettingsStore.mode(this)==0&&!streamUnavailable;
-  String mode=useStream?"streaming":"ổn định";
+  boolean preferenceFast=SettingsStore.mode(this)==0;
+  boolean useStream=preferenceFast&&SystemClock.elapsedRealtime()>=streamRetryAtMs;
+  String mode=useStream?"streaming":(preferenceFast?"ổn định (streaming tạm nghỉ)":"ổn định (đã chọn)");
   try{
    for(String part:splitText(input)){
     if(stopped)return;
@@ -95,15 +97,22 @@ public class MoonTtsService extends TextToSpeechService {
      long before=writer.received();
      try{
       streamAudio(key,model,voice,style,request.getSpeechRate(),part,writer);
+      streamRetryAtMs=0;
+      lastStreamProblem="";
+      SettingsStore.setStreamInfo(this,"Streaming đã hoạt động thành công");
      }catch(Exception ex){
       if(stopped)return;
       if(writer.received()!=before)throw ex;
       String reason=ex.getMessage()==null?"":ex.getMessage();
       if(reason.contains("429")||reason.contains("401")||reason.contains("403"))
        throw ex;
-      // No PCM was sent for the current text. Revert to the proven v1.1 request
-      // and stop trying streaming for the remainder of this service session.
-      streamUnavailable=true;
+      // V1.3 disabled streaming permanently for any transient error.
+      // Retry automatically after a bounded cooldown; preserve the reason for diagnostics.
+      lastStreamProblem=reason.length()>170?reason.substring(0,170):reason;
+      boolean unsupported=reason.contains("(400)")||reason.contains("HTTP 404")||reason.contains("HTTP 422");
+      streamRetryAtMs=SystemClock.elapsedRealtime()+(unsupported?600000L:45000L);
+      SettingsStore.setStreamInfo(this,"Không dùng streaming vì: "+lastStreamProblem+
+          (unsupported?" (thử lại sau 10 phút)":" (thử lại sau 45 giây)"));
       useStream=false;
       mode="dự phòng ổn định";
       byte[] pcm=unaryAudio(key,model,voice,style,request.getSpeechRate(),part);
@@ -118,7 +127,8 @@ public class MoonTtsService extends TextToSpeechService {
    if(!writer.hasStarted())throw new Exception("Gemini không trả âm thanh.");
    SettingsStore.setError(this,"");
    SettingsStore.setMetric(this,mode+": âm đầu "+(writer.firstAudioMs())+
-       " ms; tổng tổng hợp "+(SystemClock.elapsedRealtime()-begin)+" ms");
+       " ms; tổng tổng hợp "+(SystemClock.elapsedRealtime()-begin)+" ms"+
+       (preferenceFast&&!lastStreamProblem.isEmpty()?" | "+lastStreamProblem:""));
    callback.done();
   }catch(Exception ex){
    if(stopped)return;
