@@ -16,9 +16,68 @@ final class GeminiSpeech {
  static final int SAMPLE_RATE=24000;
  private GeminiSpeech(){}
 
+ interface Status {
+  void update(String message);
+ }
+ static final class RateLimitException extends Exception {
+  final boolean daily;
+  final long retryMs;
+  RateLimitException(String message,boolean daily,long retryMs){
+   super(message);this.daily=daily;this.retryMs=retryMs;
+  }
+ }
+ private static final Object RATE_LOCK=new Object();
+ private static long nextAllowedAt=0;
+ private static final long MIN_REQUEST_INTERVAL=15000L;
+
  static byte[] synthesize(Context context,String input)throws Exception{
+  return synthesize(context,input,null);
+ }
+ static byte[] synthesize(Context context,String input,Status feedback)throws Exception{
+  byte[] cached=SpeechCache.load(context,input);
+  if(cached!=null){
+   if(feedback!=null)feedback.update("Đã có giọng Puck trong bộ nhớ; không dùng API.");
+   return cached;
+  }
   String key=SettingsStore.getKey(context);
   if(key.isEmpty())throw new Exception("Chưa nhập Gemini API key.");
+  for(int attempt=0;attempt<2;attempt++){
+   waitForSlot(feedback);
+   try{
+    byte[] pcm=callGemini(context,key,input);
+    SpeechCache.save(context,input,pcm);
+    return pcm;
+   }catch(RateLimitException ex){
+    if(ex.daily||attempt>=1)throw ex;
+    long backoff=Math.max(20000L,Math.min(90000L,ex.retryMs));
+    synchronized(RATE_LOCK){
+     nextAllowedAt=Math.max(nextAllowedAt,android.os.SystemClock.elapsedRealtime()+backoff);
+    }
+    if(feedback!=null)feedback.update("Google 429: tạm giới hạn yêu cầu. Tự thử lại sau "+
+       (backoff/1000)+" giây (tối đa một lần).");
+   }
+  }
+  throw new Exception("Không tạo được âm thanh.");
+ }
+ private static void waitForSlot(Status feedback)throws InterruptedException{
+  long scheduled;
+  synchronized(RATE_LOCK){
+   long now=android.os.SystemClock.elapsedRealtime();
+   scheduled=Math.max(nextAllowedAt,now);
+   nextAllowedAt=scheduled+MIN_REQUEST_INTERVAL;
+  }
+  long previous=-1;
+  while(true){
+   long remaining=scheduled-android.os.SystemClock.elapsedRealtime();
+   if(remaining<=0)return;
+   long seconds=(remaining+999)/1000;
+   if(feedback!=null&&(previous<0||seconds<=3||seconds%5==0)&&seconds!=previous)
+    feedback.update("Điều tiết API miễn phí • chờ "+seconds+" giây");
+   previous=seconds;
+   Thread.sleep(Math.min(1000L,remaining));
+  }
+ }
+ private static byte[] callGemini(Context context,String key,String input)throws Exception{
   JSONObject annotation=new JSONObject().put("type","speech_metadata")
    .put("style","Cheerful, curious, engaging, lively, natural audiobook storytelling. Read faithfully without adding or omitting words.");
   JSONObject text=new JSONObject().put("type","text")
@@ -45,7 +104,22 @@ final class GeminiSpeech {
    int code=conn.getResponseCode();
    if(code!=200){
     String detail=read(conn.getErrorStream(),5000);
-    if(code==429)throw new Exception("Gemini hết hạn mức hoặc quá nhiều yêu cầu (429). Hãy thử lại sau.");
+    if(code==429){
+     String lower=detail.toLowerCase(java.util.Locale.ROOT);
+     boolean daily=lower.contains("per_day")||lower.contains("perday")||
+       lower.contains("requestsperday")||lower.contains("quota_exceeded")||
+       lower.contains("per day")||lower.contains("rpd");
+     long retryMs=30000L;
+     String retryHeader=conn.getHeaderField("Retry-After");
+     if(retryHeader!=null)try{
+      retryMs=Math.max(5000L,Math.min(90000L,
+          (long)(Double.parseDouble(retryHeader.trim())*1000)));
+     }catch(NumberFormatException ignored){}
+     if(daily)throw new RateLimitException(
+       "Google 429: đã hết hạn mức theo ngày của dự án Gemini. Không thể tự khắc phục bằng thử lại liên tục. Kiểm tra AI Studio > Rate limits.",true,retryMs);
+     throw new RateLimitException(
+       "Google 429: quá nhiều yêu cầu hoặc hết hạn mức. Đã giảm tốc độ; nếu vẫn lỗi, kiểm tra hạn mức dự án trong AI Studio.",false,retryMs);
+    }
     if(code==401||code==403)throw new Exception("Gemini từ chối API key hoặc quyền TTS ("+code+").");
     throw new Exception("Gemini HTTP "+code+": "+detail.substring(0,Math.min(220,detail.length())));
    }
