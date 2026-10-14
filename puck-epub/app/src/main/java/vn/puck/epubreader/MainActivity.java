@@ -93,7 +93,7 @@ public final class MainActivity extends Activity {
      lastStatus="Không đọc được: "+message;
      updateStatus();
      new AlertDialog.Builder(MainActivity.this).setTitle("TTS tạm dừng")
-       .setMessage(message+"\n\nBạn có thể thử lại. Nếu báo 429, hãy chờ hạn mức Gemini hồi phục.")
+       .setMessage(message+"\n\nNếu 429 do giới hạn theo ngày, cần chờ hạn mức phục hồi. Kiểm tra aistudio.google.com > Rate limits. Những đoạn giọng đã tạo sẽ được giữ trong máy.")
        .setPositiveButton("Đóng",null).show();
     });
    }
@@ -154,7 +154,7 @@ public final class MainActivity extends Activity {
 
   scroll=new ScrollView(this);scroll.setFillViewport(true);
   scroll.setBackground(shape(0xfff4f6fa,16));
-  reader=text("Nhấn “Mở EPUB” để chọn sách.\n\nỨng dụng sẽ chuẩn bị sẵn các đoạn tiếp theo trong khi đọc, giúp giảm khoảng nghỉ giữa các câu.",font,INK,false);
+  reader=text("Nhấn “Mở EPUB” để chọn sách.\n\nChế độ tiết kiệm hạn mức: chỉ gọi một yêu cầu Gemini mỗi lần, có đọc trước và lưu âm thanh trên máy.",font,INK,false);
   reader.setLineSpacing(dp(7),1.12f);
   reader.setPadding(dp(18),dp(20),dp(18),dp(25));
   scroll.addView(reader,new ScrollView.LayoutParams(-1,-2));
@@ -187,7 +187,7 @@ public final class MainActivity extends Activity {
   status.setPadding(dp(10),dp(9),dp(10),dp(9));
   column.addView(status);
   gap(column,5);
-  stats=text("Tải trước 2 đoạn • Puck Flash-Lite • Cần kết nối mạng",12,MUTED,false);
+  stats=text("Đọc trước 1 đoạn • Puck Flash-Lite • Lưu giọng trên máy",12,MUTED,false);
   column.addView(stats);
   if(book!=null)showBook();else updateStatus();
  }
@@ -346,12 +346,13 @@ public final class MainActivity extends Activity {
  private void updateStatus(){
   if(status==null)return;
   status.setText(lastStatus);
-  if(book==null){stats.setText("EPUB • Giọng Puck • Đọc trước 2 đoạn");return;}
+  if(book==null){stats.setText("EPUB • Puck • Gọi API lần lượt • Có bộ nhớ âm thanh");return;}
   EpubBook.Segment seg=book.segments.get(currentSegment);
   stats.setText("Chương "+(seg.chapter+1)+"/"+book.chapters.size()+
    " • "+(currentSegment+1)+"/"+book.segments.size()+" đoạn"+
    (lastDelay>=0?" • Chờ đầu "+String.format(Locale.ROOT,"%.1f",lastDelay/1000f)+" s":"")+
-   " • Đệm sẵn "+lastPrefetch+" đoạn");
+   " • Đệm sẵn "+lastPrefetch+" đoạn"+
+   " • Đã lưu "+String.format(Locale.ROOT,"%.1f",SpeechCache.bytes(this)/(1024f*1024f))+" MB");
  }
  @Override public void onConfigurationChanged(Configuration config){
   super.onConfigurationChanged(config);
