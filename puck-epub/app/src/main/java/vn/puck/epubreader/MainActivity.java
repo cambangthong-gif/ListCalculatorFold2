@@ -41,7 +41,7 @@ public final class MainActivity extends Activity {
  private Button play;
  private int currentSegment=0,chapterShown=-1,font=20;
  private boolean ignoreSelection=false;
- private SpannableStringBuilder chapterText;
+ private Spannable chapterText;
  private final ArrayList<Integer> textOffsets=new ArrayList<>();
  private BackgroundColorSpan highlight;
  private String lastStatus="Mở sách EPUB để bắt đầu.";
@@ -63,7 +63,7 @@ public final class MainActivity extends Activity {
   b.setMinHeight(dp(46));return b;
  }
  private LinearLayout row(){LinearLayout l=new LinearLayout(this);l.setOrientation(LinearLayout.HORIZONTAL);l.setGravity(Gravity.CENTER_VERTICAL);return l;}
- private void weighted(LinearLayout parent,View v,int weight){
+ private void weighted(LinearLayout parent,View v,float weight){
   LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(0,dp(45),weight);
   lp.setMargins(dp(2),0,dp(2),0);parent.addView(v,lp);
  }
@@ -220,8 +220,10 @@ public final class MainActivity extends Activity {
     EpubBook b=EpubBook.open(this,uri);
     runOnUiThread(()->{
      book=b;player.setBook(b);
-     prefs().edit().putString("uri",uri.toString()).apply();
-     currentSegment=Math.max(0,Math.min(prefs().getInt("segment",0),b.segments.size()-1));
+     String previous=prefs().getString("uri","");
+     int saved=uri.toString().equals(previous)?prefs().getInt("segment",0):0;
+     prefs().edit().putString("uri",uri.toString()).putInt("segment",saved).apply();
+     currentSegment=Math.max(0,Math.min(saved,b.segments.size()-1));
      showBook();
      lastStatus="Sẵn sàng. Nhấn ▶ Đọc để bắt đầu.";
      updateStatus();
@@ -260,8 +262,8 @@ public final class MainActivity extends Activity {
    textOffsets.add(sb.length());
    sb.append(p).append("\n\n");
   }
-  chapterText=sb;
-  reader.setText(chapterText,TextView.BufferType.SPANNABLE);
+  reader.setText(sb,TextView.BufferType.SPANNABLE);
+  chapterText=(Spannable)reader.getText();
   ignoreSelection=true;
   chapterSpinner.setSelection(idx,false);
   ignoreSelection=false;
