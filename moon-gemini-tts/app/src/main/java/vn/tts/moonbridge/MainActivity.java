@@ -24,7 +24,7 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
  private EditText keyField,trial;
- private Spinner voice,model,style;
+ private Spinner voice,model,style,latency;
  private TextView status;
  private TextToSpeech tester;
 
@@ -82,7 +82,12 @@ public class MainActivity extends Activity {
 
   heading(root,"4. Phong cách");
   style=dropdown(SettingsStore.STYLES,SettingsStore.style(this));
-  root.addView(style,new LinearLayout.LayoutParams(-1,dp(52)));gap(root,20);
+  root.addView(style,new LinearLayout.LayoutParams(-1,dp(52)));gap(root,17);
+  heading(root,"5. Tối ưu tốc độ đọc");
+  latency=dropdown(SettingsStore.LATENCIES,SettingsStore.LATENCIES[SettingsStore.mode(this)]);
+  root.addView(latency,new LinearLayout.LayoutParams(-1,dp(52)));gap(root,5);
+  root.addView(text("Chế độ nhanh phát ngay khi nhận âm thanh, tự quay về chế độ ổn định nếu streaming bị lỗi trước khi phát.",13,false));
+  gap(root,20);
 
   Button save=button("Lưu cấu hình",true);root.addView(save,new LinearLayout.LayoutParams(-1,dp(54)));
   save.setOnClickListener(v->save());gap(root,24);
@@ -99,7 +104,9 @@ public class MainActivity extends Activity {
   open.setOnClickListener(v->openSettings());gap(root,20);
   status=text(SettingsStore.getKey(this).isEmpty()?"Chưa nhập API key.":"API key đã lưu. Sẵn sàng thử giọng.",14,false);
   status.setPadding(dp(12),dp(14),dp(12),dp(14));status.setBackground(bg(0xffedf3fc));
-  root.addView(status);gap(root,20);
+  root.addView(status);gap(root,6);
+  TextView metric=text("Lần đọc gần nhất: "+SettingsStore.metric(this),13,false);
+  metric.setTextColor(0xff58697b);root.addView(metric);gap(root,20);
   TextView guide=text("HƯỚNG DẪN MOON+ READER\n\n1. Lưu API key và nghe thử.\n2. Cài đặt Android > Chuyển văn bản thành giọng nói > Công cụ ưu tiên > Moon Gemini TTS.\n3. Trong Moon+ Reader, mở sách > Đọc to (TTS).\n\nỨng dụng gửi đoạn văn tới Google Gemini. Cần mạng và có giới hạn API miễn phí. Giọng Puck không phải Drew.",14,false);
   guide.setLineSpacing(dp(3),1f);root.addView(guide);
  }
@@ -109,6 +116,7 @@ public class MainActivity extends Activity {
    if(!input.isEmpty()){SettingsStore.saveKey(this,input);keyField.setText("");}
    SettingsStore.saveOptions(this,voice.getSelectedItem().toString(),
        SettingsStore.MODELS[model.getSelectedItemPosition()],style.getSelectedItem().toString());
+   SettingsStore.setMode(this,latency.getSelectedItemPosition());
    status("Đã lưu giọng "+SettingsStore.voice(this)+". API key: "+
        (SettingsStore.getKey(this).isEmpty()?"chưa có":"đã mã hóa."));
    return true;
@@ -132,13 +140,13 @@ public class MainActivity extends Activity {
    if(langResult==TextToSpeech.LANG_NOT_SUPPORTED||langResult==TextToSpeech.LANG_MISSING_DATA){status("Moon Gemini TTS chưa nhận tiếng Việt.");return;}
    tester.setOnUtteranceProgressListener(new UtteranceProgressListener(){
     @Override public void onStart(String id){status("Đang phát giọng "+SettingsStore.voice(MainActivity.this)+"...");}
-    @Override public void onDone(String id){status("Đọc xong. Có thể mở Moon+ Reader.");}
+    @Override public void onDone(String id){status("Đọc xong. "+SettingsStore.metric(MainActivity.this));}
     @Override public void onError(String id){status("Lỗi: "+SettingsStore.getError(MainActivity.this));}
     @Override public void onError(String id,int code){status("Lỗi: "+SettingsStore.getError(MainActivity.this));}
    });
    if(tester.speak(message,TextToSpeech.QUEUE_FLUSH,null,"moon_test")!=TextToSpeech.SUCCESS)
        status("Không gửi được yêu cầu TTS tới Android.");
-   else status("Đang gọi Gemini, chờ vài giây...");
+   else status("Đang gọi Gemini. Nếu khoảng chờ kéo dài, xem thông số sau khi đọc xong.");
  }
  private void openSettings(){
   for(String action:new String[]{"com.android.settings.TTS_SETTINGS","android.settings.TTS_SETTINGS",Settings.ACTION_ACCESSIBILITY_SETTINGS}){
