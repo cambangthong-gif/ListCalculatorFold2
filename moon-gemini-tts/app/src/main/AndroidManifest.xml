@@ -6,8 +6,8 @@
  <activity android:name=".MainActivity" android:exported="true">
  <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
  </activity>
- <service android:name=".MoonTtsService" android:exported="true" android:permission="android.permission.BIND_TEXT_SERVICE" android:label="Moon Gemini TTS (Online)">
- <intent-filter><action android:name="android.intent.action.TTS_SERVICE"/></intent-filter>
+ <service android:name=".MoonTtsService" android:exported="true" android:label="Moon Gemini TTS (Online)">
+ <intent-filter><action android:name="android.intent.action.TTS_SERVICE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>
  <meta-data android:name="android.speech.tts" android:resource="@xml/tts_engine"/>
  </service>
  </application>
