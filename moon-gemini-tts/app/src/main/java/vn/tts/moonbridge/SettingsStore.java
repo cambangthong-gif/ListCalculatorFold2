@@ -26,6 +26,8 @@ final class SettingsStore {
  static void setMode(Context c,int mode){prefs(c).edit().putInt("latency_mode",mode==1?1:0).apply();}
  static void setMetric(Context c,String metric){prefs(c).edit().putString("latency_metric",metric).apply();}
  static String metric(Context c){return prefs(c).getString("latency_metric","Chưa đo tốc độ đọc.");}
+ static void setStreamInfo(Context c,String info){prefs(c).edit().putString("stream_info",info).apply();}
+ static String streamInfo(Context c){return prefs(c).getString("stream_info","Chưa thử streaming.");}
  static void saveOptions(Context c,String v,String m,String s){
   prefs(c).edit().putString("voice",v).putString("model",m).putString("style",s).apply();
  }
