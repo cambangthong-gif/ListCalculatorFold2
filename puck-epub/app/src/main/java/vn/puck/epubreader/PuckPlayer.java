@@ -40,7 +40,14 @@ final class PuckPlayer {
 
  void setBook(EpubBook b){
   stop();
-  synchronized(guard){book=b;position=0;}
+  synchronized(guard){
+   // Segment indices start again at zero for each book. Cached audio must not
+   // leak from the previous EPUB into the new book.
+   cache.clear();
+   cacheBytes=0;
+   book=b;
+   position=0;
+  }
  }
  int position(){synchronized(guard){return position;}}
  void startAt(int wanted){
