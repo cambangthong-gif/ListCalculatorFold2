@@ -190,12 +190,19 @@ final class EpubBook {
   }
  }
  private static Document parseXml(String xml)throws Exception{
+  // Android's built-in DOM implementation does NOT necessarily support Xerces features.
+  // Reject DTD/entity declarations in the bounded XML text before invoking the parser;
+  // an entity resolver below also blocks any attempts to fetch external resources.
+  if(java.util.regex.Pattern.compile("<!\\s*(?:DOCTYPE|ENTITY)\\b",
+       java.util.regex.Pattern.CASE_INSENSITIVE).matcher(xml).find()){
+   throw new Exception("EPUB chứa khai báo DTD/ENTITY không được hỗ trợ vì lý do an toàn.");
+  }
   DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();
   f.setNamespaceAware(true);
-  f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);
-  f.setFeature("http://xml.org/sax/features/external-general-entities",false);
-  f.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
-  f.setXIncludeAware(false);
-  return f.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
+  f.setValidating(false);
+  javax.xml.parsers.DocumentBuilder builder=f.newDocumentBuilder();
+  builder.setEntityResolver((publicId,systemId)->
+       new org.xml.sax.InputSource(new java.io.StringReader("")));
+  return builder.parse(new java.io.ByteArrayInputStream(xml.getBytes(StandardCharsets.UTF_8)));
  }
 }
