@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
   return s;
  }
  private Button button(String caption,boolean primary){
-  Button b=new Button(this);b.setText(caption);b.setTextAllCaps(false);b.setTextSize(16);
+  Button b=new Button(this);b.setText(caption);b.setAllCaps(false);b.setTextSize(16);
   b.setTextColor(primary?Color.WHITE:0xff174582);
   b.setBackground(bg(primary?0xff1766c9:0xffe4efff));return b;
  }
