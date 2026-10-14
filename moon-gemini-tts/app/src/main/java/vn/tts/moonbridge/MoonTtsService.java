@@ -1,6 +1,7 @@
 package vn.tts.moonbridge;
 
 import android.media.AudioFormat;
+import android.os.SystemClock;
 import android.speech.tts.SynthesisCallback;
 import android.speech.tts.SynthesisRequest;
 import android.speech.tts.TextToSpeech;
@@ -24,10 +25,11 @@ import java.util.List;
 import java.util.Locale;
 
 public class MoonTtsService extends TextToSpeechService {
- private static final int RATE=24000,CHUNK=2200;
+ private static final int RATE=24000,CHUNK=1400;
  private static final List<String> LANGS=Arrays.asList("vi","en","ja","ko","zh","fr","de","es","pt","it","ru","th","id","hi","ar","nl","tr","pl");
  private volatile boolean stopped=false;
  private volatile HttpURLConnection active;
+ private volatile boolean streamUnavailable=false;
 
  @Override protected String[] onGetLanguage(){return new String[]{"vie","VNM",""};}
  private static String lang(String l){
@@ -69,32 +71,61 @@ public class MoonTtsService extends TextToSpeechService {
   stopped=false;
   String key=SettingsStore.getKey(this);
   if(key.isEmpty()){
-   SettingsStore.setError(this,"Chưa có Gemini API key. Hãy mở Moon Gemini TTS để nhập.");
+   SettingsStore.setError(this,"Chưa có Gemini API key. Mở app để nhập.");
    callback.error();return;
   }
   CharSequence chars=request.getCharSequenceText();
-  String text=chars==null?"":chars.toString().trim();
-  if(text.isEmpty()){
-   callback.start(RATE,AudioFormat.ENCODING_PCM_16BIT,1);callback.done();return;
+  String input=chars==null?"":chars.toString().trim();
+  if(input.isEmpty()){
+   callback.start(RATE,AudioFormat.ENCODING_PCM_16BIT,1);
+   callback.done();return;
   }
   String model=SettingsStore.model(this),voice=SettingsStore.voice(this),style=SettingsStore.style(this);
   if(!Arrays.asList(SettingsStore.MODELS).contains(model))model=SettingsStore.MODELS[0];
   if(!Arrays.asList(SettingsStore.VOICES).contains(voice))voice=SettingsStore.VOICES[0];
-  AudioWriter writer=new AudioWriter(callback);
+
+  long begin=SystemClock.elapsedRealtime();
+  AudioWriter writer=new AudioWriter(callback,begin);
+  boolean useStream=SettingsStore.mode(this)==0&&!streamUnavailable;
+  String mode=useStream?"streaming":"ổn định";
   try{
-   for(String part:splitText(text)){
+   for(String part:splitText(input)){
     if(stopped)return;
-    streamAudio(key,model,voice,style,request.getSpeechRate(),part,writer);
-    if(stopped)return;
+    if(useStream){
+     long before=writer.received();
+     try{
+      streamAudio(key,model,voice,style,request.getSpeechRate(),part,writer);
+     }catch(Exception ex){
+      if(stopped)return;
+      if(writer.received()!=before)throw ex;
+      String reason=ex.getMessage()==null?"":ex.getMessage();
+      if(reason.contains("429")||reason.contains("401")||reason.contains("403"))
+       throw ex;
+      // No PCM was sent for the current text. Revert to the proven v1.1 request
+      // and stop trying streaming for the remainder of this service session.
+      streamUnavailable=true;
+      useStream=false;
+      mode="dự phòng ổn định";
+      byte[] pcm=unaryAudio(key,model,voice,style,request.getSpeechRate(),part);
+      writer.append(pcm);
+     }
+    }else{
+     byte[] pcm=unaryAudio(key,model,voice,style,request.getSpeechRate(),part);
+     writer.append(pcm);
+    }
    }
    if(stopped)return;
-   if(!writer.hasStarted())throw new Exception("Không nhận được âm thanh từ Gemini.");
+   if(!writer.hasStarted())throw new Exception("Gemini không trả âm thanh.");
    SettingsStore.setError(this,"");
+   SettingsStore.setMetric(this,mode+": âm đầu "+(writer.firstAudioMs())+
+       " ms; tổng tổng hợp "+(SystemClock.elapsedRealtime()-begin)+" ms");
    callback.done();
   }catch(Exception ex){
    if(stopped)return;
    String msg=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();
    SettingsStore.setError(this,msg.substring(0,Math.min(300,msg.length())));
+   SettingsStore.setMetric(this,"Lỗi sau "+(SystemClock.elapsedRealtime()-begin)+" ms: "+
+       msg.substring(0,Math.min(80,msg.length())));
    callback.error();
   }finally{
    HttpURLConnection conn=active;
@@ -106,17 +137,25 @@ public class MoonTtsService extends TextToSpeechService {
  // Do not buffer the full utterance in memory, which caused the high initial latency in v1.1.
  private final class AudioWriter {
   private final SynthesisCallback cb;
+  private final long began;
+  private long first=-1;
+  private long byteCount=0;
   private boolean started=false;
   private byte[] pending=new byte[0];
-  AudioWriter(SynthesisCallback callback){cb=callback;}
+  AudioWriter(SynthesisCallback callback,long start){cb=callback;began=start;}
   boolean hasStarted(){return started;}
+  long received(){return byteCount;}
+  long firstAudioMs(){return first<0?-1:first-began;}
   void append(byte[] bytes)throws Exception{
    if(stopped)return;
+   if(bytes.length==0)return;
    if(!started){
     if(cb.start(RATE,AudioFormat.ENCODING_PCM_16BIT,1)!=TextToSpeech.SUCCESS)
      throw new Exception("Android từ chối luồng TTS.");
     started=true;
+    first=SystemClock.elapsedRealtime();
    }
+   byteCount+=bytes.length;
    if(pending.length>0){
     byte[] merged=new byte[pending.length+bytes.length];
     System.arraycopy(pending,0,merged,0,pending.length);
@@ -216,6 +255,58 @@ public class MoonTtsService extends TextToSpeechService {
   }finally{
    active=null;
    if(c!=null)c.disconnect();
+  }
+ }
+ private byte[] unaryAudio(String key,String model,String voice,String style,int speed,String text)throws Exception{
+  JSONObject annotation=new JSONObject().put("type","speech_metadata")
+   .put("style",deliveryStyle(style,speed));
+  JSONObject textPart=new JSONObject().put("type","text").put("text",text)
+   .put("annotations",new JSONArray().put(annotation));
+  JSONObject payload=new JSONObject()
+   .put("model",model)
+   .put("input",new JSONArray().put(new JSONObject().put("type","user_input")
+     .put("content",new JSONArray().put(textPart))))
+   .put("response_format",new JSONObject().put("type","audio")
+     .put("mime_type","audio/l16").put("sample_rate",RATE))
+   .put("generation_config",new JSONObject()
+     .put("speech_config",new JSONArray().put(new JSONObject().put("voice",voice))));
+  HttpURLConnection c=null;
+  try{
+   c=(HttpURLConnection)new URL("https://generativelanguage.googleapis.com/v1beta/interactions").openConnection();
+   active=c;c.setRequestMethod("POST");c.setConnectTimeout(15000);c.setReadTimeout(60000);
+   c.setDoOutput(true);c.setRequestProperty("Content-Type","application/json; charset=utf-8");
+   c.setRequestProperty("x-goog-api-key",key);
+   try(OutputStream out=c.getOutputStream()){out.write(payload.toString().getBytes(StandardCharsets.UTF_8));}
+   int status=c.getResponseCode();
+   if(status!=200){
+    String raw=read(c.getErrorStream(),3000),desc;
+    if(status==400)desc="Yêu cầu hoặc giọng không được API hỗ trợ (400). ";
+    else if(status==401||status==403)desc="API key không hợp lệ hoặc không có quyền ("+status+"). ";
+    else if(status==429)desc="Vượt hạn mức miễn phí (429). ";
+    else desc="Gemini API HTTP "+status+". ";
+    throw new Exception(desc+raw.substring(0,Math.min(140,raw.length())));
+   }
+   JSONObject root=new JSONObject(read(c.getInputStream(),16000000));
+   String b64=null;
+   JSONObject direct=root.optJSONObject("output_audio");
+   if(direct!=null)b64=direct.optString("data",null);
+   if(b64==null||b64.isEmpty()){
+    JSONArray steps=root.optJSONArray("steps");
+    if(steps!=null)for(int s=0;s<steps.length();s++){
+     JSONObject step=steps.optJSONObject(s);
+     if(step==null||!"model_output".equals(step.optString("type")))continue;
+     JSONArray content=step.optJSONArray("content");
+     if(content==null)continue;
+     for(int j=0;j<content.length();j++){
+      JSONObject item=content.optJSONObject(j);
+      if(item!=null&&"audio".equals(item.optString("type")))b64=item.optString("data",null);
+     }
+    }
+   }
+   if(b64==null||b64.isEmpty())throw new Exception("Không tìm thấy âm thanh trong phản hồi API.");
+   return decodeAudio(Base64.decode(b64,Base64.DEFAULT));
+  }finally{
+   active=null;if(c!=null)c.disconnect();
   }
  }
  private static byte[] decodeAudio(byte[] bytes){
