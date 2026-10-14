@@ -1,0 +1,30 @@
+name: Build Puck EPUB Reader APK
+on:
+  push:
+    branches: [puck-epub-reader]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Install Android API 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Assemble debug
+        run: cd puck-epub && gradle --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Puck-EPUB-Reader-v1.0-APK
+          path: puck-epub/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
