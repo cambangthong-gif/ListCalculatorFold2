@@ -23,12 +23,12 @@ final class PuckPlayer {
   void state(String message);
   void error(String message);
  }
- private static final int PREFETCH=3;
+ private static final int PREFETCH=2;
  private static final int CACHE_LIMIT=16*1024*1024;
  private final Context context;
  private final Listener listener;
  private final ExecutorService playback=Executors.newSingleThreadExecutor();
- private final ExecutorService synthesis=Executors.newFixedThreadPool(3);
+ private final ExecutorService synthesis=Executors.newSingleThreadExecutor();
  private final Object guard=new Object();
  private final HashMap<Integer,Future<byte[]>> pending=new HashMap<>();
  private final LinkedHashMap<Integer,byte[]> cache=new LinkedHashMap<>(12,0.75f,true);
@@ -105,7 +105,8 @@ final class PuckPlayer {
     final int index=i;
     if(cache.containsKey(i)||pending.containsKey(i))continue;
     final String text=current.segments.get(i).text;
-    pending.put(i,synthesis.submit(()->GeminiSpeech.synthesize(context,text)));
+    pending.put(i,synthesis.submit(()->GeminiSpeech.synthesize(context,text,
+        status->listener.state(status))));
    }
   }
  }
@@ -118,12 +119,13 @@ final class PuckPlayer {
    future=pending.get(index);
    if(future==null){
     final String text=current.segments.get(index).text;
-    future=synthesis.submit(()->GeminiSpeech.synthesize(context,text));
+    future=synthesis.submit(()->GeminiSpeech.synthesize(context,text,
+        status->listener.state(status)));
     pending.put(index,future);
    }
   }
   byte[] pcm;
-  try{pcm=future.get(95,TimeUnit.SECONDS);}
+  try{pcm=future.get(200,TimeUnit.SECONDS);}
   catch(ExecutionException ex){
    Throwable cause=ex.getCause();
    throw new Exception(cause==null?"Gemini thất bại":cause.getMessage(),cause);
@@ -211,7 +213,7 @@ final class PuckPlayer {
   }catch(InterruptedException ignored){Thread.currentThread().interrupt();
   }catch(Exception ex){
    if(valid(token)){
-    synchronized(guard){playing=false;paused=false;}
+    synchronized(guard){playing=false;paused=false;clearPending();}
     String message=ex.getMessage()==null?ex.getClass().getSimpleName():ex.getMessage();
     listener.error(message);
    }
