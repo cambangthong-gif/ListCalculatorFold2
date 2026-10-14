@@ -121,8 +121,15 @@ public class MainActivity extends Activity {
   if(tester!=null){tester.stop();tester.shutdown();tester=null;}
   status("Đang khởi tạo dịch vụ TTS...");
   tester=new TextToSpeech(this,result->{
-   if(result!=TextToSpeech.SUCCESS||tester==null){status("Android không khởi tạo được TTS.");return;}
-   tester.setLanguage(new Locale("vi","VN"));
+   if(result!=TextToSpeech.SUCCESS){status("Android không kết nối được với Moon Gemini TTS. Kiểm tra Cài đặt > Chuyển văn bản thành giọng nói.");return;}
+   // Trì hoãn tới vòng lặp giao diện để tránh callback khởi tạo trước khi gán tester.
+   runOnUiThread(()->beginSpeaking(message));
+  },getPackageName());
+ }
+ private void beginSpeaking(String message){
+   if(tester==null){status("TTS chưa sẵn sàng; hãy thử lại.");return;}
+   int langResult=tester.setLanguage(new Locale("vi","VN"));
+   if(langResult==TextToSpeech.LANG_NOT_SUPPORTED||langResult==TextToSpeech.LANG_MISSING_DATA){status("Moon Gemini TTS chưa nhận tiếng Việt.");return;}
    tester.setOnUtteranceProgressListener(new UtteranceProgressListener(){
     @Override public void onStart(String id){status("Đang phát giọng "+SettingsStore.voice(MainActivity.this)+"...");}
     @Override public void onDone(String id){status("Đọc xong. Có thể mở Moon+ Reader.");}
@@ -132,7 +139,6 @@ public class MainActivity extends Activity {
    if(tester.speak(message,TextToSpeech.QUEUE_FLUSH,null,"moon_test")!=TextToSpeech.SUCCESS)
        status("Không gửi được yêu cầu TTS tới Android.");
    else status("Đang gọi Gemini, chờ vài giây...");
-  },getPackageName());
  }
  private void openSettings(){
   for(String action:new String[]{"com.android.settings.TTS_SETTINGS","android.settings.TTS_SETTINGS",Settings.ACTION_ACCESSIBILITY_SETTINGS}){
