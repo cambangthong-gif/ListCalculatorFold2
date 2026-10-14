@@ -16,11 +16,16 @@ final class SettingsStore {
  static final String[] VOICES={"Puck","Fenrir","Achird","Zubenelgenubi"};
  static final String[] MODELS={"gemini-3.8-flash-lite-tts","gemini-3.8-flash-tts"};
  static final String[] STYLES={"Tự nhiên","Vui vẻ","Kể chuyện","Điềm tĩnh"};
+ static final String[] LATENCIES={"Nhanh (streaming + tự dự phòng)","Ổn định (v1.1)"};
  private static final String PREF="moon_gemini_tts",ALIAS="vn.tts.moonbridge.key";
  private static SharedPreferences prefs(Context c){return c.getSharedPreferences(PREF,Context.MODE_PRIVATE);}
  static String voice(Context c){return prefs(c).getString("voice",VOICES[0]);}
  static String model(Context c){return prefs(c).getString("model",MODELS[0]);}
  static String style(Context c){return prefs(c).getString("style",STYLES[1]);}
+ static int mode(Context c){return prefs(c).getInt("latency_mode",0);}
+ static void setMode(Context c,int mode){prefs(c).edit().putInt("latency_mode",mode==1?1:0).apply();}
+ static void setMetric(Context c,String metric){prefs(c).edit().putString("latency_metric",metric).apply();}
+ static String metric(Context c){return prefs(c).getString("latency_metric","Chưa đo tốc độ đọc.");}
  static void saveOptions(Context c,String v,String m,String s){
   prefs(c).edit().putString("voice",v).putString("model",m).putString("style",s).apply();
  }
