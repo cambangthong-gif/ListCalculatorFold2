@@ -1,0 +1,39 @@
+name: Build LiveDub APK
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'LiveDubVI/**'
+      - '.github/workflows/livedub-build.yml'
+  push:
+    branches: [ live-dub-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+      - name: Download Whisper tiny.en model
+        run: |
+          mkdir -p LiveDubVI/app/src/main/assets/models
+          curl -fL --retry 4 --retry-delay 3 \
+            https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin \
+            -o LiveDubVI/app/src/main/assets/models/ggml-tiny.en.bin
+          ls -lh LiveDubVI/app/src/main/assets/models/ggml-tiny.en.bin
+      - name: Build debug APK
+        working-directory: LiveDubVI
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Rename APK
+        run: cp LiveDubVI/app/build/outputs/apk/debug/app-debug.apk LiveDub-Viet-v0.1-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LiveDub-Viet-v0.1-APK
+          path: LiveDub-Viet-v0.1-debug.apk
+          if-no-files-found: error
