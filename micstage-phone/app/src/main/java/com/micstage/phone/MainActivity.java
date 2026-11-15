@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
+import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
@@ -21,14 +23,18 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
+import android.widget.ArrayAdapter;
 
 public final class MainActivity extends Activity {
     private static final int BG=0xFF0B1423, PANEL=0xFF192A42, TXT=0xFFF0F6FF, SECOND=0xFFABBDCF, CYAN=0xFF22D3EE, GREEN=0xFF34D399;
     private volatile boolean running=false;
-    private volatile int gain=75, echo=18, reverb=12, noise=0;
+    private volatile int gain=55, echo=0, reverb=0, noise=0;
+    private volatile int inputMode=0; // 0=automatic, 1=phone mic, 2=headset/USB mic
     private volatile AudioRecord recorder;
     private volatile AudioTrack player;
     private TextView status;
+    private TextView sourceLabel;
     private Button toggle;
     private ProgressBar level;
     private Thread work;
@@ -63,7 +69,7 @@ public final class MainActivity extends Activity {
         card.setOrientation(LinearLayout.VERTICAL);card.setBackground(background(PANEL,20));
         LinearLayout.LayoutParams cp=new LinearLayout.LayoutParams(-1,-2); cp.topMargin=dp(25);c.addView(card,cp);
         status=label("Micro đang tắt",18,TXT,true);card.addView(status);
-        TextView hint=label("Giọng hát sẽ phát lại ngay trên loa hoặc tai nghe điện thoại.",14,SECOND,false);
+        TextView hint=label("Giọng hát phát qua thiết bị nghe đang kết nối. Bản 1.1 ưu tiên âm sạch và hạn chế vỡ tiếng.",14,SECOND,false);
         LinearLayout.LayoutParams hp=new LinearLayout.LayoutParams(-1,-2);hp.topMargin=dp(9);card.addView(hint,hp);
         toggle=new Button(this);toggle.setAllCaps(false);toggle.setText("BẬT MICRO");toggle.setTextSize(18);
         toggle.setTextColor(0xFF061520);toggle.setBackground(background(CYAN,15));
@@ -74,11 +80,37 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams mp=new LinearLayout.LayoutParams(-1,dp(12));mp.topMargin=dp(20);card.addView(level,mp);
         TextView meter=label("Mức tín hiệu micro",12,SECOND,false);
         LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.topMargin=dp(8);card.addView(meter,lp);
-        addSlider(c,"Âm lượng micro",250,gain,0);
+        LinearLayout inputBox=new LinearLayout(this);
+        inputBox.setOrientation(LinearLayout.VERTICAL);
+        inputBox.setPadding(dp(16),dp(14),dp(16),dp(14));
+        inputBox.setBackground(background(PANEL,16));
+        LinearLayout.LayoutParams ip=new LinearLayout.LayoutParams(-1,-2);
+        ip.topMargin=dp(17);
+        c.addView(inputBox,ip);
+        inputBox.addView(label("Nguồn thu micro",15,TXT,true));
+        Spinner selector=new Spinner(this);
+        ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_item,
+            new String[]{"Tự động", "Micro điện thoại", "Micro tai nghe / USB"});
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        selector.setAdapter(adapter);
+        selector.setBackground(background(0xFFE7EEF7,9));
+        LinearLayout.LayoutParams sip=new LinearLayout.LayoutParams(-1,dp(48));
+        sip.topMargin=dp(9);inputBox.addView(selector,sip);
+        selector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int pos,long id){
+                inputMode=pos;
+                if(running)sourceLabel.setText("Đổi nguồn micro: hãy tắt rồi bật lại.");
+            }
+            public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        sourceLabel=label("Nguồn thu: tự động",12,SECOND,false);
+        LinearLayout.LayoutParams slp=new LinearLayout.LayoutParams(-1,-2);slp.topMargin=dp(8);
+        inputBox.addView(sourceLabel,slp);
+        addSlider(c,"Âm lượng micro (nên giữ 40–70%)",250,gain,0);
         addSlider(c,"Echo • tiếng vọng",100,echo,1);
         addSlider(c,"Reverb • độ vang",100,reverb,2);
         addSlider(c,"Lọc tiếng ồn",100,noise,3);
-        TextView warn=label("Lưu ý: loa ngoài và micro ở gần nhau dễ gây hú. Nên bắt đầu ở âm lượng thấp; dùng tai nghe hoặc loa có dây để giảm trễ. Bluetooth có thể bị trễ tiếng.",13,SECOND,false);
+        TextView warn=label("Nếu vẫn rè: chọn đúng nguồn micro, để Echo và Reverb 0%, hạ âm lượng micro. Lưu ý: micro tai nghe có thể bị quá tải khi hát sát miệng. Bluetooth có thể trễ hoặc giảm chất lượng khi dùng mic Bluetooth.",13,SECOND,false);
         LinearLayout.LayoutParams wp=new LinearLayout.LayoutParams(-1,-2);wp.topMargin=dp(26); c.addView(warn,wp);
     }
     private void addSlider(LinearLayout parent,String text,int max,int initial,int which){
@@ -145,8 +177,8 @@ public final class MainActivity extends Activity {
                 .setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build();
             AudioFormat playback=new AudioFormat.Builder().setSampleRate(rate)
                 .setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build();
-            AudioRecord r=new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-                .setAudioFormat(capture).setBufferSizeInBytes(Math.max(minIn,rate/10)).build();
+            AudioRecord r=createAudioRecord(capture,Math.max(minIn,rate/10));
+            selectPreferredInput(r);
             if(r.getState()!=AudioRecord.STATE_INITIALIZED)throw new IllegalStateException("Không mở được micro");
             recorder=r;
             AudioTrack p=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
@@ -155,34 +187,55 @@ public final class MainActivity extends Activity {
                 .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
                 .setBufferSizeInBytes(Math.max(minOut,rate/10)).build();
             if(p.getState()!=AudioTrack.STATE_INITIALIZED)throw new IllegalStateException("Không mở được loa");
+            p.setVolume(0.95f);
             player=p;
             if(!running)return;
             p.play();r.startRecording();
             if(r.getRecordingState()!=AudioRecord.RECORDSTATE_RECORDING)throw new IllegalStateException("Micro bị hệ thống chặn");
-            runOnUiThread(()-> {if(running)status.setText("Micro đang hoạt động");});
+            AudioDeviceInfo routedInput=r.getRoutedDevice();
+            final String routeText=routedInput==null?"Nguồn thu: không xác định":
+                "Nguồn thu đang dùng: "+inputDeviceName(routedInput);
+            runOnUiThread(()-> {if(running){status.setText("Micro đang hoạt động");sourceLabel.setText(routeText);}});
             short[] input=new short[480],output=new short[480];
             float[] delays=new float[rate],rooms=new float[rate];
             int index=0;long lastMeter=0;
+            float hpPrevX=0, hpPrevY=0, gateEnvelope=1f, smoothGain=gain/100f, smoothEcho=0f, smoothReverb=0f, limiterGain=1f;
             while(running){
                 int n=r.read(input,0,input.length,AudioRecord.READ_BLOCKING);
                 if(n<0){if(!running)break;throw new IllegalStateException("Lỗi đọc micro: "+n);}
                 if(n==0)continue;
                 float g=gain/100f, e=echo/100f,rv=reverb/100f;
-                float threshold=noise/100f*0.035f;
+                float threshold=noise/100f*0.025f;
                 double energy=0;
+                int clippedSamples=0;
                 for(int i=0;i<n;i++){
                     float raw=input[i]/32768f;
                     energy+=raw*raw;
-                    float x=Math.abs(raw)>=threshold?raw*g:0f;
+                    if(Math.abs(raw)>0.985f)clippedSamples++;
+                    // 80 Hz first-order high-pass to reduce rumble and DC offset
+                    float hp=raw-hpPrevX+0.9895f*hpPrevY;
+                    hpPrevX=raw;hpPrevY=hp;
+                    float wantedGate=(threshold<=0 || Math.abs(hp)>threshold)?1f:0f;
+                    float gateSpeed=wantedGate>gateEnvelope?0.025f:0.0018f;
+                    gateEnvelope+=(wantedGate-gateEnvelope)*gateSpeed;
+                    // Smooth real-time parameter changes to avoid clicks
+                    smoothGain+=(g-smoothGain)*0.0018f;
+                    smoothEcho+=(e-smoothEcho)*0.0018f;
+                    smoothReverb+=(rv-smoothReverb)*0.0018f;
+                    float x=hp*gateEnvelope*smoothGain;
                     int d1=(index+rate-8640)%rate;
                     int d2=(index+rate-2352)%rate;
                     int d3=(index+rate-6192)%rate;
                     float echoTap=delays[d1];
                     float roomTap=0.57f*rooms[d2]+0.43f*rooms[d3];
-                    delays[index]=clamp(x+echoTap*0.23f);
-                    rooms[index]=clamp(x+roomTap*0.28f);
-                    float mixed=clamp(x+e*0.56f*echoTap+rv*0.42f*roomTap);
-                    output[i]=(short)(mixed*32767f);
+                    delays[index]=limitFeedback(x+echoTap*0.20f);
+                    rooms[index]=limitFeedback(x+roomTap*0.25f);
+                    float mixed=x+smoothEcho*0.52f*echoTap+smoothReverb*0.39f*roomTap;
+                    // Fast attack / slow release output limiter, then rounded soft saturation.
+                    float peak=Math.abs(mixed);
+                    float desiredGain=peak>0.82f?0.82f/peak:1f;
+                    limiterGain+=(desiredGain-limiterGain)*(desiredGain<limiterGain?0.25f:0.001f);
+                    output[i]=(short)(softLimit(mixed*limiterGain)*32767f);
                     index++;if(index==rate)index=0;
                 }
                 int sent=0;
@@ -192,9 +245,16 @@ public final class MainActivity extends Activity {
                     sent+=wrote;
                 }
                 long now=android.os.SystemClock.elapsedRealtime();
-                if(now-lastMeter>90){
+                if(now-lastMeter>180){
                     final int meter=Math.min(100,(int)(Math.sqrt(energy/n)*750));
-                    runOnUiThread(()->{if(running)level.setProgress(meter);});
+                    final boolean inputClipped=clippedSamples>n/25;
+                    runOnUiThread(()->{
+                        if(running){
+                            level.setProgress(meter);
+                            if(inputClipped)status.setText("Micro đầu vào quá lớn – nói/hát xa mic hơn");
+                            else status.setText("Micro đang hoạt động");
+                        }
+                    });
                     lastMeter=now;
                 }
             }
@@ -213,7 +273,51 @@ public final class MainActivity extends Activity {
             });
         }
     }
-    private static float clamp(float x){return Math.max(-1f,Math.min(1f,x));}
+    private static float limitFeedback(float x){return Math.max(-1.4f,Math.min(1.4f,x));}
+    private static float softLimit(float x){
+        float a=Math.abs(x);
+        if(a<=0.72f)return x;
+        float y=0.72f+0.25f*(1f-(float)Math.exp(-(a-0.72f)/0.25f));
+        return x<0?-y:y;
+    }
+    private AudioRecord createAudioRecord(AudioFormat format,int size){
+        int desired=android.os.Build.VERSION.SDK_INT>=29?
+            MediaRecorder.AudioSource.VOICE_PERFORMANCE:MediaRecorder.AudioSource.VOICE_RECOGNITION;
+        try{
+            AudioRecord ar=new AudioRecord.Builder().setAudioSource(desired)
+                .setAudioFormat(format).setBufferSizeInBytes(size).build();
+            if(ar.getState()==AudioRecord.STATE_INITIALIZED)return ar;
+            ar.release();
+        }catch(Exception ignored){}
+        return new AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+            .setAudioFormat(format).setBufferSizeInBytes(size).build();
+    }
+    private void selectPreferredInput(AudioRecord ar){
+        if(inputMode==0)return;
+        AudioManager am=(AudioManager)getSystemService(AUDIO_SERVICE);
+        if(am==null)return;
+        for(AudioDeviceInfo device:am.getDevices(AudioManager.GET_DEVICES_INPUTS)){
+            int type=device.getType();
+            boolean builtin=type==AudioDeviceInfo.TYPE_BUILTIN_MIC;
+            boolean external=(type==AudioDeviceInfo.TYPE_WIRED_HEADSET
+                ||type==AudioDeviceInfo.TYPE_USB_DEVICE
+                ||type==AudioDeviceInfo.TYPE_USB_HEADSET);
+            if((inputMode==1&&builtin)||(inputMode==2&&external)){
+                ar.setPreferredDevice(device);return;
+            }
+        }
+        runOnUiThread(()->sourceLabel.setText("Không thấy nguồn micro đã chọn, dùng mặc định"));
+    }
+    private String inputDeviceName(AudioDeviceInfo d){
+        switch(d.getType()){
+            case AudioDeviceInfo.TYPE_BUILTIN_MIC:return "Micro điện thoại";
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:return "Micro tai nghe có dây";
+            case AudioDeviceInfo.TYPE_USB_DEVICE:
+            case AudioDeviceInfo.TYPE_USB_HEADSET:return "Micro USB";
+            case AudioDeviceInfo.TYPE_BLUETOOTH_SCO:return "Micro Bluetooth (chế độ thoại)";
+            default:return d.getProductName().toString();
+        }
+    }
     @Override protected void onStop(){stopMic();super.onStop();}
     @Override protected void onDestroy(){stopMic();super.onDestroy();}
 }
