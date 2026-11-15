@@ -1,0 +1,1 @@
+MicStage Karaoke for Android phones, standalone mic monitor with volume, echo, reverb, noise gate. Run with headphones or USB-C audio to avoid acoustic feedback. Builds as debug APK through GitHub Actions. No network or audio recording to disk.
